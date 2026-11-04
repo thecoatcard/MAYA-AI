@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keeps the pinned GitHub Action commit SHAs current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Keeps the pinned dev dependency (yaml) current.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

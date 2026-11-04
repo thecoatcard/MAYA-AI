@@ -1,0 +1,6 @@
+#!/bin/sh
+# Managed by the repository governance system (governance/GIT_WORKFLOW.md).
+# Full local validation, including change-range rules against the base branch.
+command -v node >/dev/null 2>&1 || { echo "Governance hooks need Node.js 22+ (see docs/guides/ONBOARDING.md)." >&2; exit 1; }
+root="$(git rev-parse --show-toplevel)" || exit 1
+exec node "$root/scripts/validation/validate.mjs" --stage pre-push

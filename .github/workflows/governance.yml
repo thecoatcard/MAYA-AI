@@ -1,0 +1,53 @@
+name: Governance
+
+# Runs the same validators as the local Git hooks, so every contributor and agent is held
+# to the same checks. Branch protection should require the "validate" job.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out (full history for change-range checks)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned dev dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: node scripts/validation/validate.mjs --stage ci --base "$BASE_REF"
+
+      - name: Validate push
+        if: github.event_name != 'pull_request'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          BASE="$BEFORE_SHA"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="origin/main"
+          fi
+          node scripts/validation/validate.mjs --stage ci --base "$BASE"

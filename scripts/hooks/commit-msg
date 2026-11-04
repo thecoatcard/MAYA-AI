@@ -1,0 +1,6 @@
+#!/bin/sh
+# Managed by the repository governance system (governance/GIT_WORKFLOW.md).
+# Validates the Conventional Commits header and the approval trailer for guardrail files.
+command -v node >/dev/null 2>&1 || { echo "Governance hooks need Node.js 22+ (see docs/guides/ONBOARDING.md)." >&2; exit 1; }
+root="$(git rev-parse --show-toplevel)" || exit 1
+exec node "$root/scripts/validation/check-commit-msg.mjs" "$1"

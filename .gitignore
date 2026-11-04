@@ -1,0 +1,47 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+out/
+.next/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and credentials: never commit (see governance/SECURITY_POLICY.md)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+credentials.json
+service-account*.json
+*.tfstate
+*.tfstate.*
+.netrc
+secrets/
+
+# Local, per-developer tool state
+.claude/settings.local.json
+CLAUDE.local.md
+AGENTS.local.md
+.codemie/
+
+# Logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+# Normalise line endings to LF in the working tree. Shell hooks break with CRLF on Windows.
+* text=auto eol=lf
+
+*.sh text eol=lf
+scripts/hooks/* text eol=lf
+
+# Generated lockfile: collapse in diffs
+package-lock.json linguist-generated=true
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

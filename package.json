@@ -1,0 +1,26 @@
+{
+  "name": "maya-ai-governance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repository governance automation for MAYA AI (MYAI). Application code is not implemented yet.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/governance/setup.mjs",
+    "validate": "node scripts/validation/validate.mjs --stage full",
+    "validate:fast": "node scripts/validation/validate.mjs --stage fast",
+    "validate:ci": "node scripts/validation/validate.mjs --stage ci",
+    "test": "node --test \"scripts/**/*.test.mjs\"",
+    "lint": "node scripts/validation/validate.mjs --stage lint",
+    "typecheck": "node scripts/validation/validate.mjs --stage typecheck",
+    "docs:check": "node scripts/validation/check-docs.mjs",
+    "security:check": "node scripts/validation/validate.mjs --stage security",
+    "agents:sync": "node scripts/governance/sync-agent-files.mjs",
+    "agents:check": "node scripts/governance/sync-agent-files.mjs --check"
+  },
+  "devDependencies": {
+    "yaml": "2.9.1"
+  }
+}
