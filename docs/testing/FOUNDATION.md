@@ -299,3 +299,17 @@ extended launcher's help command passed. The implementing agent also reported
 strict mypy for six files and Ruff lint/format passing. Full repository validation
 with backend tools on PATH passed 10 checks, failed none, and skipped four
 comparison checks before staging. Extended real-user evidence remains pending.
+
+### Continuity launcher failure and fix (2026-11-05)
+
+The first user-run continuity observation failed in session 1 with an abnormal
+provider disconnect (close code 1008) after 124.062 seconds, before any GoAway or
+resumption; see the
+[isolated README](../../backend/tests/spikes/gemini/README.md#failed-user-run-continuity-evidence-2026-11-05).
+Inactivity after the seed turn is suspected, not proven. Deterministic
+regressions first failed against the previous adapter (no synthetic activity
+while waiting; space-joined transcript deltas), then passed after adding bounded
+synthetic activity, allowlisted close diagnostics and delta concatenation.
+Isolated checks: 148 passed, strict mypy passed for six files, and Ruff
+lint/format passed, using the existing environment with `--no-sync`. No API
+request was made by an agent; continuity evidence remains pending.

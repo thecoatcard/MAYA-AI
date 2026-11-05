@@ -17,7 +17,7 @@ from contextlib import (
     contextmanager,
 )
 from dataclasses import dataclass, field, replace
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, cast, get_args
 
 from google.genai import errors, types
 from google.genai import live as sdk_live
@@ -30,7 +30,14 @@ LIVE_MODEL = "gemini-3.8-live"
 SMOKE_AUDIO_BYTES = 48_000 * 10
 CONTINUITY_MAX_SECONDS = 960
 CONTINUITY_MAX_RESUMPTIONS = 4
-CONTINUITY_MAX_AUDIO_BYTES = 48_000 * 30
+# 90 seconds of 24 kHz mono PCM16 output, cumulative across all turns in a session.
+CONTINUITY_MAX_AUDIO_BYTES = 48_000 * 90
+CONTINUITY_ACTIVITY_INTERVAL_SECONDS = 60.0
+CONTINUITY_MAX_SYNTHETIC_TURNS = 15
+# Fixed, nonce-free, and does not mention remembered words.
+CONTINUITY_ACTIVITY_PROMPT = "Periodic synthetic connection check. Reply with only the word ready."
+# RFC 6455 limits a close reason to 123 bytes; anything longer is not trusted.
+MAX_CLOSE_REASON_BYTES = 123
 CONTINUITY_MAX_RESPONSE_BYTES = 256
 CONTINUITY_NONCE_WORDS = (
     "amber",
@@ -62,8 +69,38 @@ CONTINUITY_NONCE_WORDS = (
 )
 
 
+FailureCategory = Literal[
+    "sdk_operation_failed",
+    "response_validation_failed",
+    "audio_output_cap_exceeded",
+    "transcription_bound_exceeded",
+    "synthetic_activity_send_failed",
+    "cleanup_failed",
+]
+FAILURE_CATEGORIES: frozenset[str] = frozenset(get_args(FailureCategory))
+
+
 class AdapterFailure(RuntimeError):
-    """Redacted operational failure; never includes SDK errors or response text."""
+    """Redacted operational failure; never includes SDK errors or response text.
+
+    ``category`` is a fixed allowlisted label, safe to persist as evidence.
+    """
+
+    def __init__(self, message: str, category: FailureCategory = "sdk_operation_failed") -> None:
+        super().__init__(message)
+        self.category: FailureCategory = category
+
+
+class _ContinuityStop(Exception):
+    """Internal fixed-message stop carrying an allowlisted failure category."""
+
+    def __init__(self, message: str, category: FailureCategory) -> None:
+        super().__init__(message)
+        self.category: FailureCategory = category
+
+
+class _ContinuityBoundError(_ContinuityStop, ValueError):
+    """Response validation or output bound violation."""
 
 
 class EmbeddingModels(Protocol):
@@ -172,7 +209,7 @@ async def _connection(
                 async with asyncio.timeout(CLOSE_SECONDS):
                     await context.__aexit__(None, None, None)
             except Exception:
-                raise AdapterFailure("S3 SDK session cleanup failed.") from None
+                raise AdapterFailure("S3 SDK session cleanup failed.", "cleanup_failed") from None
 
         await _finish_cleanup(close_session())
 
@@ -290,7 +327,14 @@ class LiveObservation:
     resumed_setup_observed: bool = False
     provider_closed: bool = False
     provider_close_code: int | None = None
+    # Allowlisted labels only; the raw close reason is never stored.
+    provider_close_code_category: str | None = None
+    provider_close_reason_category: str | None = None
     transcription_bytes: int = 0
+    synthetic_turns_sent: int = 0
+    synthetic_turns_completed: int = 0
+    synthetic_turn_limit_reached: bool = False
+    seconds_since_last_client_send: float | None = None
 
     @property
     def audio_duration_ms(self) -> float:
@@ -493,6 +537,129 @@ async def observe_session(
     return observation
 
 
+# RFC 6455 / IANA WebSocket close-code names. Codes are measured; names are not causes.
+_CLOSE_CODE_CATEGORIES: dict[int, str] = {
+    1000: "normal_closure",
+    1001: "going_away",
+    1002: "protocol_error",
+    1003: "unsupported_data",
+    1005: "no_status_received",
+    1006: "abnormal_closure",
+    1007: "invalid_payload_data",
+    1008: "policy_violation",
+    1009: "message_too_big",
+    1010: "mandatory_extension",
+    1011: "internal_error",
+    1012: "service_restart",
+    1013: "try_again_later",
+    1014: "bad_gateway",
+}
+
+# Known textual patterns only. Zero matches is "unknown"; several is ambiguous.
+_CLOSE_REASON_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "quota_or_rate_limit",
+        ("quota", "rate limit", "resource exhausted", "resource_exhausted", "too many requests"),
+    ),
+    ("deadline_or_timeout", ("deadline", "timeout", "timed out")),
+    ("inactivity", ("idle", "inactiv")),
+    ("invalid_argument", ("invalid argument", "invalid_argument")),
+    (
+        "unsupported_or_not_found",
+        ("not implemented", "not supported", "unsupported", "not enabled", "not found"),
+    ),
+    (
+        "authentication_or_permission",
+        ("api key", "permission", "unauthenticated", "unauthorized", "forbidden"),
+    ),
+    ("service_unavailable", ("unavailable", "overloaded")),
+    ("internal_error", ("internal error",)),
+    ("policy_or_safety", ("policy", "safety")),
+)
+CLOSE_REASON_CATEGORIES: frozenset[str] = frozenset(
+    {name for name, _ in _CLOSE_REASON_PATTERNS}
+    | {"not_provided", "empty", "unknown", "multiple_patterns"}
+)
+CLOSE_CODE_CATEGORIES: frozenset[str] = frozenset(
+    set(_CLOSE_CODE_CATEGORIES.values()) | {"unknown"}
+)
+
+
+def classify_provider_close(error: errors.APIError) -> tuple[str, str]:
+    """Map an SDK close error to allowlisted (code, reason) labels; never return raw text.
+
+    SDK ``_receive`` raises ``APIError.raise_error(code, reason, None)`` for a
+    WebSocket close, so ``details`` holds the close reason string. Error JSON
+    responses instead carry a ``message`` field.
+    """
+    code = error.code
+    code_category = (
+        _CLOSE_CODE_CATEGORIES.get(code, "unknown")
+        if isinstance(code, int) and not isinstance(code, bool)
+        else "unknown"
+    )
+    details: object = error.details
+    message: object = error.message
+    text = details if isinstance(details, str) else message if isinstance(message, str) else None
+    if text is None:
+        return code_category, "not_provided"
+    if len(text.encode("utf-8", errors="replace")) > MAX_CLOSE_REASON_BYTES:
+        return code_category, "unknown"
+    folded = text.casefold().strip()
+    if not folded:
+        return code_category, "empty"
+    matches = [
+        name
+        for name, patterns in _CLOSE_REASON_PATTERNS
+        if any(pattern in folded for pattern in patterns)
+    ]
+    if len(matches) == 1:
+        return code_category, matches[0]
+    return code_category, "unknown" if not matches else "multiple_patterns"
+
+
+class _ReceivePump:
+    """Own at most one pending read of one SDK receive generator.
+
+    ``asyncio.wait`` with a timeout does not cancel the read, so the client can
+    send synthetic activity while the same receive stays pending. Cleanup cancels
+    only this pump's own read task, awaits it, then closes the generator.
+    """
+
+    def __init__(self, messages: AsyncGenerator[types.LiveServerMessage, None]) -> None:
+        self._messages = messages
+        self._task: asyncio.Task[types.LiveServerMessage | None] | None = None
+
+    async def _read(self) -> types.LiveServerMessage | None:
+        try:
+            return await anext(self._messages)
+        except StopAsyncIteration:
+            return None
+
+    async def next(self, wait_seconds: float | None) -> tuple[bool, types.LiveServerMessage | None]:
+        """Return (ready, message); a ready ``None`` means this receive ended."""
+        if self._task is None:
+            self._task = asyncio.create_task(self._read())
+        done, _ = await asyncio.wait((self._task,), timeout=wait_seconds)
+        if not done:
+            return False, None
+        task, self._task = self._task, None
+        return True, task.result()
+
+    async def aclose(self) -> None:
+        async def close() -> None:
+            task, self._task = self._task, None
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass  # Cleanup only; the observation outcome is already decided.
+            await self._messages.aclose()
+
+        await _finish_cleanup(close())
+
+
 async def observe_continuity_session(
     connector: LiveConnector,
     plan: SessionPlan,
@@ -503,7 +670,10 @@ async def observe_continuity_session(
     """Observe one bounded text-input/AUDIO-output session and verify context after resume.
 
     The nonce is sent before the first connection is interrupted, then requested
-    only after resuming. Audio and transcription are inspected in memory only.
+    only after resuming; it is never replayed. While no turn is outstanding, a
+    fixed nonce-free synthetic turn is sent after each activity interval, at most
+    CONTINUITY_MAX_SYNTHETIC_TURNS times, without closing the pending receive.
+    Audio and transcription are inspected in memory only.
     """
     plan.text_arguments()
     if plan.prompt != build_plans()[0].prompt or plan.context_compression:
@@ -513,6 +683,22 @@ async def observe_continuity_session(
     nonce_words = nonce.split()
     if len(nonce_words) != 6 or any(word not in CONTINUITY_NONCE_WORDS for word in nonce_words):
         raise ValueError("Continuity probe nonce is malformed.")
+    # Read at call time so deterministic checks can shorten the interval only.
+    interval = CONTINUITY_ACTIVITY_INTERVAL_SECONDS
+    if (
+        isinstance(interval, bool)
+        or not isinstance(interval, int | float)
+        or not math.isfinite(interval)
+        or not 0 < interval <= 60
+    ):
+        raise ValueError("Continuity activity interval must be in (0, 60] seconds.")
+    max_synthetic_turns = CONTINUITY_MAX_SYNTHETIC_TURNS
+    if (
+        isinstance(max_synthetic_turns, bool)
+        or not isinstance(max_synthetic_turns, int)
+        or not 0 <= max_synthetic_turns <= 15
+    ):
+        raise ValueError("Continuity synthetic turn limit must be in [0, 15].")
 
     observation = LiveObservation(plan.method)
     started = clock()
@@ -524,6 +710,9 @@ async def observe_continuity_session(
     transcript_bytes = 0
     transcript_finished = False
     turn_complete_seen = False
+    last_client_send: float | None = None
+    turn_outstanding = False
+    synthetic_outstanding = False
     deadline = asyncio.timeout(plan.max_seconds)
     seed_prompt = (
         f"Remember these six synthetic words exactly: {nonce}. "
@@ -533,6 +722,28 @@ async def observe_continuity_session(
         "Say only the six synthetic words I asked you to remember, in order. "
         "Do not add punctuation or other text."
     )
+
+    async def send_text(session: LiveSession, text: str) -> None:
+        if plan.method == "send_client_content":
+            await session.send_client_content(
+                turns=types.Content(role="user", parts=[types.Part(text=text)]),
+                turn_complete=True,
+            )
+        else:
+            await session.send_realtime_input(text=text)
+
+    def activity_wait_seconds() -> float | None:
+        """None means no synthetic turn may be sent now; wait for the next message."""
+        if (
+            last_client_send is None
+            or turn_outstanding
+            or observation.synthetic_turns_sent >= max_synthetic_turns
+            # Never interleave with the continuity follow-up or its transcript.
+            or (continuation_sent and not observation.continuity_probe_completed)
+        ):
+            return None
+        return max(0.0, last_client_send + interval - clock())
+
     try:
         async with deadline:
             while True:
@@ -547,30 +758,20 @@ async def observe_continuity_session(
                 ) as session:
                     if session.setup_complete is None:
                         raise ValueError("SDK connection did not confirm setup.")
+                    # A new connection does not continue an earlier pending turn.
+                    turn_outstanding = synthetic_outstanding = False
                     if initial_connection:
                         initial_connection = False
-                        if plan.method == "send_client_content":
-                            await session.send_client_content(
-                                turns=types.Content(
-                                    role="user", parts=[types.Part(text=seed_prompt)]
-                                ),
-                                turn_complete=True,
-                            )
-                        else:
-                            await session.send_realtime_input(text=seed_prompt)
+                        await send_text(session, seed_prompt)
+                        last_client_send = clock()
+                        turn_outstanding = True
                     else:
                         observation.resumptions += 1
                         observation.resumed_setup_observed = True
                         if not continuation_sent:
-                            if plan.method == "send_client_content":
-                                await session.send_client_content(
-                                    turns=types.Content(
-                                        role="user", parts=[types.Part(text=followup_prompt)]
-                                    ),
-                                    turn_complete=True,
-                                )
-                            else:
-                                await session.send_realtime_input(text=followup_prompt)
+                            await send_text(session, followup_prompt)
+                            last_client_send = clock()
+                            turn_outstanding = True
                             continuation_sent = True
 
                     while not goaway:
@@ -578,92 +779,114 @@ async def observe_continuity_session(
                         messages = session.receive()
                         if not isinstance(messages, AsyncGenerator):
                             raise TypeError("SDK receive must return a closable async generator.")
+                        pump = _ReceivePump(messages)
                         receiving = True
                         try:
-                            async with aclosing(messages):
-                                async for message in messages:
-                                    received = True
-                                    content = message.server_content
-                                    if content is not None:
-                                        if content.model_turn is not None:
-                                            for part in content.model_turn.parts or []:
-                                                blob = part.inline_data
-                                                if blob is None:
-                                                    continue
-                                                if (
-                                                    blob.mime_type != "audio/pcm;rate=24000"
-                                                    or blob.data is None
-                                                    or not blob.data
-                                                    or len(blob.data) % 2
-                                                ):
-                                                    raise ValueError(
-                                                        "Continuity audio format is invalid."
-                                                    )
-                                                observation.audio_bytes += len(blob.data)
-                                                if (
-                                                    observation.audio_bytes
-                                                    > CONTINUITY_MAX_AUDIO_BYTES
-                                                ):
-                                                    raise ValueError(
-                                                        "Continuity audio bound exceeded."
-                                                    )
-                                        transcription = content.output_transcription
-                                        if (
-                                            transcription is not None
-                                            and transcription.text is not None
-                                            and continuation_sent
-                                            and not observation.continuity_probe_completed
-                                        ):
-                                            transcript_bytes += len(
-                                                transcription.text.encode("utf-8")
-                                            )
-                                            if transcript_bytes > CONTINUITY_MAX_RESPONSE_BYTES:
-                                                raise ValueError(
-                                                    "Continuity transcription bound exceeded."
+                            while True:
+                                ready, message = await pump.next(activity_wait_seconds())
+                                if not ready:
+                                    # The single receive stays pending while this is sent.
+                                    receiving = False
+                                    observation.synthetic_turns_sent += 1
+                                    observation.synthetic_turn_limit_reached = (
+                                        observation.synthetic_turns_sent >= max_synthetic_turns
+                                    )
+                                    turn_outstanding = synthetic_outstanding = True
+                                    try:
+                                        await send_text(session, CONTINUITY_ACTIVITY_PROMPT)
+                                    except Exception:
+                                        raise _ContinuityStop(
+                                            "Synthetic activity send failed.",
+                                            "synthetic_activity_send_failed",
+                                        ) from None
+                                    last_client_send = clock()
+                                    receiving = True
+                                    continue
+                                if message is None:
+                                    break
+                                received = True
+                                content = message.server_content
+                                if content is not None:
+                                    if content.model_turn is not None:
+                                        for part in content.model_turn.parts or []:
+                                            blob = part.inline_data
+                                            if blob is None:
+                                                continue
+                                            if (
+                                                blob.mime_type != "audio/pcm;rate=24000"
+                                                or blob.data is None
+                                                or not blob.data
+                                                or len(blob.data) % 2
+                                            ):
+                                                raise _ContinuityBoundError(
+                                                    "Continuity audio format is invalid.",
+                                                    "response_validation_failed",
                                                 )
-                                            observation.transcription_bytes = transcript_bytes
-                                            transcription_parts.append(transcription.text)
-                                            transcript_finished = (
-                                                transcript_finished
-                                                or transcription.finished is True
-                                            )
-                                        if continuation_sent and content.turn_complete is True:
-                                            turn_complete_seen = True
+                                            observation.audio_bytes += len(blob.data)
+                                            if observation.audio_bytes > CONTINUITY_MAX_AUDIO_BYTES:
+                                                raise _ContinuityBoundError(
+                                                    "Continuity audio bound exceeded.",
+                                                    "audio_output_cap_exceeded",
+                                                )
+                                    transcription = content.output_transcription
                                     if (
-                                        turn_complete_seen
-                                        and transcript_finished
+                                        transcription is not None
+                                        and transcription.text is not None
                                         and continuation_sent
                                         and not observation.continuity_probe_completed
                                     ):
-                                        transcript = " ".join(transcription_parts).casefold()
-                                        normalized = re.sub(r"[^\w\s]", " ", transcript)
-                                        transcript_words = normalized.split()
-                                        observation.continuity_probe_completed = True
-                                        observation.context_continuity_verified = (
-                                            transcript_words == nonce_words
+                                        transcript_bytes += len(transcription.text.encode("utf-8"))
+                                        if transcript_bytes > CONTINUITY_MAX_RESPONSE_BYTES:
+                                            raise _ContinuityBoundError(
+                                                "Continuity transcription bound exceeded.",
+                                                "transcription_bound_exceeded",
+                                            )
+                                        observation.transcription_bytes = transcript_bytes
+                                        transcription_parts.append(transcription.text)
+                                        transcript_finished = (
+                                            transcript_finished or transcription.finished is True
                                         )
-                                        if not observation.context_continuity_verified:
-                                            observation.end_reason = "continuity_mismatch"
-                                            return observation
+                                    if content.turn_complete is True:
+                                        if synthetic_outstanding:
+                                            observation.synthetic_turns_completed += 1
+                                        turn_outstanding = synthetic_outstanding = False
+                                        if continuation_sent:
+                                            turn_complete_seen = True
+                                if (
+                                    turn_complete_seen
+                                    and transcript_finished
+                                    and continuation_sent
+                                    and not observation.continuity_probe_completed
+                                ):
+                                    # Transcription parts are deltas: a word may span parts.
+                                    transcript = "".join(transcription_parts).casefold()
+                                    normalized = re.sub(r"[^\w\s]", " ", transcript)
+                                    observation.continuity_probe_completed = True
+                                    observation.context_continuity_verified = (
+                                        normalized.split() == nonce_words
+                                    )
+                                    if not observation.context_continuity_verified:
+                                        observation.end_reason = "continuity_mismatch"
+                                        return observation
 
-                                    update = message.session_resumption_update
-                                    if update is not None:
-                                        handle = (
-                                            update.new_handle
-                                            if update.resumable and update.new_handle
-                                            else None
-                                        )
-                                        if handle is not None:
-                                            observation.resumption_handle_observed = True
-                                    if message.go_away is not None:
-                                        observation.go_away_events += 1
-                                        observation.goaway_observed = True
-                                        goaway = True
-                                        break
-                        except errors.APIError:
-                            raise
-                        else:
-                            receiving = False
+                                update = message.session_resumption_update
+                                if update is not None:
+                                    handle = (
+                                        update.new_handle
+                                        if update.resumable and update.new_handle
+                                        else None
+                                    )
+                                    if handle is not None:
+                                        observation.resumption_handle_observed = True
+                                if message.go_away is not None:
+                                    observation.go_away_events += 1
+                                    observation.goaway_observed = True
+                                    goaway = True
+                                    break
+                        finally:
+                            # Cancel only our own pending read, then close the generator.
+                            await pump.aclose()
+                        receiving = False
                         if not received:
                             observation.end_reason = "provider_closed"
                             observation.termination_observed = True
@@ -683,17 +906,31 @@ async def observe_continuity_session(
     except errors.APIError as error:
         if not receiving:
             raise AdapterFailure("S3 continuity SDK operation failed.") from None
-        observation.provider_close_code = error.code
+        code_category, reason_category = classify_provider_close(error)
+        code = error.code
+        observation.provider_close_code = (
+            code if isinstance(code, int) and not isinstance(code, bool) else None
+        )
+        observation.provider_close_code_category = code_category
+        observation.provider_close_reason_category = reason_category
         observation.termination_observed = True
-        if error.code in (1000, 1001):
+        if observation.provider_close_code in (1000, 1001):
             observation.end_reason = "provider_closed"
             observation.provider_closed = True
         else:
             observation.end_reason = "provider_disconnected"
-    except Exception:
-        raise AdapterFailure("S3 continuity SDK operation or response validation failed.") from None
+    except Exception as error:
+        category: FailureCategory = "sdk_operation_failed"
+        if isinstance(error, _ContinuityStop | AdapterFailure):
+            category = error.category
+        raise AdapterFailure(
+            "S3 continuity SDK operation or response validation failed.", category
+        ) from None
     finally:
-        observation.observed_seconds = max(0, clock() - started)
+        now = clock()
+        observation.observed_seconds = max(0, now - started)
+        if last_client_send is not None:
+            observation.seconds_since_last_client_send = max(0.0, now - last_client_send)
     return observation
 
 

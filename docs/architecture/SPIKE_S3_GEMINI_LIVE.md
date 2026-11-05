@@ -112,6 +112,21 @@ normalized word-sequence match after resumed setup. No nonce, transcript, audio
 or handle is saved. Local timeout and provider closure are distinct outcomes;
 neither mocked success nor elapsed observation proves maximum lifetime.
 
+**First user-run continuity attempt (failed, 2026-11-05).** Session 1
+(`send_client_content`) ended `provider_disconnected` after 124.062 seconds with
+WebSocket close code 1008; a resumable handle was observed, but no GoAway,
+resumption or continuity probe occurred, and session 2 did not run. That version
+sent only the seed turn and then stayed silent. Client inactivity is suspected
+but not proven: 1008 is a measured policy-violation code, not an idleness
+measurement. The owner then approved, for the same free-only scope, allowlisted
+close-reason categories and bounded synthetic activity: a fixed nonce-free turn
+every 60 seconds while no turn is outstanding, at most 15 extra turns per
+session, and at most 90 seconds of cumulative output PCM per session. The
+960-second and four-resumption limits are unchanged, the seed is never replayed
+after reconnect, and transcript deltas are now concatenated rather than joined
+with spaces. These changes are mock-tested only; real continuity evidence
+remains pending a user rerun.
+
 The owner initially approved live S3/S4 evaluation and isolated SDK installation,
 then specified a **combined INR 100 maximum** and requested a full-lifetime cost
 estimate first. After reviewing the uncertainty, the owner chose offline harnesses

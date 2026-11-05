@@ -16,10 +16,17 @@ from tests.spikes.spike_s3_gemini_live import build_plans
 
 from . import free_tier_smoke
 from .adapters import (
+    CLOSE_CODE_CATEGORIES,
+    CLOSE_REASON_CATEGORIES,
     CLOSE_SECONDS,
+    CONTINUITY_ACTIVITY_INTERVAL_SECONDS,
+    CONTINUITY_MAX_AUDIO_BYTES,
     CONTINUITY_MAX_RESUMPTIONS,
     CONTINUITY_MAX_SECONDS,
+    CONTINUITY_MAX_SYNTHETIC_TURNS,
     CONTINUITY_NONCE_WORDS,
+    FAILURE_CATEGORIES,
+    AdapterFailure,
     LiveObservation,
     observe_continuity_session,
 )
@@ -41,9 +48,14 @@ Workload: two separate text-input Live sessions with AUDIO responses and
 output-audio transcription, one per input method;
 each observes at most {CONTINUITY_MAX_SECONDS} seconds and uses at most
 {CONTINUITY_MAX_RESUMPTIONS} resumptions. A built-in synthetic nonce is sent
-before reconnect; after a resumed setup, the model is asked to say the six
-synthetic words exactly. Only SDK/model identifiers, timestamps,
-numeric/boolean measurements, and redacted status are saved. Audio and
+once before reconnect and never replayed; after a resumed setup, the model is
+asked to say the six synthetic words exactly. While no turn is outstanding, a
+fixed nonce-free synthetic turn is sent every
+{CONTINUITY_ACTIVITY_INTERVAL_SECONDS:g} seconds, at most
+{CONTINUITY_MAX_SYNTHETIC_TURNS} extra turns per session; output audio is capped
+at {CONTINUITY_MAX_AUDIO_BYTES // 48_000} seconds of PCM per session. Only SDK/model
+identifiers, timestamps, numeric/boolean measurements, allowlisted
+close/failure categories, and redacted status are saved. Audio and
 transcription are inspected in memory and counted, never saved. Prompts,
 responses, nonce, handles, API key, headers, and raw errors are never saved.
 
@@ -59,6 +71,13 @@ ClientFactory = free_tier_smoke.ClientFactory
 
 def _new_nonce() -> str:
     return " ".join(secrets.choice(CONTINUITY_NONCE_WORDS) for _ in range(6))
+
+
+def _allowlisted(value: str | None, allowed: frozenset[str]) -> str | None:
+    """Persist only fixed labels; anything else becomes "unknown"."""
+    if value is None:
+        return None
+    return value if value in allowed else "unknown"
 
 
 def _session_evidence(observation: LiveObservation) -> dict[str, object]:
@@ -77,6 +96,16 @@ def _session_evidence(observation: LiveObservation) -> dict[str, object]:
         "context_continuity_verified": observation.context_continuity_verified,
         "provider_closed": observation.provider_closed,
         "provider_close_code": observation.provider_close_code,
+        "provider_close_code_category": _allowlisted(
+            observation.provider_close_code_category, CLOSE_CODE_CATEGORIES
+        ),
+        "provider_close_reason_category": _allowlisted(
+            observation.provider_close_reason_category, CLOSE_REASON_CATEGORIES
+        ),
+        "synthetic_turns_sent": observation.synthetic_turns_sent,
+        "synthetic_turns_completed": observation.synthetic_turns_completed,
+        "synthetic_turn_limit_reached": observation.synthetic_turn_limit_reached,
+        "seconds_since_last_client_send": observation.seconds_since_last_client_send,
         "termination_observed": observation.termination_observed,
         "observation_limit_reached": observation.observation_limit_reached,
     }
@@ -95,6 +124,9 @@ def _new_evidence() -> dict[str, object]:
             "independent_text_sessions": SESSION_COUNT,
             "per_session_observation_seconds": CONTINUITY_MAX_SECONDS,
             "max_resumptions_per_session": CONTINUITY_MAX_RESUMPTIONS,
+            "synthetic_activity_interval_seconds": CONTINUITY_ACTIVITY_INTERVAL_SECONDS,
+            "max_synthetic_turns_per_session": CONTINUITY_MAX_SYNTHETIC_TURNS,
+            "max_output_audio_seconds_per_session": CONTINUITY_MAX_AUDIO_BYTES // 48_000,
             "total_walltime_seconds": TOTAL_WALLTIME_SECONDS,
             "automatic_retries": False,
             "http_transport_retries": False,
@@ -122,8 +154,13 @@ def _new_evidence() -> dict[str, object]:
                 "measurement."
             ),
             (
-                "No prompts, responses, nonce, handles, credentials, raw errors, or user "
-                "content are retained."
+                "No prompts, responses, nonce, handles, credentials, raw errors, raw close "
+                "reasons, or user content are retained."
+            ),
+            (
+                "Close code categories are RFC 6455 names for the measured code; reason "
+                "categories match fixed known patterns only. Neither proves a root cause, "
+                "and a 1008 policy-violation code alone does not show idleness."
             ),
         ],
     }
@@ -201,6 +238,12 @@ async def run_continuity_observation(
         raise
     except TimeoutError:
         evidence["failure"] = {"stage": current_stage, "code": "total_deadline_exceeded"}
+    except AdapterFailure as error:
+        evidence["failure"] = {
+            "stage": current_stage,
+            "code": "operation_failed",
+            "category": _allowlisted(error.category, FAILURE_CATEGORIES),
+        }
     except Exception:
         evidence["failure"] = {"stage": current_stage, "code": "operation_failed"}
 

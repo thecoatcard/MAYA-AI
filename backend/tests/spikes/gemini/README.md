@@ -69,9 +69,15 @@ model requests.
   a connection setup using the actual resumable handle. In-memory transcription
   is compared as a complete normalized word sequence after both transcription
   completion and model-turn completion; punctuation/case/spacing normalization
-  cannot accept partial or substring matches. Audio is validated as
-  `audio/pcm;rate=24000`, counted, and bounded to 30 seconds per session;
-  transcription is bounded to 256 UTF-8 bytes per session. Raw audio and
+  cannot accept partial or substring matches. Transcription parts are
+  concatenated as deltas (a word may span parts) rather than joined with an
+  inserted space. Audio is validated as `audio/pcm;rate=24000`, counted, and
+  bounded to 90 seconds cumulatively per session;
+  transcription is bounded to 256 UTF-8 bytes per session.
+  While no turn is outstanding and the follow-up probe is not pending, it sends a
+  fixed nonce-free synthetic turn every 60 seconds, at most 15 extra turns per
+  session, while the single SDK receive read stays pending (no second receive,
+  no generator restart). The seed nonce is never replayed after reconnect. Raw audio and
   transcription are never persisted or included in observations.
 - The extended launcher runs the two different text-input methods in independent
   sessions, each bounded to 960 seconds and four resumptions. Responses use AUDIO
@@ -129,7 +135,11 @@ normal versus abnormal provider closure, latest-handle replacement/invalidation,
 and bounded reconnects. The extended continuity checks validate the complete
 nonce transcription after resumed setup, continued observation beyond a
 completed turn, four-resumption termination, normal/abnormal provider closure,
-timeout distinction and redaction. Launcher checks cover interactive confirmation
+timeout distinction and redaction. They also cover synthetic activity sent while
+one receive stays pending, the 15-turn and one-outstanding-turn limits, no
+activity during the follow-up, the cumulative 90-second output cap, fragmented
+transcripts, allowlisted close classification, and cleanup without task leaks
+after cancellation, deadline expiry or a failed activity send. Launcher checks cover interactive confirmation
 ordering, environment override refusal, fixed endpoint and retry settings, full
 fake-client success, timeout/quota failures, cleanup of both clients, evidence
 redaction, and the help/noninteractive CLI paths. All tests avoid SDK client
@@ -162,6 +172,18 @@ Earlier baseline validation recorded on 2026-11-05 before the extended launcher:
   ```powershell
   uv run --directory backend --no-sync mypy --exclude '^tests/spikes/(gemini/|s1/(driver|runtime)\.py$)' .
   ```
+
+Continuity-failure fix validation (2026-11-05), existing isolated environment
+with `--no-sync`, no install or sync:
+
+- New regressions first failed against the previous adapter: the idle-wait check
+  ended in `observation_timeout` instead of `provider_closed` because no
+  synthetic turn was sent, and a mid-word fragmented transcript was rejected
+  (and a boundary without a space accepted) by the space join.
+- Isolated pytest: **148 passed** (five repeated runs); strict mypy: **6 source
+  files passed**; Ruff lint and format checks passed. Launcher `--help` passed.
+- No live API command was run; no credential was acquired and no network request
+  was made by the agent.
 
 Extended-launcher validation using the existing isolated environment and
 `--no-sync`:
@@ -276,8 +298,12 @@ resumable handle, the launcher reconnects and records whether setup completed;
 it then asks the model to say the nonce seeded before reconnect. The Live
 configuration uses `response_modalities=[AUDIO]` plus
 `output_audio_transcription`; it does not request TEXT modality. The emitted
-PCM and transcription are held in memory only, with 30 seconds of PCM
-(`audio/pcm;rate=24000`) and 256 UTF-8 transcript bytes maximum per session.
+PCM and transcription are held in memory only, with 90 seconds of PCM
+(`audio/pcm;rate=24000`, cumulative across all turns) and 256 UTF-8 transcript
+bytes maximum per session. To avoid a silent connection, a fixed nonce-free
+synthetic turn ("reply with only the word ready") is sent after 60 seconds
+without client input whenever no turn is outstanding, at most 15 extra turns
+per session; none is sent while the post-resumption follow-up is pending.
 The entire normalized word sequence must match after both transcription and
 model-turn completion; punctuation/case/spacing normalization does not accept
 partial or substring matches. Receiving continues
@@ -299,9 +325,38 @@ Interpret the redacted `results/gemini-free-tier-continuity-*.json` as follows:
 - `end_reason: "observation_timeout"` and
   `observation_limit_reached: true` mean the local bound expired; this is not
   provider closure and is not a measurement of the provider's maximum lifetime.
+- `provider_close_code_category` is the RFC 6455 name of the measured close
+  code (for example `policy_violation` for 1008). `provider_close_reason_category`
+  is one allowlisted label from fixed textual patterns (`inactivity`,
+  `deadline_or_timeout`, `quota_or_rate_limit`, and so on); `unknown`,
+  `empty`, `not_provided` or `multiple_patterns` are used otherwise. The raw
+  reason is never saved. A category is a diagnostic hint, not a proven cause:
+  a 1008 code alone is a measured policy-violation close, not idleness.
+- `synthetic_turns_sent`/`synthetic_turns_completed`,
+  `synthetic_turn_limit_reached` and `seconds_since_last_client_send` measure the
+  bounded activity. A failure with code `operation_failed` carries an allowlisted
+  `category` such as `audio_output_cap_exceeded` or
+  `synthetic_activity_send_failed`.
 - `resumption_limit`, missing continuity, or provider disconnect causes a
   failed run and stops further sessions. `live_acceptance_verified` remains
   false in every outcome; this launcher does not report lifetime acceptance.
+
+### Failed user-run continuity evidence (2026-11-05)
+
+The user ran the earlier launcher once. The unchanged ignored result
+`results/gemini-free-tier-continuity-20261105T073745.054919Z.json` records
+`status: "failed"` at `session_1` (`send_client_content`) with failure code
+`provider_disconnect`: `provider_disconnected` after 124.062 seconds, close code
+1008, 109,440 output audio bytes (about 2.3 seconds), a resumable handle
+observed, and no GoAway, resumption, follow-up probe or continuity. Session 2 did
+not run. That version sent only the seed turn and then sent nothing until GoAway.
+
+Client inactivity is a **suspected, unproven** contributor; 1008 is a measured
+policy-violation close code, and the old evidence did not record any reason
+category. The owner then approved the bounded synthetic activity and allowlisted
+close diagnostics described above, with the 960-second and four-resumption
+limits unchanged. No rerun has been performed by an agent; the next user run
+may or may not reach GoAway, and Phase 01 continuity evidence remains pending.
 
 The launcher has no provider-side cost cap and authorizes no paid use. Any
 future paid use still requires a separately reviewed enforceable hard spending

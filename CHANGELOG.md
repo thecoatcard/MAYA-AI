@@ -6,6 +6,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Fixed
 
+- Gemini free-tier continuity launcher: after a user run disconnected with close code 1008 at 124 seconds before any GoAway (inactivity suspected, not proven), the adapter now sends a fixed nonce-free synthetic turn every 60 seconds while no turn is outstanding (at most 15 per session, 90 seconds cumulative output PCM), keeps one pending receive, concatenates transcript deltas, and records only allowlisted close/failure categories. Mock-tested only (148 isolated checks); continuity evidence remains pending.
 - Environment-variable documentation checks now inspect tracked and non-ignored source files instead of generated Next.js bundles and Python dependency environments. Regression tests retain checks for undocumented source variables, including tracked files matched by ignore patterns.
 - Phase 01 documentation now matches generic health bodies, resource-test path and direct router mounting. The owner revised acceptance to free-tier-only, retaining provider-enforced paid caps before future paid use; extended lifetime/continuity evidence remains pending.
 - All 587 nonexistent future-artifact references in Phases 02–16 are explicitly labelled planned without removing paths or requirements, creating dummy files, or changing validators; documentation validation now passes.

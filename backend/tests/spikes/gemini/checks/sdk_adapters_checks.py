@@ -5,6 +5,7 @@ import inspect
 import io
 import json
 import math
+import re
 import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -907,7 +908,7 @@ def continuity_sessions(nonce: str) -> list[FakeSession]:
                 continuity_audio_message(),
                 continuity_audio_turn_message(),
                 transcription_message(
-                    " ".join(nonce.split()[3:]) + ".",
+                    " " + " ".join(nonce.split()[3:]) + ".",  # deltas carry spacing
                     finished=True,
                     turn_complete=False,
                 ),
@@ -1154,6 +1155,442 @@ async def test_continuity_records_abnormal_provider_disconnect_code_redacted() -
     assert result.provider_close_code == 1011
     assert result.termination_observed and not result.provider_closed
     assert "private disconnect detail" not in repr(result)
+
+
+class GatedContinuitySession(FakeSession):
+    """Each receive() waits until enough text prompts were sent, then yields a batch.
+
+    Waiting is event-driven, so these checks do not depend on wall-clock races.
+    """
+
+    def __init__(self, steps: list[tuple[int, float, list[types.LiveServerMessage]]]) -> None:
+        super().__init__([])
+        self.steps = steps
+        self.prompt_sent = asyncio.Event()
+        self.active_receives = 0
+        self.max_active_receives = 0
+        self.started_generators = 0
+        self.receives_active_at_prompt: list[int] = []
+        self.second_prompt = asyncio.Event()
+
+    def prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for kind, value in self.sends:
+            if kind == "client" and isinstance(value, types.Content):
+                prompts.extend(part.text or "" for part in value.parts or [])
+            elif kind == "realtime" and isinstance(value, str):
+                prompts.append(value)
+        return prompts
+
+    def _record_prompt(self) -> None:
+        self.receives_active_at_prompt.append(self.active_receives)
+        self.prompt_sent.set()
+        if len(self.receives_active_at_prompt) >= 2:
+            self.second_prompt.set()
+
+    async def send_client_content(
+        self, *, turns: types.Content, turn_complete: bool = True
+    ) -> None:
+        await super().send_client_content(turns=turns, turn_complete=turn_complete)
+        self._record_prompt()
+
+    async def send_realtime_input(
+        self,
+        *,
+        text: str | None = None,
+        audio: types.Blob | None = None,
+        audio_stream_end: bool | None = None,
+    ) -> None:
+        await super().send_realtime_input(text=text, audio=audio, audio_stream_end=audio_stream_end)
+        if text is not None:
+            self._record_prompt()
+
+    async def receive(self) -> AsyncIterator[types.LiveServerMessage]:
+        self.started_generators += 1
+        self.active_receives += 1
+        self.max_active_receives = max(self.max_active_receives, self.active_receives)
+        try:
+            if self.steps:
+                gate, delay, batch = self.steps.pop(0)
+                while len(self.prompts()) < gate:
+                    self.prompt_sent.clear()
+                    await self.prompt_sent.wait()
+                if delay:
+                    await asyncio.sleep(delay)
+                for message in batch:
+                    yield message
+        finally:
+            self.active_receives -= 1
+            self.closed_generators += 1
+
+
+NONCE = "amber cedar violet harbor maple silver"
+
+
+@pytest.mark.parametrize("method_index", [0, 1])
+async def test_continuity_sends_synthetic_activity_while_receive_is_pending(
+    method_index: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: the adapter used to send the seed and then wait silently
+    # until GoAway; this provider only advances after periodic client activity.
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.01, raising=False)
+    first = GatedContinuitySession(
+        [
+            (1, 0, [continuity_audio_turn_message()]),
+            (2, 0, [continuity_audio_turn_message()]),
+            (3, 0, [resume_message("handle-one"), GO_AWAY]),
+        ]
+    )
+    resumed = GatedContinuitySession(
+        [(1, 0, [transcription_message(" " + NONCE + ".", finished=True)])]
+    )
+    connector = FakeLive([first, resumed])
+    plan = replace(build_plans()[method_index], max_seconds=5)
+
+    result = await observe_continuity_session(connector, plan, nonce=NONCE)
+
+    assert result.end_reason == "provider_closed"
+    assert not result.observation_limit_reached
+    assert result.continuity_probe_completed and result.context_continuity_verified
+    prompts = first.prompts()
+    assert len(prompts) == 3 and NONCE in prompts[0]
+    assert prompts[1:] == [sdk_adapters.CONTINUITY_ACTIVITY_PROMPT] * 2
+    # Synthetic sends happen while exactly one receive generator is pending.
+    assert first.receives_active_at_prompt == [0, 1, 1]
+    assert first.max_active_receives == resumed.max_active_receives == 1
+    assert first.started_generators == first.closed_generators == 3
+    assert resumed.started_generators == resumed.closed_generators == 2
+    # The seed/nonce is never replayed after reconnect.
+    assert NONCE not in repr(resumed.sends)
+    assert len(resumed.prompts()) == 1
+    # The second synthetic turn was still outstanding when GoAway arrived.
+    assert result.synthetic_turns_sent == 2 and result.synthetic_turns_completed == 1
+    assert not result.synthetic_turn_limit_reached
+    assert NONCE not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("fragments", "verified"),
+    [
+        (["am", "ber ce", "dar violet harbor maple sil", "ver."], True),
+        ([" Amber", " cedar,", " violet", " harbor", " maple", " silver."], True),
+        (["amber cedar", "violet harbor maple silver"], False),  # no guessed separator
+    ],
+)
+async def test_continuity_transcript_fragments_are_concatenated_not_space_joined(
+    fragments: list[str], verified: bool
+) -> None:
+    messages = [
+        transcription_message(fragment, finished=False, turn_complete=False)
+        for fragment in fragments[:-1]
+    ] + [transcription_message(fragments[-1], finished=True, turn_complete=True)]
+    connector = FakeLive(
+        [
+            FakeSession([[resume_message("handle-one"), GO_AWAY]]),
+            FakeSession([messages]),
+            FakeSession([]),
+        ]
+    )
+    result = await observe_continuity_session(connector, build_plans()[0], nonce=NONCE)
+    assert result.continuity_probe_completed
+    assert result.context_continuity_verified is verified
+
+
+def test_continuity_activity_bounds_are_the_owner_approved_values() -> None:
+    assert sdk_adapters.CONTINUITY_ACTIVITY_INTERVAL_SECONDS == 60
+    assert sdk_adapters.CONTINUITY_MAX_SYNTHETIC_TURNS == 15
+    # 90 seconds of 24 kHz mono PCM16, cumulative per session.
+    assert sdk_adapters.CONTINUITY_MAX_AUDIO_BYTES == 24_000 * 2 * 90
+    assert sdk_adapters.CONTINUITY_MAX_SECONDS == 960
+    assert sdk_adapters.CONTINUITY_MAX_RESUMPTIONS == 4
+    prompt_words = set(re.findall(r"[a-z]+", sdk_adapters.CONTINUITY_ACTIVITY_PROMPT.casefold()))
+    assert not prompt_words & set(sdk_adapters.CONTINUITY_NONCE_WORDS)
+    assert "remember" not in prompt_words and "words" not in prompt_words
+
+
+async def test_continuity_stops_synthetic_activity_after_fifteen_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+    steps: list[tuple[int, float, list[types.LiveServerMessage]]] = [
+        (1, 0, [continuity_audio_turn_message()])
+    ]
+    steps += [(gate, 0, [continuity_audio_turn_message()]) for gate in range(2, 17)]
+    # Many intervals elapse here; a sixteenth synthetic send would be a bound violation.
+    steps.append((16, 0.2, [resume_message(None), GO_AWAY]))
+    session = GatedContinuitySession(steps)
+    connector = FakeLive([session])
+
+    result = await observe_continuity_session(
+        connector, replace(build_plans()[0], max_seconds=10), nonce=NONCE
+    )
+
+    assert result.end_reason == "goaway_without_handle"
+    assert result.synthetic_turns_sent == 15 == result.synthetic_turns_completed
+    assert result.synthetic_turn_limit_reached
+    assert session.prompts()[1:] == [sdk_adapters.CONTINUITY_ACTIVITY_PROMPT] * 15
+    assert session.max_active_receives == 1
+    assert session.started_generators == session.closed_generators == 17
+
+
+@pytest.mark.parametrize("seed_completes", [False, True])
+async def test_continuity_keeps_at_most_one_turn_outstanding(
+    seed_completes: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+    steps: list[tuple[int, float, list[types.LiveServerMessage]]] = []
+    if seed_completes:
+        # One synthetic turn is sent; its audio arrives without turn completion.
+        steps.append((1, 0, [continuity_audio_turn_message()]))
+        steps.append((2, 0.2, [continuity_audio_message(), resume_message(None), GO_AWAY]))
+    else:
+        # The seed turn never completes, so no synthetic turn may be sent.
+        steps.append((1, 0.2, [continuity_audio_message(), resume_message(None), GO_AWAY]))
+    session = GatedContinuitySession(steps)
+
+    result = await observe_continuity_session(
+        FakeLive([session]), replace(build_plans()[0], max_seconds=10), nonce=NONCE
+    )
+
+    assert result.end_reason == "goaway_without_handle"
+    expected = 1 if seed_completes else 0
+    assert result.synthetic_turns_sent == expected
+    assert result.synthetic_turns_completed == 0
+    assert len(session.prompts()) == 1 + expected
+
+
+async def test_continuity_sends_no_synthetic_activity_while_followup_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+    first = GatedContinuitySession(
+        [
+            (1, 0, [continuity_audio_turn_message()]),
+            (2, 0, [continuity_audio_turn_message(), resume_message("handle-one"), GO_AWAY]),
+        ]
+    )
+    resumed = GatedContinuitySession(
+        [
+            # The follow-up turn completes before its transcript is finished.
+            (1, 0, [transcription_message(" amber cedar violet", finished=False)]),
+            (1, 0.2, [transcription_message(" harbor maple silver", finished=True)]),
+            (2, 0, [continuity_audio_turn_message(), resume_message(None), GO_AWAY]),
+        ]
+    )
+
+    result = await observe_continuity_session(
+        FakeLive([first, resumed]), replace(build_plans()[0], max_seconds=10), nonce=NONCE
+    )
+
+    assert result.context_continuity_verified
+    assert result.end_reason == "goaway_without_handle"
+    # Exactly one synthetic turn after the probe completed, none during it.
+    assert resumed.prompts()[1:] == [sdk_adapters.CONTINUITY_ACTIVITY_PROMPT]
+    assert NONCE not in repr(resumed.sends)
+    assert result.synthetic_turns_sent == 2 and result.synthetic_turns_completed == 2
+
+
+async def test_continuity_output_audio_cap_is_cumulative_across_turns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+    half = sdk_adapters.CONTINUITY_MAX_AUDIO_BYTES // 2
+    session = GatedContinuitySession(
+        [
+            (1, 0, [continuity_audio_turn_message(b"\0" * half)]),
+            (2, 0, [continuity_audio_turn_message(b"\0" * (half + 2))]),
+        ]
+    )
+    client = FakeSdkClient(FakeLive([session]))
+    output = tmp_path / "audio-cap.json"
+    completed, evidence = await free_tier_continuity.run_continuity_observation(
+        "synthetic-test-key",
+        output,
+        client_factory=lambda _key: client,
+        nonce_factory=lambda: NONCE,
+    )
+    assert not completed
+    assert evidence["failure"] == {
+        "stage": "session_1",
+        "code": "operation_failed",
+        "category": "audio_output_cap_exceeded",
+    }
+    assert session.started_generators == session.closed_generators == 2
+    serialized = output.read_text(encoding="utf-8")
+    assert NONCE not in serialized and "synthetic-test-key" not in serialized
+    assert "Periodic" not in serialized and "Remember" not in serialized
+
+
+async def test_continuity_synthetic_send_failure_stops_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+
+    class FailingActivitySession(GatedContinuitySession):
+        async def send_client_content(
+            self, *, turns: types.Content, turn_complete: bool = True
+        ) -> None:
+            if self.prompts():
+                raise RuntimeError("private socket detail")
+            await super().send_client_content(turns=turns, turn_complete=turn_complete)
+
+    session = FailingActivitySession([(1, 0, [continuity_audio_turn_message()]), (99, 0, [])])
+    connector = FakeLive([session])
+    with pytest.raises(AdapterFailure) as error:
+        await observe_continuity_session(
+            connector, replace(build_plans()[0], max_seconds=10), nonce=NONCE
+        )
+    assert error.value.category == "synthetic_activity_send_failed"
+    assert error.value.__cause__ is None and error.value.__suppress_context__
+    assert "private" not in str(error.value)
+    assert session.started_generators == session.closed_generators == 2
+    assert session.active_receives == 0
+    assert connector.closed == 1
+
+
+async def test_continuity_cancellation_cancels_pending_read_without_task_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 0.001)
+    session = GatedContinuitySession([(1, 0, [continuity_audio_turn_message()]), (99, 0, [])])
+    connector = FakeLive([session])
+    baseline = asyncio.all_tasks()
+    task = asyncio.create_task(
+        observe_continuity_session(
+            connector, replace(build_plans()[0], max_seconds=10), nonce=NONCE
+        )
+    )
+    # Seed plus one synthetic send while the second receive stays pending.
+    async with asyncio.timeout(5):
+        await session.second_prompt.wait()
+    await asyncio.sleep(0.01)  # further intervals elapse; the turn is outstanding
+    assert len(session.prompts()) == 2
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert session.started_generators == session.closed_generators == 2
+    assert session.active_receives == 0 and session.max_active_receives == 1
+    assert connector.closed == 1
+    assert asyncio.all_tasks() - baseline == set()
+
+
+async def test_continuity_deadline_during_pending_read_closes_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", 60)
+    session = GatedContinuitySession([(1, 0, [continuity_audio_turn_message()]), (99, 0, [])])
+    connector = FakeLive([session])
+    baseline = asyncio.all_tasks()
+    result = await observe_continuity_session(
+        connector, replace(build_plans()[0], max_seconds=0.2), nonce=NONCE
+    )
+    assert result.end_reason == "observation_timeout"
+    assert result.synthetic_turns_sent == 0
+    assert result.seconds_since_last_client_send is not None
+    assert session.started_generators == session.closed_generators == 2
+    assert asyncio.all_tasks() - baseline == set()
+
+
+@pytest.mark.parametrize("interval", [0, -1, 61, math.inf, math.nan, True])
+async def test_continuity_rejects_unbounded_activity_interval_before_connect(
+    interval: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_ACTIVITY_INTERVAL_SECONDS", interval)
+    connector = FakeLive()
+    with pytest.raises(ValueError, match="activity interval"):
+        await observe_continuity_session(connector, build_plans()[0], nonce=NONCE)
+    assert not connector.configs
+
+
+@pytest.mark.parametrize("limit", [-1, 16, True])
+async def test_continuity_rejects_synthetic_limit_above_fifteen(
+    limit: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sdk_adapters, "CONTINUITY_MAX_SYNTHETIC_TURNS", limit)
+    connector = FakeLive()
+    with pytest.raises(ValueError, match="synthetic turn limit"):
+        await observe_continuity_session(connector, build_plans()[0], nonce=NONCE)
+    assert not connector.configs
+
+
+@pytest.mark.parametrize(
+    ("code", "details", "expected"),
+    [
+        (1008, "", ("policy_violation", "empty")),  # 1008 alone is not idleness
+        (1008, "Policy violation.", ("policy_violation", "policy_or_safety")),
+        (1008, "private opaque text 0123", ("policy_violation", "unknown")),
+        (
+            1011,
+            "Deadline expired before operation could complete.",
+            ("internal_error", "deadline_or_timeout"),
+        ),
+        (1011, "You exceeded your current quota", ("internal_error", "quota_or_rate_limit")),
+        (1008, "Session idle", ("policy_violation", "inactivity")),
+        (1008, "Requested entity was not found.", ("policy_violation", "unsupported_or_not_found")),
+        (
+            1007,
+            "Request contains an invalid argument.",
+            ("invalid_payload_data", "invalid_argument"),
+        ),
+        (1011, "internal error: quota", ("internal_error", "multiple_patterns")),
+        (1006, "x" * 124, ("abnormal_closure", "unknown")),  # longer than RFC 6455 allows
+        (4003, "quota", ("unknown", "quota_or_rate_limit")),
+        (1011, {"message": "Service unavailable"}, ("internal_error", "service_unavailable")),
+        (1011, {"unexpected": 1}, ("internal_error", "not_provided")),
+    ],
+)
+def test_provider_close_classification_is_allowlisted(
+    code: int, details: object, expected: tuple[str, str]
+) -> None:
+    error = errors.APIError(code, details)
+    code_category, reason_category = sdk_adapters.classify_provider_close(error)
+    assert (code_category, reason_category) == expected
+    assert code_category in sdk_adapters.CLOSE_CODE_CATEGORIES
+    assert reason_category in sdk_adapters.CLOSE_REASON_CATEGORIES
+
+
+async def test_continuity_1008_evidence_has_categories_but_no_raw_reason(
+    tmp_path: Path,
+) -> None:
+    session = FakeSession([[continuity_audio_turn_message()]])
+    raw_reason = "private reason text with key-like 0123456789abcdef"
+
+    async def failing_receive() -> AsyncIterator[types.LiveServerMessage]:
+        try:
+            if session.batches:
+                for message in session.batches.pop(0):
+                    yield message
+                return
+            raise errors.APIError(1008, raw_reason)
+        finally:
+            session.closed_generators += 1
+
+    session.receive = failing_receive  # type: ignore[method-assign]
+    client = FakeSdkClient(FakeLive([session]))
+    output = tmp_path / "policy.json"
+    completed, evidence = await free_tier_continuity.run_continuity_observation(
+        "synthetic-test-key",
+        output,
+        client_factory=lambda _key: client,
+        nonce_factory=lambda: NONCE,
+    )
+    serialized = output.read_text(encoding="utf-8")
+    observations = evidence["observations"]
+    assert not completed
+    assert evidence["failure"] == {"stage": "session_1", "code": "provider_disconnect"}
+    assert isinstance(observations, list) and isinstance(observations[0], dict)
+    item = observations[0]
+    assert item["end_reason"] == "provider_disconnected"
+    assert item["provider_close_code"] == 1008
+    assert item["provider_close_code_category"] == "policy_violation"
+    assert item["provider_close_reason_category"] == "unknown"
+    assert item["synthetic_turns_sent"] == 0
+    assert isinstance(item["seconds_since_last_client_send"], float)
+    # A 1008 code alone is recorded as a measured policy-violation code, not idleness.
+    assert "inactivity" not in json.dumps(observations)
+    assert raw_reason not in serialized and "private reason" not in serialized
+    assert NONCE not in serialized and "synthetic-test-key" not in serialized
+    assert session.closed_generators == 2
 
 
 async def test_continuity_launcher_writes_redacted_evidence_for_two_sessions(
