@@ -85,13 +85,17 @@ Evidence for the items below is the [Model Gateway architecture document](../arc
 
 ### Phase 04 — Chat and Conversation System
 
-- [ ] Authenticated basic chat persists user and assistant messages under RLS.
-- [ ] Owner approves the contract for `/api/v1/chat/message`, including whether SSE emits task events or model tokens; no unapproved session CRUD endpoints are added.
-- [ ] Browser streaming uses fetch with bearer authentication, stable event/message IDs, and a client idempotency key so reconnects do not resubmit or rebill a message.
-- [ ] Context-window limits are based on the approved model/token budget, not an invented turn count.
-- [ ] Markdown is sanitized at render time and remote images are blocked.
-- [ ] Client disconnection terminates upstream model generation immediately to conserve tokens.
-- [ ] Browser/UI acceptance is not claimed until an authenticated UI path exists.
+Evidence for the items below is the [chat API contract](../api/CHAT.md), [ADR-0008](../adr/0008-chat-api-contract.md) and the Phase 04 tests: 388 backend tests (unit, fake-provider integration, and PostgreSQL/Redis service tests) and 691 web tests (jsdom). The model is always a fake client that follows the real SDK's calling convention; nothing contacted Gemini.
+
+- [x] Authenticated basic chat persists user and assistant messages under RLS (real PostgreSQL, forced row-level security, user ownership checked in every statement; a foreign user's session is indistinguishable from a missing one).
+- [x] Owner approved the contract for `/api/v1/chat/message` on 2026-11-05 ("Hybrid typed-event SSE"); the only added routes are the two read-only session endpoints; no session create, rename or delete.
+- [ ] Browser streaming uses fetch with bearer authentication, stable event/message IDs, and a client idempotency key so reconnects do not resubmit or rebill a message. Implemented in the web client and the API, and tested offline (jsdom, and the API against real Redis: a repeated key never calls the model again). Not verified in a real browser or against the running API: there is no login UI and the CORS or proxy decision is open.
+- [ ] Context-window limits are based on the approved model/token budget, not an invented turn count. The window is token-based and bounded by the model's limits, but the budget value (32000 tokens) is provisional and awaits the owner; tokens are estimated locally and were not compared with the real tokenizer.
+- [x] Markdown is sanitized at render time and remote images are blocked (dependency-free parser that builds React elements, no raw HTML; only `http`, `https` and `mailto` links; fuzz and hostile-input tests; an independent review found no script path). Tested in jsdom only, not in a browser.
+- [x] Client disconnection terminates upstream model generation immediately (tested with a hand-driven ASGI client and a real uvicorn socket against a fake provider stream; the partial reply is stored as interrupted). Real Gemini streams were not observed.
+- [ ] Browser/UI acceptance: not claimed. It needs an authenticated UI path (a login UI) and browser-to-API connectivity.
+
+**Local scope implemented and tested offline; the open items above need the owner or a login UI.** Independent security, contract and web reviews ran; their findings were fixed or recorded in [CHAT.md](../api/CHAT.md#known-limitations).
 
 ### Master-plan P1 — Foundation milestone
 

@@ -39,9 +39,10 @@ When code starts reading an environment variable:
 | `MAYA_GEMINI_MAX_TOOL_TURNS_ALERT` | Per-task tool turns alert threshold; a warning only, set it below the cap in `enforce` mode | No; defaults to 10 | `10` |
 | `MAYA_GEMINI_BUDGET_TASK_USD_CAP` | Per-task hard budget cap (USD); required when enforcement mode is `enforce`; owner-approved value 1.50 | No; required in `enforce` mode | None |
 | `MAYA_GEMINI_MAX_TOOL_TURNS_CAP` | Per-task hard tool turn cap; required when enforcement mode is `enforce`; owner-approved value 10 | No; required in `enforce` mode | None |
-| `MAYA_CHAT_MAX_MESSAGE_CHARS` | Longest chat message accepted; provisional, not owner-approved | No; defaults to 8000, 1 to 100000 | `8000` |
+| `MAYA_CHAT_MAX_MESSAGE_CHARS` | Longest chat message accepted; provisional, not owner-approved | No; defaults to 8000, 1 to 16000 (the 64 KiB request-body limit bounds the real maximum) | `8000` |
 | `MAYA_CHAT_RATE_LIMIT_PER_MINUTE` | Chat messages per user per minute; provisional, no measured baseline exists | No; defaults to 20, 1 to 10000 | `20` |
 | `MAYA_CHAT_CONTEXT_TOKEN_BUDGET` | Soft token budget for the history sent to the model; provisional | No; defaults to 32000, 1000 to 1000000 | `32000` |
+| `NEXT_PUBLIC_API_BASE_URL` | Web only: API origin the chat page sends requests to; compiled into the browser bundle, so never put a secret in it. An `http://` URL is refused unless it points at loopback (the bearer token would travel in clear text) | No; defaults to `http://127.0.0.1:8000` | `http://127.0.0.1:8000` |
 | `POSTGRES_DB` | Compose development database | Compose | `maya` |
 | `POSTGRES_USER` | Compose bootstrap administrator, not the API login | Compose | `maya_migrator` |
 | `POSTGRES_PASSWORD` | Bootstrap password, only a non-secret local example is tracked | Compose | Set privately outside local testing |
@@ -54,7 +55,7 @@ Never put real secrets in `.env.example` or in this document. Real values live i
 Settings reject missing/invalid connection URLs and hide inputs in validation errors.
 Connection strings, the two keys and the SMTP password are `SecretStr` values; the runtime never uses migration
 credentials. The local [runbook](../operations/LOCAL_DEVELOPMENT.md) explains first initialization,
-password changes and safe shutdown. Gemini settings are not consumed yet. The keys in the root example are public
+password changes and safe shutdown. The Gemini settings are read by the model gateway; without `MAYA_GEMINI_API_KEY` it is inert and chat answers `503 model_unavailable`. The keys in the root example are public
 placeholders for loopback use; use private random values (at least 32 bytes each, different from each other) anywhere else.
 Without `MAYA_SMTP_HOST` and `MAYA_SMTP_FROM_ADDRESS` the application starts, and the endpoints that must send a code answer 503. The owner can check a real mail account with the [SMTP check tool](../../backend/app/tools/README.md).
 Test-only variables (`MAYA_TEST_ENV_FILE`, `MAYA_TEST_POSTGRES_ADMIN_URL`, `MAYA_TEST_POSTGRES_APP_URL`,

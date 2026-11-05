@@ -10,7 +10,8 @@
 - **Priority:** High
 - **Estimated Complexity:** Medium
 - **Estimated Duration:** 8 business days.
-- **Implementation Blocker:** The master plan defines `POST /api/v1/chat/message` as an SSE stream of task events, while this phase draft streams model tokens and adds session CRUD endpoints that are absent from the master API table. The owner must approve the public API semantics before implementation; this draft is not approval.
+- **Implementation Blocker (resolved 2026-11-05):** The master plan defines `POST /api/v1/chat/message` as an SSE stream of task events, while this phase draft streamed model tokens and added session CRUD endpoints that are absent from the master API table. The owner chose the "Hybrid typed-event SSE" contract; see [CHAT.md](../../api/CHAT.md) and [ADR-0008](../../adr/0008-chat-api-contract.md). The token-stream draft in section F is superseded.
+- **Status:** Implemented locally under the owner's Phase 04 gate exception (2026-11-05); see section K for what was built, what differs from this plan and what is not verified.
 
 ---
 
@@ -151,9 +152,9 @@
 
 ## F. API and Data Contracts
 
-### 1. Proposed Chat Message Contract (Not Approved)
+### 1. Proposed Chat Message Contract (Superseded)
 
-The token-stream contract below is retained only as a proposal. It conflicts with the master plan's task-event stream and must not be implemented until the owner selects and approves the public contract.
+The token-stream contract below is the original proposal and is **not** what was built. The owner approved a different contract on 2026-11-05; the implemented one is [docs/api/CHAT.md](../../api/CHAT.md). It is kept here only as a record.
 
 - **`POST /api/v1/chat/message`**
   - Headers: `Authorization: Bearer <jwt>`, `Accept: text/event-stream`
@@ -219,3 +220,14 @@ The token-stream contract below is retained only as a proposal. It conflicts wit
 
 - **Demonstrated Proof:** Owner-approved API contract; deterministic persistence, isolation, reconnect, and failure tests; browser evidence after an authenticated UI path exists.
 - **Dependent Phase Unlocked:** Phase 05 (Orchestrator and Agent Framework) is cleared to begin.
+
+---
+
+## K. Implementation record (2026-11-05)
+
+- **Status:** Implemented locally under the owner's Phase 04 gate exception. Verified with fake Gemini clients, real PostgreSQL 17 and real Redis; the web client with jsdom. **Not** run against the real Gemini API, **not** used in a browser, and not exercised against the running API.
+- **Backend:** `backend/app/schemas/chat.py` (request, read models, SSE payloads, `encode_sse`), `backend/app/db/repositories/chat.py` (user- and workspace-scoped sessions and messages, keyset pagination), `backend/app/services/context_manager.py`, `backend/app/services/chat_service.py`, `backend/app/services/chat_idempotency.py`, `backend/app/api/v1/chat.py`, three settings in `backend/app/core/config.py`, `app.state.settings` in `backend/app/main.py`. No migration and no new dependency.
+- **Web:** `apps/web/src/app/chat/`, `components/chat/` (workspace, thread, message, composer, notice, code block, safe Markdown renderer, signed-out state, theme toggle), `hooks/useChatStream.ts`, `lib/{sse,api-client,auth-session,markdown}.ts`. No new dependency; Markdown and code highlighting are written in the repository.
+- **Differences from this plan:** repository tests are in `backend/tests/postgres/` (the PostgreSQL fixtures live there) rather than `tests/integration/`; web tests are named `*.test.tsx` (the Vitest include pattern); there is no Playwright test (Playwright is not installed and adding it is a dependency decision); tokens are counted by a local conservative estimate instead of a provider tokenizer call; repository results are frozen dataclasses and the API models are Pydantic; the composer is `ChatInput`; the contract is the approved one, not the draft in section F.
+- **Reviews:** three independent read-only reviews (security, contract and correctness, web) found no cross-tenant or injection path. Fixed after review: settings were not wired into the app (every real chat request would fail under the documented run command), the in-progress claim could expire before a slow first chunk, a delivered reply could be re-run after one Redis hiccup, an empty assistant message was stored when a client left before any text, the request hash was unsalted, the list endpoints were cacheable, client-chosen field names were echoed, and in the web client Retry reused a key that can only replay an error, the rate-limit countdown was re-announced every second, links hid their real host, focus was lost after Retry or Dismiss, and hostile Markdown was slow to parse. Recorded and not built: see [CHAT.md known limitations](../../api/CHAT.md#known-limitations).
+- **Owner items:** approve or change the three provisional limits; decide browser-to-API connectivity (CORS or same-origin proxy); choose a per-user stream cap, reply deadline and `max_output_tokens`; decide a typeface and a Content-Security-Policy for the web app; approve a migration for history indexes; build or schedule the login UI; run the Phase 03 live smoke check before relying on any streaming behavior here.

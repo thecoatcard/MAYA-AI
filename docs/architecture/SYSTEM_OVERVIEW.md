@@ -6,7 +6,7 @@
 
 The [backend](../../backend/README.md) provides typed configuration, redacted JSON logs,
 resource lifecycles and public [health probes](../api/HEALTH.md). The
-[web scaffold](../../apps/web/README.md) provides a static overview, not chat or auth.
+[web app](../../apps/web/README.md) provides a static overview and a chat page (`/chat`) that has no sign-in yet.
 Local PostgreSQL/pgvector and Redis AOF are described in the
 [data-store state](DATA_MODEL.md) and [runbook](../operations/LOCAL_DEVELOPMENT.md).
 Phase 02 added the [application schema with forced row-level security](DATA_MODEL.md) and own-account
@@ -16,8 +16,13 @@ role alias resolution, terminating fallback graph, exact Decimal token metering 
 a workspace-scoped store for provider cache references (cache creation and attachment are not implemented),
 input sanitization, structured output self-repair, and an owner-run diagnostic smoke tool. The gateway is
 verified offline with test doubles pinned to the SDK's calling convention; it has never been run against the
-real provider and no live external Gemini calls have been executed. There is no browser login or
-browser-to-API product flow or agent engine yet.
+real provider and no live external Gemini calls have been executed. Phase 04 added the persisted
+[chat API](../api/CHAT.md) ([ADR-0008](../adr/0008-chat-api-contract.md)): a typed Server-Sent Events stream on
+`POST /api/v1/chat/message`, idempotent per `Idempotency-Key` so a reconnect never calls (or bills) the model
+twice, user-and-workspace-isolated session and message storage, a bounded context window, and read-only session
+list and history endpoints. It is verified with fake Gemini clients, real PostgreSQL and real Redis only. There is
+no browser login, no decided browser-to-API connectivity (CORS or proxy) and no agent engine yet, so the chat page
+has not been used end to end.
 
 [S3 voice readiness](SPIKE_S3_GEMINI_LIVE.md) and
 [S4 embedding readiness](SPIKE_S4_EMBEDDINGS.md) have offline fixture analyzers

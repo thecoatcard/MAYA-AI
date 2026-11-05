@@ -9,8 +9,8 @@
 ├── MAYA_AI_FINAL_PLAN.md      Authoritative product plan
 ├── README.md, CHANGELOG.md, .env.example
 ├── package.json               npm scripts for governance automation
-├── backend/                   FastAPI foundation, locked Python dependencies and tests
-├── apps/web/                  Next.js 15 overview, component tests and npm lockfile
+├── backend/                   FastAPI foundation, auth, model gateway, chat API, locked Python dependencies and tests
+├── apps/web/                  Next.js 15 overview and chat page, component tests and npm lockfile
 ├── docker-compose.yml         Local-only PostgreSQL/pgvector and Redis AOF
 ├── docker/postgres/           Extension and restricted runtime-role initialization
 ├── governance/                Policies, config, workflows/ (12), roles/ (9)
@@ -49,8 +49,8 @@ The local foundation now exists. Product modules beyond configuration, data-serv
 connections, health probes and the static overview remain planned:
 
 ```text
-backend/        FastAPI foundation; task engine, agents and MCP gateway are planned
-apps/web/       Static Next.js overview; product UI is planned
+backend/        FastAPI foundation, auth, model gateway and chat; task engine, agents and MCP gateway are planned
+apps/web/       Next.js overview and a chat page without sign-in; the rest of the product UI is planned
 docker/         Local PostgreSQL bootstrap; sandbox image is planned
 ```
 

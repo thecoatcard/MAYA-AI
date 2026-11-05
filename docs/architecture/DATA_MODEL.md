@@ -19,7 +19,7 @@ Authentication, tenant isolation and the account tables are documented in
 | :--- | :--- | :--- |
 | `workspaces` | One tenant | Policy on `id`; a tenant cannot list other workspaces' names or slugs |
 | `users` | Accounts | Plan table plus `username`, `email_verified_at`, `password_changed_at`; `hashed_password` is mandatory |
-| `sessions`, `messages` | Chat conversations | Plan tables, unchanged; no code uses them yet (Phase 04) |
+| `sessions`, `messages` | Chat conversations | Plan tables, unchanged. The Phase 04 chat repository (`backend/app/db/repositories/chat.py`) uses them: every statement names the workspace and the user (user-level ownership on top of row-level security), and keyset pagination orders by `(created_at, id)`. No index serves those queries yet; adding one needs a migration (Level 3), recommended before large histories exist |
 | `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals | Plan tables, unchanged (Phases 05 to 07) |
 | `audit_log` | Audit trail | Plan table; the runtime role may insert and read only. Hash chaining is not computed yet (Phase 07) |
 | `mcp_servers`, `file_artifacts`, `memory_items` | Integrations, artifacts, memory | Plan tables and indexes, unchanged (Phases 08, 10, 11) |

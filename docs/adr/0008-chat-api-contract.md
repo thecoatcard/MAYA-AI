@@ -20,9 +20,11 @@ how the first session is created, and whether session CRUD is in scope.
 2. **Sessions.** `session_id` is optional; the server creates a session when it is omitted and returns the id. Only two
    read endpoints are added: list the caller's sessions and read a session's messages. Create, rename and delete are
    out of the MVP.
-3. **Idempotency.** An `Idempotency-Key` header is required. The key is claimed atomically in Redis (24 hours) with a hash
-   of the request. A repeat never calls the model again: a finished or interrupted request is replayed, a running one is
-   refused with 409. If Redis is unreachable, chat fails closed.
+3. **Idempotency.** An `Idempotency-Key` header is required. The key is claimed atomically in Redis (15 minutes while
+   running, renewed as the reply streams; 24 hours once it ended) with a keyed hash (HMAC) of the request. A repeat never
+   calls the model again: a finished, interrupted or failed request is replayed (a failure replays the same `error`
+   event, so another attempt needs a new key), a running one is refused with 409. If Redis is unreachable, chat fails
+   closed.
 4. **No migration.** `sessions` and `messages` already exist with full access for the runtime role and row-level
    security by workspace. User-level ownership is enforced in the repository. Idempotency state lives in Redis, not in a
    new column, which avoids a schema change.
@@ -45,6 +47,10 @@ how the first session is created, and whether session CRUD is in scope.
 - Replay returns the whole stored reply as one `delta`, not the original token pieces; clients must replace, not
   append, when `replayed` is true.
 - Idempotency is only as durable as Redis for 24 hours; after that, or if Redis loses the key, the same key is treated
-  as new.
+  as new. If the final Redis write fails three times in a row, the key stays `in_progress` until its 15-minute claim
+  expires and could then run a second time.
+- A failed request is replayed too, so `retryable` on an `error` event means "ask again with a new key", never "resend
+  the same key".
+- No per-user concurrent-stream cap and no reply deadline yet (see the API document's known limitations).
 - Input limit, rate limit and context budget are provisional until the owner approves values.
 - Until a login UI exists the chat page cannot be exercised in a browser end to end.

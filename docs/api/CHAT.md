@@ -2,7 +2,7 @@
 
 - **Base path:** `/api/v1/chat`
 - **Authentication:** `Authorization: Bearer <access token>` on every endpoint (the Phase 02 access token)
-- **Status:** Contract approved by the owner on 2026-11-05 (option "Hybrid typed-event SSE", task P04-T004); implementation in progress under the Phase 04 gate exception. Browser UI: planned, and no login UI exists yet.
+- **Status:** Contract approved by the owner on 2026-11-05 (option "Hybrid typed-event SSE", task P04-T004). Implemented locally under the Phase 04 gate exception and tested with fake Gemini clients, real PostgreSQL and real Redis; it has never run against the real Gemini API. The browser page exists, but no login UI exists and browser-to-API connectivity (CORS or a proxy) is not decided, so nothing was exercised end to end in a browser.
 - **Decision record:** [ADR-0008](../adr/0008-chat-api-contract.md)
 
 Bodies are JSON with unknown fields rejected. Errors before a stream starts are `{"error": "<code>"}`;
@@ -21,7 +21,7 @@ Send one text message and stream the assistant's reply.
 | :--- | :--- |
 | Header `Idempotency-Key` | Required. 8 to 128 characters of `A-Za-z0-9_-`. A client generates one per user message (a UUID is fine). |
 | Header `Accept` | `text/event-stream` |
-| Body `content` | Required string, 1 to `MAYA_CHAT_MAX_MESSAGE_CHARS` characters (**provisional** default 8000), control characters other than newline and tab rejected |
+| Body `content` | Required string, 1 to `MAYA_CHAT_MAX_MESSAGE_CHARS` characters (**provisional** default 8000, configurable up to 16000). Control characters other than newline and tab are rejected, so a carriage return (CRLF text) is a `422`; whitespace-only text is rejected too |
 | Body `session_id` | Optional UUID. Omitted: the server creates a session (title: the first 60 characters of the message, whitespace collapsed) and returns its id in `message.accepted`. |
 | Body `modality` | Optional, only `"text"` in Phase 04 |
 
@@ -37,10 +37,11 @@ Failures before the stream starts (JSON, no events were sent and no model call w
 | 401 | `not_authenticated`, `invalid_token` | As for every endpoint |
 | 404 | `session_not_found` | Unknown session, or one owned by another user |
 | 409 | `request_in_progress` | The same key is still being processed |
-| 422 | `validation_error`, `idempotency_key_reused` | Bad body; or the key was used earlier with a different `content` or `session_id` |
+| 413 | `payload_too_large` | The request body is over 64 KiB. This global limit applies before authentication and bounds the real maximum length: a client that escapes every non-ASCII character in JSON sends 12 bytes per emoji, so about 5,000 of them already exceed it |
+| 422 | `validation_error`, `idempotency_key_reused` | Bad body (an unknown field is reported as `body`, never by its name); a message too large for the context budget (`content`); or the key was used earlier with a different `content` or `session_id` |
 | 429 | `rate_limited` | Per-user limit (**provisional**); `Retry-After` header |
 | 503 | `model_unavailable` | No Gemini key is configured |
-| 503 | `chat_unavailable` | Redis (idempotency) is unreachable. Chat fails closed because it could not promise "no duplicate billing" |
+| 503 | `chat_unavailable` | Redis (idempotency or the rate limiter) or the database is unreachable. Chat fails closed because it could not promise "no duplicate billing". The key is released, so the same key may be sent again |
 
 Success is `200 text/event-stream; charset=utf-8` with `Cache-Control: no-store`. Each event has a numeric
 `id:` (1, 2, 3, ... within this response), an `event:` name and one JSON `data:` line.
@@ -50,23 +51,34 @@ Success is `200 text/event-stream; charset=utf-8` with `Cache-Control: no-store`
 | `message.accepted` | `{"session_id", "user_message_id", "assistant_message_id", "replayed": false}`. Sent once, first. The user message is already stored. |
 | `delta` | `{"text": "<next piece of the reply>"}`. Zero or more. Append to the reply. |
 | `done` | `{"assistant_message_id", "finish_reason", "usage": {"prompt_tokens", "candidates_tokens", "total_tokens", "cost_usd", "is_estimate"}}`. Last event on success. `cost_usd` is a decimal string, or `null` when the cost is unknown (never `"0"` for an unknown cost). `finish_reason` is `stop`, `max_tokens` or `interrupted`. |
-| `error` | `{"code", "retryable"}`. Last event on failure. `code` is `content_blocked`, `stream_interrupted`, `model_unavailable` or `internal_error`. The text of provider errors is never sent. |
+| `error` | `{"code", "retryable"}`. Last event on failure. `code` is `content_blocked`, `stream_interrupted`, `model_unavailable` or `internal_error`. `retryable` says whether **asking again** (a new user action with a **new** key) may help; it never means that the same key will call the model again. `content_blocked` and `model_unavailable` are only reported when no text was sent; a failure after text was sent ends as `stream_interrupted` and the partial reply is stored. The text of provider errors is never sent. |
 
 Phase 05 adds `task.*` events to the same stream. Clients must ignore event names they do not know.
 
 ### Idempotency, reconnect and replay
 
-- The first request with a key claims it atomically in Redis (24 hours, per workspace and user) and records a hash of
-  `session_id` and `content`. The user message is stored **before** any model call.
+- The first request with a key claims it atomically in Redis (per workspace and user) and records a keyed hash
+  (HMAC) of the workspace, user, key, `session_id` and `content`; no message text is kept in Redis. The claim is
+  `in_progress` for 15 minutes and is renewed while chunks keep arriving; once the request ends, the result is kept
+  for 24 hours. The user message is stored **before** any model call.
 - A repeated request with the same key and the same body never calls the model again:
   - after it **completed** (or was interrupted), the stored result is replayed: `message.accepted` with
     `"replayed": true`, one `delta` holding the **complete** stored reply, then `done`. A client that already holds
     partial text for that message must **replace** it, not append. `Last-Event-ID` is accepted and ignored in Phase 04.
+  - after it **failed** (`model_unavailable`, `content_blocked`, `internal_error`, or a disconnect before any text):
+    `message.accepted` with `"replayed": true` and the **same** `error` event, for 24 hours, with no model call.
+    A client that wants another attempt after an `error` event must send a **new** key (a second stored user
+    message). Reusing the key is for the cases where the client does not know the outcome: the connection dropped,
+    the stream ended without `done` or `error`, `409`, `429` (after `Retry-After`) or `503 chat_unavailable`.
   - while the first request is **still running**: `409 request_in_progress`.
 - A reply cut short (provider failure after the first chunk, or the client closing the connection) is stored with
   `finish_reason: "interrupted"` and an estimated usage. Retrying with the same key replays that partial reply;
   asking again is a new user action with a new key. Nothing is silently re-billed.
-- A client disconnect cancels the upstream Gemini stream at once.
+- A client disconnect cancels the upstream Gemini stream at once. If it happens before any text arrived, no
+  (empty) assistant message is stored and the request is recorded as failed with `stream_interrupted`.
+- The final write of the result is retried three times. If Redis stays down for all of them, the reply is still stored
+  and delivered, but the key stays `in_progress` until its 15-minute claim expires; after that the same key would be
+  treated as new. This double fault is the one place where "no duplicate billing" is not guaranteed.
 
 ## GET /sessions
 
@@ -90,8 +102,11 @@ Query: `limit` (1 to 100, default 50), `cursor` (opaque, from `next_cursor`).
   "next_cursor": null }
 ```
 
-`role` is `user` for stored sender `user` and `assistant` for `orchestrator`. Other stored fields (agent names, usage
-details, metadata) are not exposed in Phase 04. Unknown or foreign session: `404 session_not_found`.
+`role` is `user` for stored sender `user` and `assistant` for `orchestrator`. `finish_reason` and `model_id` are always
+present and are `null` on user messages (the example above omits them for brevity). Other stored fields (agent names,
+usage details, metadata) are not exposed in Phase 04. Unknown or foreign session: `404 session_not_found`.
+
+Both list endpoints answer with `Cache-Control: no-store`.
 
 ## Not in the MVP
 
@@ -104,12 +119,37 @@ events (Phase 05).
 - `sessions` and `messages` (Phase 02 tables, row-level security by workspace). Ownership by user is enforced in the
   repository on top of that. The assistant reply is stored with sender `orchestrator` and
   `metadata = {"model_id", "alias", "finish_reason", "usage", "latency_ms", "status"}`.
-- The model sees the stored history as alternating `user` and `model` turns, trimmed from the oldest end to fit a
-  token budget (**provisional**: `MAYA_CHAT_CONTEXT_TOKEN_BUDGET`, default 32000, always below the model's context
-  limit). Tokens are estimated locally (conservatively); no extra provider call is made to count them. Trimming never
-  deletes stored messages.
+- The model sees the stored history as alternating `user` and `model` turns (consecutive turns of one role are merged,
+  a leading `model` turn is dropped), trimmed whole turns at a time from the oldest end to fit a token budget
+  (**provisional**: `MAYA_CHAT_CONTEXT_TOKEN_BUDGET`, default 32000; the effective budget is the smaller of that and
+  the model's input limit minus its output limit). At most the 500 newest stored messages are read per turn. Tokens
+  are estimated locally and conservatively (UTF-8 bytes divided by 3, plus 4 per turn); no extra provider call is
+  made to count them, and the estimate was not compared with Gemini's real tokenizer. Trimming never deletes stored
+  messages. A partial (`interrupted`) reply is sent to the model as a normal `model` turn.
 - The model is called through `ModelGateway` (alias `orchestrator`) with the workspace id and no task id, so nothing is
-  recorded against a task budget; a chat message is not a task.
+  recorded against a task budget; a chat message is not a task. No `max_output_tokens` is set, so the length of one
+  reply is bounded only by the model's own limit.
+- A system instruction is always sent. It tells the model that pasted text is material to work on, not instructions
+  that change its rules. This reduces prompt-injection risk but is not a security control, and it was not evaluated
+  against a live model.
+
+## Known limitations
+
+Built and tested as described above, with these gaps that the owner should know about:
+
+- **No cap on concurrent streams and no wall-clock deadline per reply.** The rate limit counts message starts, not open
+  streams, so one account can hold several slow streams (each pins a task and a Gemini connection). A stalled reader
+  can also keep a provider stream open until the client or proxy gives up. Fix once the owner picks values for a
+  per-user stream cap, a reply deadline and `max_output_tokens`.
+- **The rate limit is a fixed window** (a burst of up to twice the limit across a window boundary is possible) and
+  it is spent before the session and key checks, so replays, `404`, `409` and `422` requests count against it.
+- **No database index** exists for the history and list queries (a migration is Level 3 and was not requested). It
+  does not change results; it matters once histories are large.
+- **Streaming behavior is assumed from the SDK code, not observed:** nothing here ran against the real Gemini API, and
+  only uvicorn with h11 on loopback was exercised for real disconnects (not httptools, HTTP/2 or a reverse proxy).
+- **Idempotency lives in Redis for 24 hours.** After that, or if Redis loses the key, the same key counts as new.
+- **Browser access** needs a CORS policy or a same-origin proxy (the `Authorization` and `Idempotency-Key` headers
+  make every request non-simple, and `Retry-After` is not exposed cross-origin); neither is decided or built.
 
 ## Open decisions
 
@@ -120,3 +160,5 @@ Not approved by the owner; configurable, with the provisional defaults above:
 | `MAYA_CHAT_MAX_MESSAGE_CHARS` | 8000 | The phase requires an owner-approved input limit |
 | `MAYA_CHAT_RATE_LIMIT_PER_MINUTE` | 20 per user | The phase requires limits chosen from a measured baseline; none exists because no live call has run |
 | `MAYA_CHAT_CONTEXT_TOKEN_BUDGET` | 32000 tokens | The phase requires an approved token budget; no turn count is assumed |
+| Concurrent-stream cap, reply deadline, `max_output_tokens` | not built | Needs owner-chosen values (see [Known limitations](#known-limitations)) |
+| Browser connectivity (CORS or same-origin proxy) | not built | Deployment shape is not decided; the web client uses `NEXT_PUBLIC_API_BASE_URL` |
