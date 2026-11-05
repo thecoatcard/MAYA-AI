@@ -50,7 +50,7 @@ live item remains unverified, so this is not full original-scope acceptance.
 
 ### Phase 02 — Authentication, Users, Workspaces & Database Security
 
-Evidence for the items below is the [verification record](../testing/AUTH_AND_RLS.md): 864 backend tests passed with local PostgreSQL and Redis, strict lint and types clean; the persistent local database was migrated and the real API probed against it. Not verified in GitHub CI (the workflow has never run). Real SMTP delivery and the account flows were verified by the owner (reported 2026-11-05, not agent-observed).
+Evidence for the items below is the [verification record](../testing/AUTH_AND_RLS.md): 864 backend tests passed with local PostgreSQL and Redis, strict lint and types clean; the persistent local database was migrated and the real API probed against it. Not verified in GitHub CI (no run has been observed yet). Real SMTP delivery and the account flows were verified by the owner (reported 2026-11-05, not agent-observed).
 
 - [x] Alembic migration creates the schema in [`MAYA_AI_FINAL_PLAN.md`](../../MAYA_AI_FINAL_PLAN.md) §14 plus the owner-required OTP challenge storage; table count and RLS coverage are explicitly verified (the plan has 12 listed tables, 11 tenant-scoped; the implementation has 14 tables, all with forced RLS: the plan's 12 plus `auth_otp_challenges` and `auth_sessions`).
 - [x] Row-Level Security policies active and forced across all tenant tables via `app.workspace_id` (transaction-local; restricted non-owner `maya_app` role; startup guard refuses a privileged runtime role).
@@ -62,7 +62,7 @@ Evidence for the items below is the [verification record](../testing/AUTH_AND_RL
 - [x] Plan-defined `audit_log` table scope is verified; workspace-less pre-authentication events are not recorded in the database (log-only) until the Phase 07 writer exists.
 - [x] The security review's findings are dispositioned in the [security document](../security/AUTHENTICATION.md#decisions-on-the-reviews-remaining-findings-owner-2026-11-05): pre-hijacking fixed (verification needs the password), composite foreign keys implemented, migrator privileges tested; ADR-0005 and ADR-0006 accepted.
 - [x] Owner's run of the SMTP check tool against the real mail account and manual registration, verification and login through the running API (reported by the owner on 2026-11-05).
-- [ ] First GitHub CI run of the updated workflow (it has never run; there is no GitHub remote).
+- [ ] First GitHub CI run of the updated workflow observed (the remote exists since 2026-11-05; the result has not been seen, and the `dependency-review` job may need GitHub Advanced Security on a private repository).
 
 Phase 02 does not implement the secrets vault or audit-chain enforcement. Their owning phase must be reconciled before those controls are scheduled.
 

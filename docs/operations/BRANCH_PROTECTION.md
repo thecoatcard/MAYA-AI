@@ -1,6 +1,17 @@
 # Branch protection and required checks
 
-Local Git hooks can be skipped, and agent permission rules are advisory. The real gate is CI plus branch protection on the hosting platform. **This is a manual step**: it needs administrator access to a remote repository, and none exists yet for this project. Do this when the repository is first pushed to GitHub.
+Local Git hooks can be skipped, and agent permission rules are advisory. The real gate is CI plus branch protection on the hosting platform. **Configuring it is a manual step** that needs administrator access to the remote repository.
+
+## Current status (recorded 2026-11-05): not enforceable on this repository
+
+The repository exists on GitHub (`thecoatcard/MAYA-AI`, private). GitHub told the owner on 2026-11-05 that rulesets are **not enforced on this private repository until it moves to a GitHub Team organization account**. The owner's decision (option A) is to stay private on the current plan for now. Until that changes:
+
+- The table below is the **target configuration**, not the current state. Nothing on the server stops a direct push to `main`, a force-push, a merge with failing checks, or a merge without review.
+- What stands in for it: the repository Git hooks (skippable with `--no-verify`), the CI workflows (they run and report, but cannot be made required), the agent `ask` rules in `.claude/settings.json` (advisory), and the owner's own discipline: work on a branch, let CI run, and merge only when it passes.
+- Agents never push or merge to `main` on their own initiative. Merging to `main` needs the owner's explicit request in the current conversation, and a commit that touches a guardrail path still needs a `Human-Approval:` trailer.
+- CODEOWNERS is not committed and would not be enforced on this plan either.
+- The `dependency-review` job needs GitHub Advanced Security on private repositories (see Prerequisites), so it may fail or be unavailable here. Its first result has not been observed; record it in the verification record once seen.
+- **Trigger to revisit:** a second contributor, a hosted deployment, or any real user data. Then move to a plan that enforces rulesets (or make the repository public after reviewing what that exposes), apply the table below, and record the date and verifier under "Verify it works".
 
 ## Prerequisites
 

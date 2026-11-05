@@ -3,13 +3,13 @@
 ## Phase 02 update (2026-11-05)
 
 Phase 02 (14-table schema with forced row-level security and composite foreign keys, restricted runtime role, own-account
-authentication) is **implemented and tested locally** on branch `feat/phase-02-auth-database-security` (committed locally,
-not pushed), under the owner's recorded dependency-gate exception (the extended Gemini continuity item stays open). Start with
+authentication) is **implemented and tested locally** on branch `feat/phase-02-auth-database-security` (pushed to the GitHub remote and merged into `main`
+on 2026-11-05; branch protection is not enforceable on the current private repository plan), under the owner's recorded dependency-gate exception (the extended Gemini continuity item stays open). Start with
 the [verification record](../testing/AUTH_AND_RLS.md), the [security document](../security/AUTHENTICATION.md) (with the
 decisions on the security review) and ADR-0005/0006 (Accepted). The persistent local database is migrated (revision 0004,
 empty). The owner reported (2026-11-05) that the SMTP check (`python -m app.tools.smtp_smoke`) and the registration,
-verification and login flows work against the real mail account. Still open: the workflow has never run in GitHub CI
-(there is no remote).
+verification and login flows work against the real mail account. Still open: no agent has observed a GitHub CI run of the
+workflow yet.
 
 ## Current implementation update (2026-11-05)
 
@@ -81,7 +81,7 @@ Entry point for a **new chat or a new AI agent**. It tells you where the project
 | Area                         | State                                                                                                                                                                                                                  |
 | :--------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Governance system (Phase 00) | Implemented and tested locally: rules, hooks, validators, 59 generated agent files, CI workflows. One commit by the owner (`304dcdc`).                                                                                 |
-| CI                           | Written but **never run** on GitHub: there is no remote repository yet.                                                                                                                                                |
+| CI                           | Written; the GitHub remote exists since 2026-11-05 but no run has been observed yet. Not a required check (see BRANCH_PROTECTION.md).                                                                                                                                                |
 | ADRs 0001 and 0002           | Still "Proposed"; the owner has not accepted them.                                                                                                                                                                     |
 | Application code             | **None.** Phase 01 has not started.                                                                                                                                                                                    |
 | This reorganisation          | The implementation documents were moved into `docs/implementation/` and their links made relative. Not yet committed.                                                                                                  |

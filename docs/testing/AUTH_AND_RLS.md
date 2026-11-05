@@ -32,7 +32,7 @@ to drop anything that does not match that name. Seeding uses the administrator, 
 | `ruff check`, `ruff format --check`, strict `mypy` over app and tests | clean (101 source files) |
 | Disposable databases and probe roles left behind | 0 |
 
-The suite also passed when its modules were run in reverse order. GitHub CI has never run (no remote), so none of
+The suite also passed when its modules were run in reverse order. No GitHub CI result has been observed yet (the repository was pushed on 2026-11-05), so none of
 this is CI-verified.
 
 ## What is covered
@@ -78,8 +78,10 @@ this is CI-verified.
 
 ## What is not verified
 
-- GitHub CI: the workflow now provisions PostgreSQL, Redis, Python and the web dependencies, but it has never run
-  (there is no remote), so it is written and linted only.
+- GitHub CI: the workflow now provisions PostgreSQL, Redis, Python and the web dependencies, but no agent has
+  observed a run yet (the remote exists since 2026-11-05), so it is written and linted only. Branch protection is not
+  enforceable on the current private repository plan (see `docs/operations/BRANCH_PROTECTION.md`), so a CI result
+  is advisory until the plan changes.
 - Real SMTP delivery by an agent: no agent contacted a mail server; the tool's logic is covered by tests with a mocked mail
   library. **Owner-reported (2026-11-05):** the owner ran the SMTP check tool against the real mail account, received the
   message, and registered, verified (code and password), logged in and used the other documented flows through the running

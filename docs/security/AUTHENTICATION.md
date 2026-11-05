@@ -3,7 +3,7 @@
 **Status:** implemented and tested locally (deterministic tests plus real PostgreSQL and
 Redis), then reviewed by an independent read-only security reviewer whose confirmed findings
 were fixed (see "Review history" below). The CI workflow now provisions PostgreSQL and Redis, but
-GitHub CI has never run (no remote). On 2026-11-05 the owner reported running the SMTP check tool
+No agent has yet observed a GitHub CI result (the repository was pushed on 2026-11-05, and the first workflow run is still unseen). On 2026-11-05 the owner reported running the SMTP check tool
 against the real mail account and registering, verifying and logging in through the running API with real
 e-mail; no agent observed this and no evidence file was kept. Decisions: [ADR-0005](../adr/0005-own-account-authentication.md)
 and [ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md). Endpoint contract:

@@ -32,7 +32,7 @@ A check result of `SKIPPED` means it did not run; it is not a pass. Details: [do
 
 - **One source of truth:** [AGENTS.md](AGENTS.md) holds the rules every AI agent follows; [governance/](governance/README.md) holds the detailed policies, 12 reusable workflows and 9 development roles.
 - **Per-tool entry points** are thin and mostly generated: see [docs/governance/AI_AGENT_COMPATIBILITY.md](docs/governance/AI_AGENT_COMPATIBILITY.md) for what each tool reads, verified against vendor documentation.
-- **Enforcement** is in the repository, not in any one agent: Git hooks ([scripts/hooks](scripts/hooks)) and GitHub Actions run the same validators. Hooks can be bypassed locally, so CI and branch protection ([docs/operations/BRANCH_PROTECTION.md](docs/operations/BRANCH_PROTECTION.md)) are the real gate.
+- **Enforcement** is in the repository, not in any one agent: Git hooks ([scripts/hooks](scripts/hooks)) and GitHub Actions run the same validators. Hooks can be bypassed locally, so CI and branch protection ([docs/operations/BRANCH_PROTECTION.md](docs/operations/BRANCH_PROTECTION.md)) are meant to be the real gate; branch protection is not enforceable on the current private repository plan, so merging to `main` relies on the owner acting on CI results.
 - **Documentation ships with code**, decisions are recorded as [ADRs](docs/adr/README.md), and non-trivial changes end with a change report ([template](templates/change-report/TEMPLATE.md)).
 
 ## Where to look
