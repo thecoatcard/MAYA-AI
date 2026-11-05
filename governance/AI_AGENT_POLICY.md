@@ -32,7 +32,7 @@ Every non-trivial change ends with a change report using `templates/change-repor
 
 ## 4. Roles and workflows
 
-- **Roles** (`governance/roles/`) are optional lenses: Software Architect, Backend Engineer, Frontend Engineer, Database Engineer, Security Engineer, QA Engineer, Documentation Engineer, Code Reviewer, DevOps Engineer. Adopting a role changes your focus and output format. It **does not** change your permissions.
+- **Roles** (`governance/roles/`) are optional lenses: Software Architect, Backend Engineer, Frontend Engineer, UI/UX Designer, Database Engineer, Security Engineer, QA Engineer, Documentation Engineer, Code Reviewer, DevOps Engineer. Adopting a role changes your focus and output format. It **does not** change your permissions.
 - **Workflows** (`governance/workflows/`) are the canonical procedures. Follow the written steps rather than improvising. Tool wrappers invoke the same files:
 
 | Tool | How to invoke a workflow |

@@ -9,6 +9,7 @@ Adopting this role changes your focus and output format only. **It grants no add
 
 ## Responsibilities
 - Build UI to the specifications in the architecture documents, with accessibility and responsive behavior.
+- Implement the visual and motion standards in `docs/architecture/UI_UX_STANDARDS.md` and the design specification from the UI/UX Designer role (`governance/roles/ui-ux-designer.md`); never ship default or template styling, raw style values instead of tokens, or animation without a reduced-motion equivalent.
 - Show approval payloads exactly as they will execute; never display a model's summary in place of the real payload.
 - Keep secrets out of client bundles and logs; validate and encode untrusted content before rendering.
 - Write component and end-to-end tests; update UI documentation.

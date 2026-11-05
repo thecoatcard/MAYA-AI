@@ -24,7 +24,7 @@
 - **Required Infrastructure:** Node.js 22+; running FastAPI backend exposing REST, WebSocket, and SSE endpoints.
 - **Required Credentials or External Services:** None.
 - **Required Architectural Decisions:** [`MAYA_AI_FINAL_PLAN.md`](../../../MAYA_AI_FINAL_PLAN.md) §16 (Three Core Surfaces) and §11.2 (Exact-payload review cards).
-- **Required Documentation:** [`docs/architecture/SYSTEM_OVERVIEW.md`](../../architecture/SYSTEM_OVERVIEW.md).
+- **Required Documentation:** [`docs/architecture/SYSTEM_OVERVIEW.md`](../../architecture/SYSTEM_OVERVIEW.md) and the [UI/UX standards](../../architecture/UI_UX_STANDARDS.md) (look, feel, motion and the pass/fail review gate). Start with a design brief and two directions for the owner to choose from before building any surface. Design work uses the UI/UX Designer role (`governance/roles/ui-ux-designer.md`).
 
 ---
 

@@ -20,5 +20,8 @@ Development and production-start scripts bind to loopback. The page uses system
 fonts and does not contact the backend, a model provider or an external font service.
 No application environment variables are read by this scaffold.
 
+Look, feel and motion follow the [UI/UX standards](../../docs/architecture/UI_UX_STANDARDS.md); local agent rules
+for this folder are in [AGENTS.md](AGENTS.md). The current page is a plain foundation scaffold, not the product design.
+
 Vitest and Testing Library cover the rendered page, roadmap states and navigation.
 The [test strategy](../../docs/testing/FOUNDATION.md) describes the verification boundary.

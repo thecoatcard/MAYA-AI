@@ -29,7 +29,7 @@ If two sources conflict, follow the higher one and report the conflict in the ch
 | [TOOL_PERMISSIONS.md](TOOL_PERMISSIONS.md) | The four permission levels and how each tool enforces them |
 | [governance.config.json](governance.config.json) | Machine-readable policy used by the validators |
 | [workflows/](workflows/) | The 12 reusable procedures |
-| [roles/](roles/) | The 9 optional development roles |
+| [roles/](roles/) | The 10 optional development roles |
 
 ## How the rules are enforced
 
