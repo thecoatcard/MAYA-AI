@@ -30,6 +30,15 @@ When code starts reading an environment variable:
 | `MAYA_SMTP_USERNAME` | SMTP login; set together with the password | No | Set privately |
 | `MAYA_SMTP_PASSWORD` | SMTP password or app password; never logged | No | Set privately |
 | `MAYA_SMTP_FROM_ADDRESS` | Sender address; set together with the host | No | Placeholder in the root example (commented) |
+| `MAYA_GEMINI_API_KEY` | Gemini API key; optional in local tests, never logged | No | Commented placeholder `example-gemini-key-not-real` |
+| `MAYA_GEMINI_MODEL_OVERRIDES` | JSON dict overriding model IDs for enabled REST aliases only | No; defaults to empty `{}` | `{}` |
+| `MAYA_GEMINI_VERIFY_MODELS_ON_STARTUP` | Whether to query models.list at startup; disabled by default and in tests | No; defaults to false | `false` |
+| `MAYA_GEMINI_REQUEST_TIMEOUT_SECONDS` | Gateway per-request timeout in seconds | No; defaults to 30.0, between 0 and 300 | `30.0` |
+| `MAYA_BUDGET_ENFORCEMENT_MODE` | Budget mode: `log_only` records usage and alerts; `enforce` stops execution | No; defaults to `log_only` | `log_only` |
+| `MAYA_GEMINI_BUDGET_TASK_USD_ALERT` | Per-task spending alert threshold (USD); proposal only | No; defaults to 1.50 | `1.50` |
+| `MAYA_GEMINI_MAX_TOOL_TURNS_ALERT` | Per-task tool turns alert threshold; proposal only | No; defaults to 10 | `10` |
+| `MAYA_GEMINI_BUDGET_TASK_USD_CAP` | Per-task hard budget cap (USD); required when enforcement mode is `enforce` | No; required in `enforce` mode | None |
+| `MAYA_GEMINI_MAX_TOOL_TURNS_CAP` | Per-task hard tool turn cap; required when enforcement mode is `enforce` | No; required in `enforce` mode | None |
 | `POSTGRES_DB` | Compose development database | Compose | `maya` |
 | `POSTGRES_USER` | Compose bootstrap administrator, not the API login | Compose | `maya_migrator` |
 | `POSTGRES_PASSWORD` | Bootstrap password, only a non-secret local example is tracked | Compose | Set privately outside local testing |

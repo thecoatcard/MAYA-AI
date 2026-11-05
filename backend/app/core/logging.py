@@ -55,6 +55,8 @@ def configure_logging(settings: Settings) -> None:
     )
     if settings.smtp_password is not None:
         secrets.append(settings.smtp_password.get_secret_value())
+    if settings.gemini_api_key is not None:
+        secrets.append(settings.gemini_api_key.get_secret_value())
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter(tuple(secrets)))
     logger = logging.getLogger("maya")

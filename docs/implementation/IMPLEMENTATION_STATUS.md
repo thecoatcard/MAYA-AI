@@ -18,7 +18,7 @@
 | [`Phase 00`](IMPLEMENTATION_PHASES/PHASE_00_GOVERNANCE.md)             | Project Governance & Development Environment          | **Implemented locally; CI unverified** | 2026-11-05      | Last recorded fast check: 7 passed, 1 skipped; GitHub CI has not run; ADRs 0001 and 0002 remain Proposed |
 | [`Phase 01`](IMPLEMENTATION_PHASES/PHASE_01_FOUNDATION.md) | Core Infrastructure & Application Foundation | **Implemented/Tested locally; extended live evidence pending** | Local closure: 2026-11-05 | Foundation, S1/S2 and short S3/S4 smoke verified. ADR-0003 Accepted. Owner revised scope to free-only; long-session/continuity still pending |
 | [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **Implemented/Tested locally** | Local: 2026-11-05 | 864 backend tests with local PostgreSQL/Redis, strict lint and types; see the [verification record](../testing/AUTH_AND_RLS.md). Started under the owner's gate exception. Persistent local database migrated; ADR-0005/0006 accepted. Not CI-verified (the workflow has never run). The owner reported (2026-11-05) that the SMTP check, e-mail delivery, registration, verification and login all work against the real mail account |
-| [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **NOT_STARTED**                        | Projected       | Dependent on Phase 01                                                                                    |
+| [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **IN_PROGRESS (under owner gate exception)** | Projected       | In progress under owner dependency-gate exception (2026-11-05); exit gate blocked on O6 budget caps |
 | [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03; public SSE/session contract requires owner decision                           |
 | [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03                                                                                |
 | [`Phase 06`](IMPLEMENTATION_PHASES/PHASE_06_BACKGROUND_TASK_ENGINE.md) | Background Task Execution Engine                      | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 05                                                                                |
@@ -36,6 +36,14 @@
 ---
 
 ## 2. Owner Decisions and Open Questions
+
+**Phase 03 dependency-gate exception (2026-11-05).** "Owner decision: I grant a
+dependency-gate exception for Phase 03 planning and implementation only, while the Phase 01
+extended Gemini continuity evidence stays open. It does not cover Phase 12 or any paid or
+live Gemini call." Scope: Phase 03 planning and implementation only. It does not cover Phase 12
+or any paid or live Gemini call. Phase 01 stays "Implemented/Tested locally; extended live
+evidence pending". Phase 03 uses mock/fake clients and deterministic tests only; paid calls
+remain strictly blocked until a provider-enforced INR 100 cap is verified.
 
 **Phase 02 dependency-gate exception (2026-11-05).** The owner permitted Phase 02
 (authentication, database and RLS) implementation while the Phase 01 item

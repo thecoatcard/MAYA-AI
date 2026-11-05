@@ -1,11 +1,14 @@
 import re
-from typing import Literal, Self
+from decimal import Decimal
+from typing import Any, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from app.gateway.registry import ALLOWED_OVERRIDE_ALIASES, MODEL_ID_PATTERN
 
 MIN_SECRET_KEY_BYTES = 32
 SENDER_ADDRESS = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$")
@@ -61,6 +64,17 @@ class Settings(BaseSettings):
     smtp_from_address: str | None = Field(default=None, max_length=320)
     smtp_security: Literal["starttls", "ssl"] = "starttls"
 
+    # Model Gateway (Phase 03)
+    gemini_api_key: SecretStr | None = None
+    gemini_model_overrides: dict[str, str] = Field(default_factory=dict)
+    gemini_verify_models_on_startup: bool = False
+    gemini_request_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    budget_enforcement_mode: Literal["log_only", "enforce"] = "log_only"
+    gemini_budget_task_usd_alert: Decimal = Field(default=Decimal("1.50"), ge=0)
+    gemini_max_tool_turns_alert: int = Field(default=10, ge=1)
+    gemini_budget_task_usd_cap: Decimal | None = Field(default=None, gt=0)
+    gemini_max_tool_turns_cap: int | None = Field(default=None, ge=1)
+
     @field_validator("jwt_signing_key", "otp_hmac_key")
     @classmethod
     def validate_secret_keys(cls, value: SecretStr) -> SecretStr:
@@ -73,6 +87,33 @@ class Settings(BaseSettings):
             raise ValueError("Invalid sender address")
         return value
 
+    @field_validator("gemini_api_key", mode="before")
+    @classmethod
+    def validate_gemini_api_key(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            if not value.strip():
+                return None
+            return SecretStr(value)
+        if isinstance(value, SecretStr):
+            if not value.get_secret_value().strip():
+                return None
+        return value
+
+    @field_validator("gemini_model_overrides")
+    @classmethod
+    def validate_model_overrides(cls, value: dict[str, str]) -> dict[str, str]:
+        for alias, model_id in value.items():
+            if alias not in ALLOWED_OVERRIDE_ALIASES:
+                raise ValueError(
+                    f"Invalid model override alias '{alias}'. Only enabled REST aliases "
+                    f"can be overridden: {sorted(ALLOWED_OVERRIDE_ALIASES)}"
+                )
+            if not MODEL_ID_PATTERN.fullmatch(model_id):
+                raise ValueError(f"Invalid model_id '{model_id}' for alias '{alias}' in overrides")
+        return value
+
     @model_validator(mode="after")
     def validate_authentication_settings(self) -> Self:
         if self.jwt_signing_key.get_secret_value() == self.otp_hmac_key.get_secret_value():
@@ -83,6 +124,16 @@ class Settings(BaseSettings):
             raise ValueError("Configure the SMTP host and sender address together")
         if (self.smtp_username is None) != (self.smtp_password is None):
             raise ValueError("Configure the SMTP username and password together")
+        return self
+
+    @model_validator(mode="after")
+    def validate_budget_settings(self) -> Self:
+        if self.budget_enforcement_mode == "enforce":
+            if self.gemini_budget_task_usd_cap is None or self.gemini_max_tool_turns_cap is None:
+                raise ValueError(
+                    "Configure gemini_budget_task_usd_cap and gemini_max_tool_turns_cap "
+                    "when budget_enforcement_mode='enforce'"
+                )
         return self
 
     @property
