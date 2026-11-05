@@ -1,7 +1,13 @@
 import json
 import logging
 
-from app.core.logging import JsonFormatter, request_id_context, trace_id_context
+from app.core.logging import (
+    JsonFormatter,
+    configure_logging,
+    request_id_context,
+    trace_id_context,
+)
+from tests.support.settings import JWT_KEY, OTP_KEY, make_settings
 
 
 def test_json_logging_redacts_secrets_and_urls() -> None:
@@ -20,6 +26,15 @@ def test_json_logging_redacts_secrets_and_urls() -> None:
     assert "abc123" not in output
     assert "maya:example" not in output
     assert json.loads(output)["level"] == "ERROR"
+
+
+def test_configured_authentication_secrets_are_redacted() -> None:
+    settings = make_settings(smtp_username="mailer", smtp_password="smtp-fake-password")
+    configure_logging(settings)
+    handler = logging.getLogger("maya").handlers[0]
+    for secret in (JWT_KEY, OTP_KEY, "smtp-fake-password"):
+        record = logging.LogRecord("maya", logging.ERROR, "", 1, f"leak {secret}", (), None)
+        assert secret not in handler.format(record)
 
 
 def test_exception_message_is_not_serialized() -> None:

@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import Settings
 from app.core.redis import create_redis_client
 from app.db.session import create_database_engine
+from app.db.tenant import verify_runtime_role
 
 logger = logging.getLogger("maya")
 
@@ -37,6 +38,15 @@ class Resources:
         except DependencyUnavailable:
             logger.error("dependency_probe_failed")
             raise
+
+    async def verify_runtime_role(self) -> None:
+        """Startup guard: the API must run as the restricted role (see ``app.db.tenant``)."""
+        try:
+            async with asyncio.timeout(self.timeout):
+                await verify_runtime_role(self.engine)
+        except (SQLAlchemyError, PostgresError, OSError, TimeoutError):
+            logger.error("dependency_probe_failed")
+            raise DependencyUnavailable() from None
 
     async def close(self) -> None:
         try:

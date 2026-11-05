@@ -1,5 +1,15 @@
 # Start here: continuing MAYA AI implementation
 
+## Phase 02 update (2026-11-05)
+
+Phase 02 (14-table schema with forced row-level security and composite foreign keys, restricted runtime role, own-account
+authentication) is **implemented and tested locally** on branch `feat/phase-02-auth-database-security` (committed locally,
+not pushed), under the owner's recorded dependency-gate exception (the extended Gemini continuity item stays open). Start with
+the [verification record](../testing/AUTH_AND_RLS.md), the [security document](../security/AUTHENTICATION.md) (with the
+decisions on the security review) and ADR-0005/0006 (Accepted). The persistent local database is migrated (revision 0004,
+empty). Still open: the workflow has never run in GitHub CI, and the owner has not yet run the SMTP check
+(`python -m app.tools.smtp_smoke`) against the real mail account, so no real e-mail has been sent.
+
 ## Current implementation update (2026-11-05)
 
 The Phase 01 local implementation scope is **implemented and tested**, with a

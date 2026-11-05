@@ -6,8 +6,8 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.exc import OperationalError
 
-from app.core.config import Settings
 from app.core.resources import DependencyUnavailable, Resources
+from tests.support.settings import make_settings
 
 
 @pytest.fixture
@@ -24,10 +24,7 @@ def resources() -> Iterator[tuple[Resources, MagicMock, AsyncMock]]:
         redis = AsyncMock()
         redis.ping.return_value = True
         redis_factory.return_value = redis
-        settings = Settings(
-            database_url="postgresql+asyncpg://maya_app:example-only@localhost/maya",
-            redis_url="redis://localhost/0",
-        )
+        settings = make_settings()
         yield Resources(settings), engine, redis
 
 

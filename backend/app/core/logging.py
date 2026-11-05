@@ -50,6 +50,11 @@ def configure_logging(settings: Settings) -> None:
     if settings.migration_database_url is not None:
         migration_url = settings.migration_database_url.get_secret_value()
         secrets.extend((migration_url, make_url(migration_url).password or ""))
+    secrets.extend(
+        (settings.jwt_signing_key.get_secret_value(), settings.otp_hmac_key.get_secret_value())
+    )
+    if settings.smtp_password is not None:
+        secrets.append(settings.smtp_password.get_secret_value())
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter(tuple(secrets)))
     logger = logging.getLogger("maya")

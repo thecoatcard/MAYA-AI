@@ -2,12 +2,12 @@
 
 | Metric               | Status                                                                                                                                   |
 | :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| **Current Baseline** | Phase 00 governance plus Phase 01 local API/web/data-service foundation |
-| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending |
+| **Current Baseline** | Phase 00 governance, Phase 01 local foundation, and Phase 02 schema/RLS/authentication implemented locally on branch `feat/phase-02-auth-database-security` (committed locally, not pushed) |
+| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally under the owner's gate exception; CI workflow never run, real SMTP delivery not exercised |
 | **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Short Gemini smoke completed |
 | **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 O6 budget caps; Phase 04 chat contract |
-| **Last Updated**     | 2026-11-05                                                                                                                               |
-| **Repository State** | Local scaffolding and isolated S1/S2 evidence implemented; no application auth, tenant schema, model gateway, chat, agents or voice |
+| **Last Updated**     | 2026-11-05 (Phase 02 implementation)                                                                                                     |
+| **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (applied to disposable test databases and the persistent local database) and own-account authentication; no model gateway, chat, agents or voice |
 
 ---
 
@@ -17,7 +17,7 @@
 | :--------------------------------------------------------------------- | :---------------------------------------------------- | :------------------------------------- | :-------------- | :------------------------------------------------------------------------------------------------------- |
 | [`Phase 00`](IMPLEMENTATION_PHASES/PHASE_00_GOVERNANCE.md)             | Project Governance & Development Environment          | **Implemented locally; CI unverified** | 2026-11-05      | Last recorded fast check: 7 passed, 1 skipped; GitHub CI has not run; ADRs 0001 and 0002 remain Proposed |
 | [`Phase 01`](IMPLEMENTATION_PHASES/PHASE_01_FOUNDATION.md) | Core Infrastructure & Application Foundation | **Implemented/Tested locally; extended live evidence pending** | Local closure: 2026-11-05 | Foundation, S1/S2 and short S3/S4 smoke verified. ADR-0003 Accepted. Owner revised scope to free-only; long-session/continuity still pending |
-| [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **NOT_STARTED**                        | Projected       | Dependent on Phase 01; pre-auth audit and workspace visibility decisions remain                          |
+| [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **Implemented/Tested locally** | Local: 2026-11-05 | 864 backend tests with local PostgreSQL/Redis, strict lint and types; see the [verification record](../testing/AUTH_AND_RLS.md). Started under the owner's gate exception. Persistent local database migrated; ADR-0005/0006 accepted. Not CI-verified (the workflow has never run); real SMTP delivery not exercised by any agent |
 | [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **NOT_STARTED**                        | Projected       | Dependent on Phase 01                                                                                    |
 | [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03; public SSE/session contract requires owner decision                           |
 | [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03                                                                                |
@@ -36,6 +36,32 @@
 ---
 
 ## 2. Owner Decisions and Open Questions
+
+**Phase 02 dependency-gate exception (2026-11-05).** The owner permitted Phase 02
+(authentication, database and RLS) implementation while the Phase 01 item
+"extended Gemini lifetime and resumption/context-continuity evidence" remains
+**open**. Scope: Phase 02 only. Phase 01 stays "Implemented/Tested locally;
+extended live evidence pending" and its checklist item stays unchecked. The
+exception does not cover Phase 03 or Phase 12, which consume Gemini behavior.
+Phase 02 contains no Gemini or voice code, settings or dependencies. The first
+user-run continuity attempt failed (WebSocket close code 1008 after 124 seconds);
+the repaired harness is mock-tested only, so the S3 outcome is unknown.
+The owner also approved the Phase 02 plan's recommended decisions: workspace
+RLS, no `audit_log` writes before the Phase 07 chain writer, a personal workspace
+per account, workspace-level database isolation with repository-level user
+isolation, the proposed token, OTP and rate-limit numbers, and definer-function
+account lookup.
+
+Later the same day the owner chose option A for the pre-hijacking finding (verifying an
+address needs the account's password too), delegated the other review follow-ups to the
+recommendations (composite foreign keys implemented; per-user RLS, recovery denial of service
+and timing deferred or accepted with reasons in the security document; non-superuser
+migration owner tested and fixed), and approved: migrating the persistent `maya` database
+(done: revision 0004, schema-only backup taken first), a local commit with the required
+trailers, a CI workflow with PostgreSQL and Redis service containers (written and linted,
+never run: there is no GitHub remote), a user-run SMTP check tool (written and mock-tested;
+no agent contacted a mail server), and acceptance of ADR-0005 and ADR-0006. **Not approved:
+pushing.**
 
 Latest closure approval (2026-11-05): the owner accepted Celery
 5.6.3/Kombu 5.7.0/redis-py 8.1.0, with mandatory Phase 06 durable cooperative

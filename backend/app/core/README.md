@@ -12,4 +12,9 @@ Resources own the SQLAlchemy engine and Redis client. Startup verifies both serv
 readiness reports an operational failure generically. Cleanup always attempts both pools,
 and unexpected programmer errors and cancellation propagate.
 
+`security.py`, `security_otp.py` and `security_tokens.py` hold the password, one-time-code and JWT primitives;
+`ratelimit.py`, `email.py` and `clock.py` are the Redis limiter, the SMTP sender and the injectable time source used by the
+[authentication module](../auth/README.md). Required settings now include two distinct signing keys of at least 32 bytes;
+the logger redacts them and the SMTP password too.
+
 See the [configuration reference](../../../docs/guides/CONFIGURATION.md).

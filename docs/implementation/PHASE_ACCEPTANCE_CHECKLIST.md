@@ -50,14 +50,18 @@ live item remains unverified, so this is not full original-scope acceptance.
 
 ### Phase 02 — Authentication, Users, Workspaces & Database Security
 
-- [ ] Alembic migration creates the schema in [`MAYA_AI_FINAL_PLAN.md`](../../MAYA_AI_FINAL_PLAN.md) §14 plus the owner-required OTP challenge storage; table count and RLS coverage are explicitly verified (the plan has 12 listed tables, 11 tenant-scoped).
-- [ ] Row-Level Security policies active and forced across all tenant tables via `app.workspace_id`.
-- [ ] Workspace-name and slug visibility is explicitly decided; the plan's `workspaces` table is not among the 11 RLS-scoped tables.
-- [ ] Cross-tenant tests cover both workspace and user boundaries; unauthorized queries return no protected rows.
-- [ ] Own-account registration, email OTP verification, username/password login, email-OTP password recovery/reset, refresh, and logout flows match the owner decisions.
-- [ ] OTP codes are HMAC-stored, short-lived, attempt-limited, single-use, invalidated on resend, rate-limited, never logged, and responses do not reveal whether an email exists.
-- [ ] Password reset revokes all sessions; email events without a workspace have an explicitly designed audit representation.
-- [ ] Plan-defined `audit_log` table scope is verified; workspace-less pre-authentication events are not recorded until their representation is decided.
+Evidence for the items below is the [verification record](../testing/AUTH_AND_RLS.md): 864 backend tests passed with local PostgreSQL and Redis, strict lint and types clean; the persistent local database was migrated and the real API probed against it. Not verified in GitHub CI (the workflow has never run) or with real SMTP delivery.
+
+- [x] Alembic migration creates the schema in [`MAYA_AI_FINAL_PLAN.md`](../../MAYA_AI_FINAL_PLAN.md) §14 plus the owner-required OTP challenge storage; table count and RLS coverage are explicitly verified (the plan has 12 listed tables, 11 tenant-scoped; the implementation has 14 tables, all with forced RLS: the plan's 12 plus `auth_otp_challenges` and `auth_sessions`).
+- [x] Row-Level Security policies active and forced across all tenant tables via `app.workspace_id` (transaction-local; restricted non-owner `maya_app` role; startup guard refuses a privileged runtime role).
+- [x] Workspace-name and slug visibility is explicitly decided: `workspaces` also has RLS, so tenants cannot list each other ([ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md), Proposed).
+- [x] Cross-tenant tests cover the workspace boundary for every table (database-enforced) and the user boundary for the authentication tables (repository-enforced; the database does not separate users inside a workspace, see ADR-0006); unauthorized queries return no protected rows.
+- [x] Own-account registration, email OTP verification, username/password login, email-OTP password recovery/reset, refresh, and logout flows match the owner decisions.
+- [x] OTP codes are HMAC-stored, short-lived, attempt-limited, single-use, invalidated on resend, rate-limited, never logged, and responses do not reveal whether an email exists (one deliberate exception: `403 email_not_verified` after a correct password).
+- [x] Password reset revokes all sessions; email events without a workspace have an explicitly designed audit representation: structured, identifier-free log events now; durable `audit_log` rows from the Phase 07 chain writer.
+- [x] Plan-defined `audit_log` table scope is verified; workspace-less pre-authentication events are not recorded in the database (log-only) until the Phase 07 writer exists.
+- [x] The security review's findings are dispositioned in the [security document](../security/AUTHENTICATION.md#decisions-on-the-reviews-remaining-findings-owner-2026-11-05): pre-hijacking fixed (verification needs the password), composite foreign keys implemented, migrator privileges tested; ADR-0005 and ADR-0006 accepted.
+- [ ] First GitHub CI run of the updated workflow, and the owner's run of the SMTP check tool against the real mail account (neither has happened).
 
 Phase 02 does not implement the secrets vault or audit-chain enforcement. Their owning phase must be reconciled before those controls are scheduled.
 

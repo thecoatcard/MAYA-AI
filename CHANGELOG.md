@@ -4,6 +4,19 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added (Phase 02, owner gate exception recorded in the status document)
+
+- Database schema by four reversible Alembic revisions: the plan's 12 tables plus `auth_otp_challenges` and `auth_sessions`, all 14 with forced row-level security keyed by a transaction-local `app.workspace_id` (including `workspaces`, so tenants cannot list each other); least-privilege grants for the restricted `maya_app` role (no `hashed_password` read, state-column-only updates on the authentication tables, append-only `audit_log` grants); two `SECURITY DEFINER` lookup functions with a fixed `search_path`; a startup guard that refuses to run as a privileged or owning role. Applied only to disposable test databases; the persistent local database is not migrated.
+- Own-account authentication: registration with e-mailed one-time-code verification (the code **and the account's password** are needed, defeating pre-hijacking of an address), username/password login (Argon2id), password recovery by code with all sessions revoked, refresh-token rotation with generation-based replay detection, logout, and `GET /auth/me`; enumeration-identical responses, HMAC-stored single-use attempt-limited codes, Redis rate limits that fail closed, standard-library SMTP over mandatory TLS, and a request-size cap. See `docs/api/AUTH.md`, `docs/security/AUTHENTICATION.md`, ADR-0005 and ADR-0006 (both Proposed).
+- Composite foreign keys on every user/session/task/subtask reference (a cross-workspace reference or cascade is impossible), a migration that also works for a non-superuser owner (testing it found and fixed a real defect), and an owner-run SMTP check tool (`python -m app.tools.smtp_smoke`) with secret-free failure categories.
+- CI: `governance.yml` now starts digest-pinned PostgreSQL 17 and Redis 7.4 service containers, installs the locked backend environment and the web dependencies, and runs with required-service mode, so the service tests cannot be silently skipped. Written and linted only; it has never run.
+- Dependencies (exact pins, resolver-checked, lock changed by additions only): `alembic` 1.20.1, `argon2-cffi` 25.1.0, `pyjwt` 2.15.1, and their transitive packages.
+- 864 backend tests (502 without services); service tests run on disposable `maya_test_*` databases created from the local containers. The persistent local database was migrated (empty) after a schema-only backup, and the real API was probed against it. An independent security review's findings were fixed with regression tests; its dispositions are in the security document. ADR-0005 and ADR-0006 are Accepted. Not CI-verified and no real SMTP delivery was exercised by any agent.
+
+### Changed
+
+- Settings now require `MAYA_JWT_SIGNING_KEY` and `MAYA_OTP_HMAC_KEY` (at least 32 bytes each, different from each other); optional token lifetimes and `MAYA_SMTP_*` settings were added to `.env.example` and the configuration reference. Unknown routes and validation failures now return `{"error": ...}` bodies.
+
 ### Fixed
 
 - Gemini free-tier continuity launcher: after a user run disconnected with close code 1008 at 124 seconds before any GoAway (inactivity suspected, not proven), the adapter now sends a fixed nonce-free synthetic turn every 60 seconds while no turn is outstanding (at most 15 per session, 90 seconds cumulative output PCM), keeps one pending receive, concatenates transcript deltas, and records only allowlisted close/failure categories. Mock-tested only (148 isolated checks); continuity evidence remains pending.

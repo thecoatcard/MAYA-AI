@@ -4,8 +4,8 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings
 from app.main import create_app
+from tests.support.settings import make_settings
 
 
 def test_liveness_readiness_and_correlation() -> None:
@@ -13,12 +13,8 @@ def test_liveness_readiness_and_correlation() -> None:
         resources = factory.return_value
         resources.check = AsyncMock(return_value=None)
         resources.close = AsyncMock()
-        app = create_app(
-            Settings(
-                database_url="postgresql+asyncpg://maya_app:example-only@localhost/maya",
-                redis_url="redis://localhost:6379/0",
-            )
-        )
+        resources.verify_runtime_role = AsyncMock(return_value=None)
+        app = create_app(make_settings())
         with TestClient(app) as client:
             response = client.get("/api/v1/healthz", headers={"X-Request-ID": "untrusted"})
             assert response.status_code == 200
@@ -36,12 +32,8 @@ def test_readiness_failure_is_generic() -> None:
         resources = factory.return_value
         resources.check = AsyncMock(side_effect=[None, DependencyUnavailable()])
         resources.close = AsyncMock()
-        app = create_app(
-            Settings(
-                database_url="postgresql+asyncpg://maya_app:example-only@localhost/maya",
-                redis_url="redis://localhost:6379/0",
-            )
-        )
+        resources.verify_runtime_role = AsyncMock(return_value=None)
+        app = create_app(make_settings())
         with TestClient(app) as client:
             response = client.get("/api/v1/readyz")
             assert response.status_code == 503
@@ -57,12 +49,8 @@ def test_startup_failure_closes_resources() -> None:
         resources = factory.return_value
         resources.check = AsyncMock(side_effect=DependencyUnavailable())
         resources.close = AsyncMock()
-        app = create_app(
-            Settings(
-                database_url="postgresql+asyncpg://maya_app:example-only@localhost/maya",
-                redis_url="redis://localhost:6379/0",
-            )
-        )
+        resources.verify_runtime_role = AsyncMock(return_value=None)
+        app = create_app(make_settings())
         with pytest.raises(DependencyUnavailable), TestClient(app):
             pytest.fail("Startup must not succeed")
         resources.close.assert_awaited_once()

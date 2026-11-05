@@ -19,7 +19,15 @@ def main() -> None:
         settings = Settings(_env_file=arguments.env_file)
     except ValidationError:
         parser.exit(2, "Invalid MAYA configuration; check required variables and URL formats.\n")
-    uvicorn.run(create_app(settings), host="127.0.0.1", port=arguments.port, access_log=False)
+    # Forwarded-for headers are not trusted: the per-address rate limits key on the direct
+    # peer, and a client-chosen header would let anyone rotate their identity.
+    uvicorn.run(
+        create_app(settings),
+        host="127.0.0.1",
+        port=arguments.port,
+        access_log=False,
+        proxy_headers=False,
+    )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 # Phase 02 — Authentication, Users, Workspaces, and Database Security
 
+> **Implementation note (2026-11-05):** implemented and tested locally; the as-built design differs from the task text below in these ways, all owner-approved in the planning conversation. Migrations live in `backend/app/db/migrations/` (not `db/alembic`, so the existing approval glob covers them). The tenant context is set with `set_config('app.workspace_id', ..., true)` because `SET LOCAL` cannot take bind parameters. Only the four tables the code touches are queried through SQL (no ORM models for the other eight yet). Flows and persistence live in `backend/app/auth/`, dependencies in `backend/app/auth/dependencies.py`, and JWT claims also carry `iss`, `aud`, `typ`, `sid` and `iat`. Added: `POST /auth/resend-verification`, `GET /auth/me`, the `auth_otp_challenges` and `auth_sessions` tables, RLS on `workspaces`, composite foreign keys, a request-size cap, a user-run SMTP check tool (`backend/app/tools/`), and a CI workflow that provisions PostgreSQL and Redis. `POST /auth/verify-email` takes the account's password as well as the code (pre-hijacking defence). See [Auth API](../../api/AUTH.md), [authentication security](../../security/AUTHENTICATION.md), [data model](../../architecture/DATA_MODEL.md), ADR-0005 and ADR-0006, and the [verification record](../../testing/AUTH_AND_RLS.md).
+
 ## A. Phase Overview
 
 - **Phase Number:** Phase 02

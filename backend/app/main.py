@@ -5,15 +5,21 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
 
-from app.api.v1.health import router
+from app.api.v1.errors import install_error_handlers
+from app.api.v1.router import api_router
+from app.auth.factory import build_auth_service
+from app.auth.service import AuthService
 from app.core.config import Settings
+from app.core.http import MaxBodySizeMiddleware
 from app.core.logging import configure_logging, request_id_context, trace_id_context
 from app.core.resources import Resources
 
 logger = logging.getLogger("maya")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, auth_service: AuthService | None = None
+) -> FastAPI:
     configuration = settings if settings is not None else Settings()
     configure_logging(configuration)
 
@@ -23,6 +29,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.resources = resources
         try:
             await resources.check()
+            await resources.verify_runtime_role()
+            service = auth_service or build_auth_service(configuration, resources)
+            app.state.auth_service = service
+            await service.warm_up()
             logger.info("application_started")
             yield
         finally:
@@ -47,5 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request_id_context.reset(request_token)
             trace_id_context.reset(trace_token)
 
-    app.include_router(router)
+    app.add_middleware(MaxBodySizeMiddleware)
+    install_error_handlers(app)
+    app.include_router(api_router)
     return app

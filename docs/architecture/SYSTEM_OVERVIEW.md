@@ -9,7 +9,9 @@ resource lifecycles and public [health probes](../api/HEALTH.md). The
 [web scaffold](../../apps/web/README.md) provides a static overview, not chat or auth.
 Local PostgreSQL/pgvector and Redis AOF are described in the
 [data-store state](DATA_MODEL.md) and [runbook](../operations/LOCAL_DEVELOPMENT.md).
-There is no browser-to-API product flow, application schema, RLS, model gateway or agent engine yet.
+Phase 02 added the [application schema with forced row-level security](DATA_MODEL.md) and own-account
+[authentication](../security/AUTHENTICATION.md) ([API](../api/AUTH.md)). There is no browser login or
+browser-to-API product flow, model gateway or agent engine yet.
 
 [S3 voice readiness](SPIKE_S3_GEMINI_LIVE.md) and
 [S4 embedding readiness](SPIKE_S4_EMBEDDINGS.md) have offline fixture analyzers
