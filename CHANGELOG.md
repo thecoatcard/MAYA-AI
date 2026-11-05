@@ -15,7 +15,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Changed
 
-- Branch protection status is now documented honestly: GitHub does not enforce rulesets on this private repository on the current plan, so the protection table in `docs/operations/BRANCH_PROTECTION.md` is a target configuration, and `governance/GIT_WORKFLOW.md`, `governance/README.md` and `README.md` no longer say `main` is protected. The owner chose to stay private on the current plan for now; the trigger to revisit is listed in that document.
+- Branch protection status is now documented from observation: GitHub warned that rulesets are not enforced on a private repository on the current plan, but the server rejected two direct pushes to `main` (first one approving review required, then changes must go through a pull request). `docs/operations/BRANCH_PROTECTION.md` records what is verified (the pull-request rule) and what is not (required checks and the other rules), and the Git workflow, governance README and root README point to it. The Phase 02 branch therefore reaches `main` through a pull request.
 - Settings now require `MAYA_JWT_SIGNING_KEY` and `MAYA_OTP_HMAC_KEY` (at least 32 bytes each, different from each other); optional token lifetimes and `MAYA_SMTP_*` settings were added to `.env.example` and the configuration reference. Unknown routes and validation failures now return `{"error": ...}` bodies.
 
 ### Fixed

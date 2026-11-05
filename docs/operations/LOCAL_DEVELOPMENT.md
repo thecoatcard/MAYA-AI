@@ -116,7 +116,7 @@ locked backend environment with a pinned `uv`, installs the web dependencies, cr
 `docker/postgres/init.sql`, and sets `MAYA_REQUIRE_POSTGRES_TESTS=1`, so the tenant-isolation and authentication tests run
 for real and a missing service fails the job. The passwords there are the public example values. **No run of this workflow
 has been observed yet**: the GitHub remote exists since 2026-11-05, so treat it as written, linted and untested until
-the first result is seen. It cannot be made a required check on the current private repository plan.
+the first result is seen. Whether it is a required check depends on the ruleset (see `docs/operations/BRANCH_PROTECTION.md`).
 
 ## Initialization and recovery
 

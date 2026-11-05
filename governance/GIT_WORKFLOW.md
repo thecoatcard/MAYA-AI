@@ -2,7 +2,7 @@
 
 ## 1. Branches
 
-- `main` is meant to be protected: no direct pushes, required checks, reviews required (see `docs/operations/BRANCH_PROTECTION.md`; a repository administrator configures this). **On the current private repository plan GitHub does not enforce these rules**, so today this is a convention that the hooks, CI results and the owner's discipline uphold; the status and the trigger to revisit are in that document.
+- `main` is protected: no direct pushes, required checks, reviews required (see `docs/operations/BRANCH_PROTECTION.md`; a repository administrator configures this). The server rejecting direct pushes to `main` has been observed (2026-11-05); which of the other rules are active has not been verified, and that document records the status.
 - Work on short-lived branches named `<type>/<short-description>`, for example `feat/mcp-gateway-pool` or `fix/task-cancellation`.
 - Agents commit only when asked, never to `main`, and never force-push.
 
@@ -44,7 +44,7 @@ Trailers are the last lines of the message, in `Key: value` form. They make deci
 | `ADR:` | Waives the architecture rule | `ADR: not-required: bug fix inside an existing design` |
 | `Changelog:` | Waives the changelog rule | `Changelog: not-required: no user-visible effect` |
 
-A waiver must state a specific reason. The `Human-Approval:` trailer is an audit trail, not a cryptographic control: anyone can type it. Its value is that an approval claim becomes visible and reviewable. Real enforcement is CODEOWNERS plus branch protection, where the hosting plan enforces them (it does not yet; see `docs/operations/BRANCH_PROTECTION.md`).
+A waiver must state a specific reason. The `Human-Approval:` trailer is an audit trail, not a cryptographic control: anyone can type it. Its value is that an approval claim becomes visible and reviewable. Real enforcement is branch protection, plus CODEOWNERS once a file is committed (see `docs/operations/BRANCH_PROTECTION.md` for what is verified).
 
 ## 4. Hooks (installed by `npm run setup`)
 
@@ -58,7 +58,7 @@ Git is configured with `core.hooksPath = scripts/hooks`, so the hooks live in th
 
 If a hook is too slow or noisy, fix the hook. Do not tell contributors to skip it.
 
-**Hooks can be bypassed** (`--no-verify`, a missing `npm run setup`). They are a convenience that catches problems early. CI runs the same validators on every pull request, and branch protection makes them required where the hosting plan enforces it (not yet the case; until then a failing CI result is advisory and must be acted on by the merger).
+**Hooks can be bypassed** (`--no-verify`, a missing `npm run setup`). They are a convenience that catches problems early. CI runs the same validators on every pull request, and branch protection is meant to make them required (only the pull-request rule has been observed to be enforced; until the rest is verified, a failing CI result must be acted on by the merger).
 
 ## 5. Pull requests
 

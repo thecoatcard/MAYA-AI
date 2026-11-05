@@ -61,9 +61,10 @@ migration owner tested and fixed), and approved: migrating the persistent `maya`
 trailers, a CI workflow with PostgreSQL and Redis service containers (written and linted;
 its first GitHub run has not been observed), a user-run SMTP check tool (written and mock-tested;
 no agent contacted a mail server; the owner has since run it successfully), and acceptance of ADR-0005 and ADR-0006. Later the owner also approved pushing both
-branches to the new GitHub remote (2026-11-05) and, after GitHub reported that branch protection cannot be
-enforced on a private repository on the current plan, chose to stay private and merge the Phase 02 branch into
-`main` by fast-forward (see `docs/operations/BRANCH_PROTECTION.md`).
+branches to the new GitHub remote (2026-11-05) and merging the Phase 02 branch into `main`. Two direct pushes
+of `main` were rejected by the server's ruleset (first: one approving review required; then: changes must be made
+through a pull request), so the merge waits for a pull request opened by the owner
+(see `docs/operations/BRANCH_PROTECTION.md`).
 
 Latest closure approval (2026-11-05): the owner accepted Celery
 5.6.3/Kombu 5.7.0/redis-py 8.1.0, with mandatory Phase 06 durable cooperative

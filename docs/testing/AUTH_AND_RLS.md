@@ -79,9 +79,9 @@ this is CI-verified.
 ## What is not verified
 
 - GitHub CI: the workflow now provisions PostgreSQL, Redis, Python and the web dependencies, but no agent has
-  observed a run yet (the remote exists since 2026-11-05), so it is written and linted only. Branch protection is not
-  enforceable on the current private repository plan (see `docs/operations/BRANCH_PROTECTION.md`), so a CI result
-  is advisory until the plan changes.
+  observed a run yet (the remote exists since 2026-11-05), so it is written and linted only. Which branch-protection
+  rules are active is only partly verified (see `docs/operations/BRANCH_PROTECTION.md`), so do not assume CI is a
+  required check.
 - Real SMTP delivery by an agent: no agent contacted a mail server; the tool's logic is covered by tests with a mocked mail
   library. **Owner-reported (2026-11-05):** the owner ran the SMTP check tool against the real mail account, received the
   message, and registered, verified (code and password), logged in and used the other documented flows through the running

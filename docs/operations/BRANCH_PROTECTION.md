@@ -2,16 +2,16 @@
 
 Local Git hooks can be skipped, and agent permission rules are advisory. The real gate is CI plus branch protection on the hosting platform. **Configuring it is a manual step** that needs administrator access to the remote repository.
 
-## Current status (recorded 2026-11-05): not enforceable on this repository
+## Current status (recorded 2026-11-05)
 
-The repository exists on GitHub (`thecoatcard/MAYA-AI`, private). GitHub told the owner on 2026-11-05 that rulesets are **not enforced on this private repository until it moves to a GitHub Team organization account**. The owner's decision (option A) is to stay private on the current plan for now. Until that changes:
+The repository exists on GitHub (`thecoatcard/MAYA-AI`, private). GitHub's notice to the owner said rulesets "won't be enforced on this private repository until you move to GitHub Team organization account". **Observed behavior differs for at least some rules.** Pushing `main` directly was rejected by the server twice (error GH013, "Repository rule violations found for refs/heads/main"): first with "At least 1 approving review is required by reviewers with write access", then, after the owner changed the ruleset, with "Changes must be made through a pull request."
 
-- The table below is the **target configuration**, not the current state. Nothing on the server stops a direct push to `main`, a force-push, a merge with failing checks, or a merge without review.
-- What stands in for it: the repository Git hooks (skippable with `--no-verify`), the CI workflows (they run and report, but cannot be made required), the agent `ask` rules in `.claude/settings.json` (advisory), and the owner's own discipline: work on a branch, let CI run, and merge only when it passes.
-- Agents never push or merge to `main` on their own initiative. Merging to `main` needs the owner's explicit request in the current conversation, and a commit that touches a guardrail path still needs a `Human-Approval:` trailer.
-- CODEOWNERS is not committed and would not be enforced on this plan either.
+- **Verified:** direct pushes to `main` are blocked, so every change reaches `main` through a pull request. `gh` is not installed on the owner's machine, so the pull request is opened in the browser (for the Phase 02 branch: `https://github.com/thecoatcard/MAYA-AI/pull/new/feat/phase-02-auth-database-security`).
+- **Not verified:** whether the other rules in the table below are active (required status checks, up-to-date branches, force-push and deletion blocks, Code Owners). An agent cannot read the ruleset. The owner confirms them under Settings, Rules, and records the result under "Verify it works". The table stays the **target configuration**. GitHub's own notice says enforcement on private repositories depends on the plan, so re-check before relying on any rule.
+- A single owner cannot approve their own pull request, so a required approving review blocks a one-person repository. Whether to use a second reviewer, zero required approvals with the pull-request rule kept, or a bypass entry is the owner's decision. Agents never change, disable or bypass the ruleset.
+- Still true everywhere: local hooks can be skipped, agent `ask` rules are advisory, and CODEOWNERS is not committed.
 - The `dependency-review` job needs GitHub Advanced Security on private repositories (see Prerequisites), so it may fail or be unavailable here. Its first result has not been observed; record it in the verification record once seen.
-- **Trigger to revisit:** a second contributor, a hosted deployment, or any real user data. Then move to a plan that enforces rulesets (or make the repository public after reviewing what that exposes), apply the table below, and record the date and verifier under "Verify it works".
+- Merging to `main` needs the owner's explicit request in the current conversation, and a commit that touches a guardrail path still needs a `Human-Approval:` trailer.
 
 ## Prerequisites
 
