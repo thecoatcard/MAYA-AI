@@ -1,5 +1,9 @@
 """MAYA AI Model Gateway package (Phase 03)."""
 
+from app.gateway.client_adapter import (
+    build_genai_client,
+    create_client_from_settings,
+)
 from app.gateway.cost_tracker import (
     BudgetTracker,
     calculate_cost,
@@ -18,6 +22,7 @@ from app.gateway.exceptions import (
     ToolCallCommitmentError,
     UnsupportedAliasTransportError,
 )
+from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import (
     ALLOWED_OVERRIDE_ALIASES,
     MODEL_ID_PATTERN,
@@ -25,6 +30,10 @@ from app.gateway.registry import (
     ModelSpec,
     build_default_registry,
     normalize_model_id,
+)
+from app.gateway.resilience import (
+    ResiliencePolicy,
+    classify_gateway_error,
 )
 from app.gateway.sanitizer import (
     sanitize_contents,
@@ -61,8 +70,10 @@ __all__ = [
     "GatewayStreamChunk",
     "InputSanitizationError",
     "MODEL_ID_PATTERN",
+    "ModelGateway",
     "ModelRegistry",
     "ModelSpec",
+    "ResiliencePolicy",
     "StreamInterruptedError",
     "StructuredOutputError",
     "TokenCountResponse",
@@ -73,8 +84,11 @@ __all__ = [
     "ToolGatewayResponse",
     "UnsupportedAliasTransportError",
     "build_default_registry",
+    "build_genai_client",
     "calculate_cost",
+    "classify_gateway_error",
     "cost_to_micro_usd",
+    "create_client_from_settings",
     "format_repair_prompt",
     "normalize_model_id",
     "parse_and_validate_json",
