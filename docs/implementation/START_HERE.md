@@ -7,8 +7,9 @@ authentication) is **implemented and tested locally** on branch `feat/phase-02-a
 not pushed), under the owner's recorded dependency-gate exception (the extended Gemini continuity item stays open). Start with
 the [verification record](../testing/AUTH_AND_RLS.md), the [security document](../security/AUTHENTICATION.md) (with the
 decisions on the security review) and ADR-0005/0006 (Accepted). The persistent local database is migrated (revision 0004,
-empty). Still open: the workflow has never run in GitHub CI, and the owner has not yet run the SMTP check
-(`python -m app.tools.smtp_smoke`) against the real mail account, so no real e-mail has been sent.
+empty). The owner reported (2026-11-05) that the SMTP check (`python -m app.tools.smtp_smoke`) and the registration,
+verification and login flows work against the real mail account. Still open: the workflow has never run in GitHub CI
+(there is no remote).
 
 ## Current implementation update (2026-11-05)
 

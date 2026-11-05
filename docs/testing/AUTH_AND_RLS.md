@@ -80,8 +80,10 @@ this is CI-verified.
 
 - GitHub CI: the workflow now provisions PostgreSQL, Redis, Python and the web dependencies, but it has never run
   (there is no remote), so it is written and linted only.
-- Real SMTP delivery: no agent contacted a mail server. The owner can use the SMTP check tool; its logic is covered by tests
-  with a mocked mail library.
+- Real SMTP delivery by an agent: no agent contacted a mail server; the tool's logic is covered by tests with a mocked mail
+  library. **Owner-reported (2026-11-05):** the owner ran the SMTP check tool against the real mail account, received the
+  message, and registered, verified (code and password), logged in and used the other documented flows through the running
+  API. This is the owner's statement, not an agent-observed or logged result.
 - Timing resistance beyond the extra work that is equalized; load or abuse behavior at scale.
 - Per-user separation inside a workspace for tables other than the authentication tables (the database does not enforce it).
 - Findings the review raised that need an owner decision are listed in the

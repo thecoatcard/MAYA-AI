@@ -3,8 +3,9 @@
 **Status:** implemented and tested locally (deterministic tests plus real PostgreSQL and
 Redis), then reviewed by an independent read-only security reviewer whose confirmed findings
 were fixed (see "Review history" below). The CI workflow now provisions PostgreSQL and Redis, but
-GitHub CI has never run (no remote), and e-mail delivery through a real SMTP server has not been
-exercised by any agent (the owner has an SMTP check tool). Decisions: [ADR-0005](../adr/0005-own-account-authentication.md)
+GitHub CI has never run (no remote). On 2026-11-05 the owner reported running the SMTP check tool
+against the real mail account and registering, verifying and logging in through the running API with real
+e-mail; no agent observed this and no evidence file was kept. Decisions: [ADR-0005](../adr/0005-own-account-authentication.md)
 and [ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md). Endpoint contract:
 [Auth API](../api/AUTH.md). Schema and roles: [data model](../architecture/DATA_MODEL.md).
 
@@ -190,8 +191,8 @@ migrations as a **non-superuser** owner found and fixed a real defect (the funct
   CORS policy) is decided with the login UI, which does not exist yet.
 - E-mail goes out from a background task without a queue: if the process stops between the
   response and the send, the code is lost and the user must request another. Real SMTP delivery
-  has not been exercised by any agent; the owner can check it with the
-  [SMTP check tool](../../backend/app/tools/README.md).
+  was verified by the owner (reported 2026-11-05) with the
+  [SMTP check tool](../../backend/app/tools/README.md); re-run it after any change to the mail account.
 - The interactive API documentation at `/docs` is enabled; disable it before any shared deployment.
 - Code redemption and the rate limits trust the server clock of one process; multiple
   instances need synchronized clocks. The login-versus-reset guard relies on a password change
