@@ -1,0 +1,1150 @@
+{
+  "cleanup": {
+    "errors": [],
+    "removed": {
+      "containers": [
+        "69358fa9979bc688bb555fee1503f7f830cb324f1fbe94f8b50985af7a3c8378",
+        "478d5a1a2e901eb8a6748a7cb786ac47ce80bb1d1e85c541bbe0981fe9267425",
+        "48b18fed0ea847f4397e600248c96c16a8a196a8b6d2161bcf5bdf219458d3ea"
+      ],
+      "images": [
+        "maya-s1-f0f619c78f47:runner"
+      ],
+      "networks": [
+        "maya-s1-f0f619c78f47-net"
+      ],
+      "volumes": [
+        "maya-s1-f0f619c78f47-redisdata",
+        "maya-s1-f0f619c78f47-pgdata"
+      ]
+    },
+    "synthetic_schema_dropped": true
+  },
+  "config": {
+    "candidate": "celery-compat",
+    "concurrency": 2,
+    "jobs": 80,
+    "seed": 20261105,
+    "timeout_seconds_per_backend": 120,
+    "workload": "three async LangGraph nodes; synthetic I/O delays; PostgreSQL receipts"
+  },
+  "error": null,
+  "invocation": {
+    "argv": [
+      "python",
+      "backend/tests/spikes/spike_s1_queue.py",
+      "--run",
+      "--jobs",
+      "80",
+      "--seed",
+      "20261105",
+      "--timeout-seconds",
+      "120",
+      "--candidate",
+      "celery-compat"
+    ],
+    "candidate": "celery-compat",
+    "dependencies": {
+      "asyncpg": "0.32.0",
+      "celery": "5.6.3",
+      "kombu": "5.7.0",
+      "langgraph": "1.2.20",
+      "redis-py": "8.1.0"
+    },
+    "host_platform": "Windows-11-10.0.26200-SP0",
+    "host_python": "3.12.10",
+    "lock_file": "backend/tests/spikes/s1/celery_compat/uv.lock",
+    "lock_sha256": "0f7672404e6e89ddc7ddb910d1d5a068050de47c7c9f3be253721b9656732509",
+    "output_path": "C:\\Users\\AnandShukla1\\Documents\\MAYA Ai\\backend\\tests\\spikes\\s1\\results\\s1-queue-20261105T053205Z-celery-compat-f0f619c78f47.json",
+    "redis_compatibility": {
+      "candidate_redis_py": "8.1.0",
+      "celery_5.6.3_kombu_5.7.0": "redis-py>=6.4.0,<9.0.0",
+      "transport_validation": "completed in this isolated run"
+    },
+    "timestamp_utc": "2026-11-05T05:32:04.490574+00:00",
+    "uv": "0.12.17"
+  },
+  "results": {
+    "candidate": "celery-compat",
+    "celery_compat": {
+      "backend": "celery",
+      "cancellation": {
+        "attempts_after_observation_window": 1,
+        "cancellation_outcome": "request_only_no_terminal_state_observed",
+        "control_request_completed": true,
+        "native_control": "Celery revoke(terminate=True)",
+        "observation_window_seconds": 4,
+        "revoke_request_returned": true,
+        "status_after_observation_window": "running",
+        "terminal_cancellation_observed": false,
+        "time_to_observed_terminal_ms": null,
+        "worker_abort_acknowledged": null
+      },
+      "concurrency": 2,
+      "container_id": "69358fa9979bc688bb555fee1503f7f830cb324f1fbe94f8b50985af7a3c8378",
+      "container_stats": {
+        "cpu_limit": "1.0",
+        "maximum_cpu_percent": 110.18,
+        "maximum_memory_bytes": 252077670,
+        "maximum_process_count": 10,
+        "memory_limit": "768m",
+        "sample_count": 24,
+        "samples": [
+          {
+            "cpu_percent": 100.09,
+            "elapsed_monotonic_s": 0.23399999999946886,
+            "memory_bytes": 61173923,
+            "process_count": 1,
+            "raw": "58.34MiB / 768MiB|100.09%|1"
+          },
+          {
+            "cpu_percent": 100.02,
+            "elapsed_monotonic_s": 2.717999999999847,
+            "memory_bytes": 118384230,
+            "process_count": 3,
+            "raw": "112.9MiB / 768MiB|100.02%|3"
+          },
+          {
+            "cpu_percent": 98.86,
+            "elapsed_monotonic_s": 4.717999999999847,
+            "memory_bytes": 163472998,
+            "process_count": 3,
+            "raw": "155.9MiB / 768MiB|98.86%|3"
+          },
+          {
+            "cpu_percent": 67.21,
+            "elapsed_monotonic_s": 6.764999999999418,
+            "memory_bytes": 252077670,
+            "process_count": 7,
+            "raw": "240.4MiB / 768MiB|67.21%|7"
+          },
+          {
+            "cpu_percent": 47.95,
+            "elapsed_monotonic_s": 8.79699999999957,
+            "memory_bytes": 251972812,
+            "process_count": 6,
+            "raw": "240.3MiB / 768MiB|47.95%|6"
+          },
+          {
+            "cpu_percent": 11.9,
+            "elapsed_monotonic_s": 10.79699999999957,
+            "memory_bytes": 175007334,
+            "process_count": 3,
+            "raw": "166.9MiB / 768MiB|11.90%|3"
+          },
+          {
+            "cpu_percent": 99.2,
+            "elapsed_monotonic_s": 12.842999999999847,
+            "memory_bytes": 143759769,
+            "process_count": 3,
+            "raw": "137.1MiB / 768MiB|99.20%|3"
+          },
+          {
+            "cpu_percent": 99.1,
+            "elapsed_monotonic_s": 14.842999999999847,
+            "memory_bytes": 171651891,
+            "process_count": 3,
+            "raw": "163.7MiB / 768MiB|99.10%|3"
+          },
+          {
+            "cpu_percent": 5.11,
+            "elapsed_monotonic_s": 16.90599999999995,
+            "memory_bytes": 232154726,
+            "process_count": 5,
+            "raw": "221.4MiB / 768MiB|5.11%|5"
+          },
+          {
+            "cpu_percent": 2.17,
+            "elapsed_monotonic_s": 18.90599999999995,
+            "memory_bytes": 232154726,
+            "process_count": 5,
+            "raw": "221.4MiB / 768MiB|2.17%|5"
+          },
+          {
+            "cpu_percent": 100.62,
+            "elapsed_monotonic_s": 21.686999999999898,
+            "memory_bytes": 120271667,
+            "process_count": 5,
+            "raw": "114.7MiB / 768MiB|100.62%|5"
+          },
+          {
+            "cpu_percent": 104.16,
+            "elapsed_monotonic_s": 24.15599999999995,
+            "memory_bytes": 147324928,
+            "process_count": 5,
+            "raw": "140.5MiB / 768MiB|104.16%|5"
+          },
+          {
+            "cpu_percent": 99.91,
+            "elapsed_monotonic_s": 26.375,
+            "memory_bytes": 169764454,
+            "process_count": 5,
+            "raw": "161.9MiB / 768MiB|99.91%|5"
+          },
+          {
+            "cpu_percent": 110.18,
+            "elapsed_monotonic_s": 28.17199999999957,
+            "memory_bytes": 221249536,
+            "process_count": 6,
+            "raw": "211MiB / 768MiB|110.18%|6"
+          },
+          {
+            "cpu_percent": 8.99,
+            "elapsed_monotonic_s": 30.79699999999957,
+            "memory_bytes": 246729932,
+            "process_count": 8,
+            "raw": "235.3MiB / 768MiB|8.99%|8"
+          },
+          {
+            "cpu_percent": 101.42,
+            "elapsed_monotonic_s": 33.21799999999985,
+            "memory_bytes": 110415052,
+            "process_count": 7,
+            "raw": "105.3MiB / 768MiB|101.42%|7"
+          },
+          {
+            "cpu_percent": 98.88,
+            "elapsed_monotonic_s": 35.57799999999952,
+            "memory_bytes": 144808345,
+            "process_count": 7,
+            "raw": "138.1MiB / 768MiB|98.88%|7"
+          },
+          {
+            "cpu_percent": 99.67,
+            "elapsed_monotonic_s": 37.45299999999952,
+            "memory_bytes": 169764454,
+            "process_count": 7,
+            "raw": "161.9MiB / 768MiB|99.67%|7"
+          },
+          {
+            "cpu_percent": 17.31,
+            "elapsed_monotonic_s": 39.4369999999999,
+            "memory_bytes": 241067622,
+            "process_count": 10,
+            "raw": "229.9MiB / 768MiB|17.31%|10"
+          },
+          {
+            "cpu_percent": 6.83,
+            "elapsed_monotonic_s": 41.46799999999985,
+            "memory_bytes": 241067622,
+            "process_count": 10,
+            "raw": "229.9MiB / 768MiB|6.83%|10"
+          },
+          {
+            "cpu_percent": 6.83,
+            "elapsed_monotonic_s": 43.4369999999999,
+            "memory_bytes": 241067622,
+            "process_count": 10,
+            "raw": "229.9MiB / 768MiB|6.83%|10"
+          },
+          {
+            "cpu_percent": 9.44,
+            "elapsed_monotonic_s": 45.5,
+            "memory_bytes": 241067622,
+            "process_count": 10,
+            "raw": "229.9MiB / 768MiB|9.44%|10"
+          },
+          {
+            "cpu_percent": 7.15,
+            "elapsed_monotonic_s": 47.51499999999942,
+            "memory_bytes": 241067622,
+            "process_count": 10,
+            "raw": "229.9MiB / 768MiB|7.15%|10"
+          },
+          {
+            "cpu_percent": 0.0,
+            "elapsed_monotonic_s": 49.5,
+            "memory_bytes": 0,
+            "process_count": 0,
+            "raw": "0B / 0B|0.00%|0"
+          }
+        ]
+      },
+      "controlled_worker_failure": {
+        "attempt_count": 2,
+        "effect_attempt_observations": 2,
+        "final_status": "completed",
+        "injected_after_synthetic_effect": true,
+        "redelivered_and_completed": true,
+        "redelivery_latency_after_kill_ms": "6986.865000",
+        "synthetic_effect_rows": 1,
+        "task_id": "e93e69725d4ed97eb5c9d7d66d0a4acc",
+        "worker_killed_at_utc": "2026-11-05T05:31:37.997122+00:00",
+        "worker_restart_ready_ms": 6962.393370999962
+      },
+      "finished_at_utc": "2026-11-05T05:31:54.113467+00:00",
+      "package_versions": {
+        "asyncpg": "0.32.0",
+        "celery": "5.6.3",
+        "kombu": "5.7.0",
+        "langgraph": "1.2.20",
+        "redis": "8.1.0"
+      },
+      "python": "3.12.10",
+      "queue_configuration": {
+        "celery": {
+          "late_ack": true,
+          "pool": "prefork",
+          "prefetch_multiplier": 1,
+          "redis_visibility_timeout_seconds": 3,
+          "reject_on_worker_lost": true,
+          "task_time_limit_seconds": 45
+        }
+      },
+      "run_id": "f0f619c78f47",
+      "seed": 20261105,
+      "started_at_utc": "2026-11-05T05:31:08.046549+00:00",
+      "throughput": {
+        "completed": 80,
+        "completion_latency_ms": {
+          "count": 80,
+          "max": 2986.187,
+          "p50": 1505.497,
+          "p95": 2831.445,
+          "samples": [
+            233.361,
+            123.746,
+            1583.938,
+            1041.617,
+            2201.791,
+            2068.455,
+            149.181,
+            251.72,
+            1135.584,
+            1221.831,
+            2050.22,
+            1672.473,
+            590.041,
+            2892.45,
+            1505.497,
+            1375.819,
+            2872.011,
+            1319.788,
+            1221.013,
+            423.0,
+            2346.773,
+            1065.731,
+            2637.84,
+            2705.665,
+            668.458,
+            575.509,
+            2560.249,
+            2485.325,
+            1595.16,
+            1886.223,
+            734.422,
+            1817.524,
+            807.552,
+            2787.426,
+            2260.435,
+            379.68,
+            1666.396,
+            1381.506,
+            2703.589,
+            1976.943,
+            2986.187,
+            1513.394,
+            495.813,
+            527.62,
+            456.045,
+            2831.445,
+            311.706,
+            1306.647,
+            2508.16,
+            1803.193,
+            2280.198,
+            2953.345,
+            748.692,
+            973.417,
+            1723.026,
+            1884.332,
+            1438.128,
+            2571.01,
+            2416.877,
+            642.904,
+            2420.61,
+            903.017,
+            2125.398,
+            283.675,
+            886.633,
+            1127.955,
+            2127.108,
+            984.538,
+            357.224,
+            217.132,
+            1996.249,
+            1743.037,
+            1444.913,
+            2353.814,
+            2625.165,
+            826.206,
+            430.879,
+            2773.343,
+            2198.827,
+            184.281
+          ]
+        },
+        "failed_or_missing": 0,
+        "producer_event_loop_max_lag_ms": 15.597513999637158,
+        "submitted": 80,
+        "task_statuses": [
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 27.85207199940487,
+            "latency_ms": "233.361000",
+            "status": "completed",
+            "task_id": "03bad450edf2ce628ac98b3a2f78c1e8"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.099543999771413,
+            "latency_ms": "123.746000",
+            "status": "completed",
+            "task_id": "047ebc50980a38ca8a46c3013212da39"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0686329997042776,
+            "latency_ms": "1583.938000",
+            "status": "completed",
+            "task_id": "04a2cd31de6aade24063ee967a7f3a18"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.048183000420977,
+            "latency_ms": "1041.617000",
+            "status": "completed",
+            "task_id": "06a9a4c77d7769804a984d2bf11a8309"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.281493999864324,
+            "latency_ms": "2201.791000",
+            "status": "completed",
+            "task_id": "0c3b614072138e8bb641a6f874950dfd"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.124245999562845,
+            "latency_ms": "2068.455000",
+            "status": "completed",
+            "task_id": "136688a84ab67e8d4bc34a8408747b9d"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.8058949997575837,
+            "latency_ms": "149.181000",
+            "status": "completed",
+            "task_id": "167ded86f9f0dde66aa124503ecdf958"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0471909990883432,
+            "latency_ms": "251.720000",
+            "status": "completed",
+            "task_id": "174df545271195c91755914177d1a43a"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.094202999411209,
+            "latency_ms": "1135.584000",
+            "status": "completed",
+            "task_id": "178699ee3f825297270a33926b129147"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.5377860006774426,
+            "latency_ms": "1221.831000",
+            "status": "completed",
+            "task_id": "195709a388ca75f6a47fd8ca2f94ff71"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.27758699980040547,
+            "latency_ms": "2050.220000",
+            "status": "completed",
+            "task_id": "1b616bf8d95b083d4f6f5d22661fe007"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.118069999392901,
+            "latency_ms": "1672.473000",
+            "status": "completed",
+            "task_id": "1ec82aca3f504469ce20b962a18172fc"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2151839991929592,
+            "latency_ms": "590.041000",
+            "status": "completed",
+            "task_id": "25293929e92035d72399ff689ca8a901"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.103581999814196,
+            "latency_ms": "2892.450000",
+            "status": "completed",
+            "task_id": "26f8a11cda10678e84024a9dca9b810d"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.3422479994696914,
+            "latency_ms": "1505.497000",
+            "status": "completed",
+            "task_id": "2acf1003c6baf91d81a781e8816b53be"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9849309999481193,
+            "latency_ms": "1375.819000",
+            "status": "completed",
+            "task_id": "2f13b7db85825d1d117092f3628a9e2f"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9395200004291837,
+            "latency_ms": "2872.011000",
+            "status": "completed",
+            "task_id": "3448a1e73d3b1593547285155dc37515"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.134522000029392,
+            "latency_ms": "1319.788000",
+            "status": "completed",
+            "task_id": "3a0cbd6f86397e94a42e364f9258d9a1"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.183962999675714,
+            "latency_ms": "1221.013000",
+            "status": "completed",
+            "task_id": "4042344478e8b54cd043cdcc3c9ca88d"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.07261099947209,
+            "latency_ms": "423.000000",
+            "status": "completed",
+            "task_id": "4417cc3b256e216850c21bc64cf15e4c"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0884409994105226,
+            "latency_ms": "2346.773000",
+            "status": "completed",
+            "task_id": "447860e48903aa0fa54f106d9e14b0eb"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.3403829996386776,
+            "latency_ms": "1065.731000",
+            "status": "completed",
+            "task_id": "4cb2809ec410e1ea286e5bda6109ac49"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.100195000617532,
+            "latency_ms": "2637.840000",
+            "status": "completed",
+            "task_id": "557855b715e05db69e41baa29c928256"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2174119992778287,
+            "latency_ms": "2705.665000",
+            "status": "completed",
+            "task_id": "585f162d62aab5cedefa42741085b7e7"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.026296999953047,
+            "latency_ms": "668.458000",
+            "status": "completed",
+            "task_id": "59cdfc013f1d560d8a6b23e25ba4320e"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9363570006826194,
+            "latency_ms": "575.509000",
+            "status": "completed",
+            "task_id": "5acdfab7410e5908ff6f03fadaf74c67"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9684509996077395,
+            "latency_ms": "2560.249000",
+            "status": "completed",
+            "task_id": "5c9fb422328b2985141aab94624a4a18"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1269470005572657,
+            "latency_ms": "2485.325000",
+            "status": "completed",
+            "task_id": "5f6e465d3df0aedb6a64e6922e0094c9"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2503140005719615,
+            "latency_ms": "1595.160000",
+            "status": "completed",
+            "task_id": "63f70bc3c6cabe2ff1e3a04be7d87c3a"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0535840001466568,
+            "latency_ms": "1886.223000",
+            "status": "completed",
+            "task_id": "720077fba0004c1f181bcdcb9c04e7c8"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0639369993441505,
+            "latency_ms": "734.422000",
+            "status": "completed",
+            "task_id": "7215a01efb323a170672c29cd39beea0"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1939359992538812,
+            "latency_ms": "1817.524000",
+            "status": "completed",
+            "task_id": "78a48fcc2e821b3b28bbe20338e440e0"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.4032850001749466,
+            "latency_ms": "807.552000",
+            "status": "completed",
+            "task_id": "7b58bf8bfbb2a346df96c92f53a4c68b"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1454429995865212,
+            "latency_ms": "2787.426000",
+            "status": "completed",
+            "task_id": "7b5b09456204f99d188840efb5f50ad1"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0867080000025453,
+            "latency_ms": "2260.435000",
+            "status": "completed",
+            "task_id": "7d9c304b545d1c2e2c600cec83dbd12a"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.8087189999059774,
+            "latency_ms": "379.680000",
+            "status": "completed",
+            "task_id": "820972eab3cdad35ed1df7cc708f3bb3"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1405129998820485,
+            "latency_ms": "1666.396000",
+            "status": "completed",
+            "task_id": "8538d0bf669bf3344dde6d15002daaaf"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2369779997243313,
+            "latency_ms": "1381.506000",
+            "status": "completed",
+            "task_id": "86c21409e5010aa2d93b5165cc76f2e5"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9792059991013957,
+            "latency_ms": "2703.589000",
+            "status": "completed",
+            "task_id": "88bedb7df98083d7bf15a4f495dfc1ea"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.035103000504023,
+            "latency_ms": "1976.943000",
+            "status": "completed",
+            "task_id": "8ae7ebae20d0f7dfe54ab1c4cfa07e90"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1329079998176894,
+            "latency_ms": "2986.187000",
+            "status": "completed",
+            "task_id": "8c390081f2c84ce1174db67dfb260f24"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1948579995078035,
+            "latency_ms": "1513.394000",
+            "status": "completed",
+            "task_id": "8ed9edbddcbbb5a3fcc15d0c84d8abd9"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.48456199965585256,
+            "latency_ms": "495.813000",
+            "status": "completed",
+            "task_id": "909fec2d37e3f50972f0e36e403e9df0"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0691959996620426,
+            "latency_ms": "527.620000",
+            "status": "completed",
+            "task_id": "914faa18122edee98a6cfabffaa0808a"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.4990600000382983,
+            "latency_ms": "456.045000",
+            "status": "completed",
+            "task_id": "923dd545cc514376334f5d11c3567bd5"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0200249998888467,
+            "latency_ms": "2831.445000",
+            "status": "completed",
+            "task_id": "93b84ab0677a958127532fbf21fb1e43"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0661739997885888,
+            "latency_ms": "311.706000",
+            "status": "completed",
+            "task_id": "9722755dbd285c8f9bd0a03255a9aa13"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.5205909992582747,
+            "latency_ms": "1306.647000",
+            "status": "completed",
+            "task_id": "98739e00f05a3162286cd463321c2f7c"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0632530002112617,
+            "latency_ms": "2508.160000",
+            "status": "completed",
+            "task_id": "9cb819f7946aa5150821843eda9c21aa"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2093710001863656,
+            "latency_ms": "1803.193000",
+            "status": "completed",
+            "task_id": "a679ac0aedea5b4fe31891065903f19b"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.148893999925349,
+            "latency_ms": "2280.198000",
+            "status": "completed",
+            "task_id": "abbaca4b4defb6a2c0c1853717451c35"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.3849749991786666,
+            "latency_ms": "2953.345000",
+            "status": "completed",
+            "task_id": "b36e533360ea264235fc692b85fc33a8"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2222909999763942,
+            "latency_ms": "748.692000",
+            "status": "completed",
+            "task_id": "b4b8ad7166e75672c0115f126a17d9ac"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1810810001406935,
+            "latency_ms": "973.417000",
+            "status": "completed",
+            "task_id": "b565b22868bafaae86f9d1120277c2a9"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0889940003835363,
+            "latency_ms": "1723.026000",
+            "status": "completed",
+            "task_id": "b5735076ffd34a8cb7ee416574674873"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.2963549997948576,
+            "latency_ms": "1884.332000",
+            "status": "completed",
+            "task_id": "b5a03ea0786b160c744b7fb304aa38a4"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9507389995633275,
+            "latency_ms": "1438.128000",
+            "status": "completed",
+            "task_id": "b87cd971a275916eb89f8ed34a031dcf"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1166049998792005,
+            "latency_ms": "2571.010000",
+            "status": "completed",
+            "task_id": "bb5deba1ca8f08b6bd549b0455c240a7"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.3941120003219112,
+            "latency_ms": "2416.877000",
+            "status": "completed",
+            "task_id": "c19ddf9b3171c72803c1b0ea864b60dd"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0310910001862794,
+            "latency_ms": "642.904000",
+            "status": "completed",
+            "task_id": "c66c31aba1738b1b75b7d87b570e0a74"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0838329999387497,
+            "latency_ms": "2420.610000",
+            "status": "completed",
+            "task_id": "ca4978ae4a8504b75d16e31d4a3a8c88"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0555279995969613,
+            "latency_ms": "903.017000",
+            "status": "completed",
+            "task_id": "ce68f92c8002e2871330d9a687df63dc"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.6438129994421615,
+            "latency_ms": "2125.398000",
+            "status": "completed",
+            "task_id": "d1d471e943338086381853ca102a8eff"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0638639996614074,
+            "latency_ms": "283.675000",
+            "status": "completed",
+            "task_id": "d58e02a33d5ce31a0764753681204fa2"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0117090005223872,
+            "latency_ms": "886.633000",
+            "status": "completed",
+            "task_id": "d9feb2f4d8bb3c0d4ac24d1c2238231d"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1773149999498855,
+            "latency_ms": "1127.955000",
+            "status": "completed",
+            "task_id": "dbd70648eb426b258d7c1ab410b8b5b6"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.6274209999901359,
+            "latency_ms": "2127.108000",
+            "status": "completed",
+            "task_id": "dd570f9cf5473fe673e50ed9a94cc8d4"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0575619999144692,
+            "latency_ms": "984.538000",
+            "status": "completed",
+            "task_id": "df3241cd68f6ef21293dad10f7475064"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0664709998309263,
+            "latency_ms": "357.224000",
+            "status": "completed",
+            "task_id": "e3008821c062be255e40bf6e838acab7"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.8916800006772974,
+            "latency_ms": "217.132000",
+            "status": "completed",
+            "task_id": "e34f9f541b22f34af12001e55b809183"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1176789994351566,
+            "latency_ms": "1996.249000",
+            "status": "completed",
+            "task_id": "e37011b24e4b479b8fc48d79919e5c9f"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9494629994151182,
+            "latency_ms": "1743.037000",
+            "status": "completed",
+            "task_id": "e9d8416f6bcf163b5ef8e86b132e2cbf"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1631879997366923,
+            "latency_ms": "1444.913000",
+            "status": "completed",
+            "task_id": "ea1932a5ec80cf43df1defb3494f018d"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1844629998449818,
+            "latency_ms": "2353.814000",
+            "status": "completed",
+            "task_id": "ea5538c6f66b47d09ce780fd65898e12"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1194320004506153,
+            "latency_ms": "2625.165000",
+            "status": "completed",
+            "task_id": "eb733e1278eca780d3a111dcdd440f10"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.556001000404649,
+            "latency_ms": "826.206000",
+            "status": "completed",
+            "task_id": "f203de85935f697062597aa3cd895535"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.0929259997283225,
+            "latency_ms": "430.879000",
+            "status": "completed",
+            "task_id": "f2341b05a62d6fec5c4521f54950c6e8"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.9350259997518151,
+            "latency_ms": "2773.343000",
+            "status": "completed",
+            "task_id": "f3103d52cfd6fb4ba01dc623e73762fe"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 0.33175699991261354,
+            "latency_ms": "2198.827000",
+            "status": "completed",
+            "task_id": "ff1932b8daafaccae5de9e46c429ee09"
+          },
+          {
+            "attempt_count": 1,
+            "error_type": null,
+            "event_loop_lag_ms": 1.1338799995428417,
+            "latency_ms": "184.281000",
+            "status": "completed",
+            "task_id": "fffbd9ce7ec9f6626a7ff7a778d169ac"
+          }
+        ],
+        "throughput_tasks_per_second": 22.788624839259676,
+        "wall_time_ms": 3510.523366999223,
+        "worker_event_loop_lag_ms": {
+          "count": 80,
+          "max": 27.85207199940487,
+          "p50": 1.0661739997885888,
+          "p95": 1.2222909999763942,
+          "samples": [
+            27.85207199940487,
+            1.099543999771413,
+            1.0686329997042776,
+            1.048183000420977,
+            0.281493999864324,
+            1.124245999562845,
+            0.8058949997575837,
+            1.0471909990883432,
+            1.094202999411209,
+            0.5377860006774426,
+            0.27758699980040547,
+            1.118069999392901,
+            1.2151839991929592,
+            1.103581999814196,
+            0.3422479994696914,
+            0.9849309999481193,
+            0.9395200004291837,
+            1.134522000029392,
+            1.183962999675714,
+            1.07261099947209,
+            1.0884409994105226,
+            0.3403829996386776,
+            1.100195000617532,
+            1.2174119992778287,
+            1.026296999953047,
+            0.9363570006826194,
+            0.9684509996077395,
+            1.1269470005572657,
+            1.2503140005719615,
+            1.0535840001466568,
+            1.0639369993441505,
+            1.1939359992538812,
+            0.4032850001749466,
+            1.1454429995865212,
+            1.0867080000025453,
+            0.8087189999059774,
+            1.1405129998820485,
+            1.2369779997243313,
+            0.9792059991013957,
+            1.035103000504023,
+            1.1329079998176894,
+            1.1948579995078035,
+            0.48456199965585256,
+            1.0691959996620426,
+            0.4990600000382983,
+            1.0200249998888467,
+            1.0661739997885888,
+            0.5205909992582747,
+            1.0632530002112617,
+            1.2093710001863656,
+            1.148893999925349,
+            0.3849749991786666,
+            1.2222909999763942,
+            1.1810810001406935,
+            1.0889940003835363,
+            1.2963549997948576,
+            0.9507389995633275,
+            1.1166049998792005,
+            0.3941120003219112,
+            1.0310910001862794,
+            1.0838329999387497,
+            1.0555279995969613,
+            0.6438129994421615,
+            1.0638639996614074,
+            1.0117090005223872,
+            1.1773149999498855,
+            0.6274209999901359,
+            1.0575619999144692,
+            1.0664709998309263,
+            0.8916800006772974,
+            1.1176789994351566,
+            0.9494629994151182,
+            1.1631879997366923,
+            1.1844629998449818,
+            1.1194320004506153,
+            0.556001000404649,
+            1.0929259997283225,
+            0.9350259997518151,
+            0.33175699991261354,
+            1.1338799995428417
+          ]
+        }
+      }
+    },
+    "configuration": {
+      "candidate_lock": "celery_compat/uv.lock",
+      "celery_redis_visibility_timeout_seconds": 3,
+      "host_mounts": [],
+      "isolated_internal_network": true,
+      "postgres_authentication": "trust on isolated private network only",
+      "postgres_database": "s1_benchmark",
+      "published_ports": [],
+      "redis_server": "7.4 with AOF enabled",
+      "worker_concurrency": 2,
+      "worker_driver_cpus": 1.0,
+      "worker_driver_memory": "768m"
+    },
+    "docker_images": {
+      "benchmark": "sha256:14da97c21093fd13e50d3dda6792c00f5b9fa30e61362dfd7499b5f6d3e41932",
+      "benchmark_image_id": "sha256:14da97c21093fd13e50d3dda6792c00f5b9fa30e61362dfd7499b5f6d3e41932",
+      "pgvector/pgvector:pg17@sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8": "sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8",
+      "postgres_container_id": "48b18fed0ea847f4397e600248c96c16a8a196a8b6d2161bcf5bdf219458d3ea",
+      "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499": "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+      "redis_container_id": "478d5a1a2e901eb8a6748a7cb786ac47ce80bb1d1e85c541bbe0981fe9267425"
+    },
+    "docker_version": "29.8.2|29.8.2",
+    "run_id": "f0f619c78f47"
+  },
+  "run_id": "f0f619c78f47",
+  "status": "completed"
+}

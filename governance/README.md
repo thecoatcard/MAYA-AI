@@ -41,7 +41,7 @@ Instructions alone are not enforcement. Each layer catches what the previous one
 | 2. Tool permissions | `.claude/settings.json` deny and ask rules; other tools' own approval prompts | Misconfiguration; matching limits (see [TOOL_PERMISSIONS.md](TOOL_PERMISSIONS.md)); tools without equivalents |
 | 3. Local Git hooks | `scripts/hooks/` via `core.hooksPath` | `git commit --no-verify`, or not running `npm run setup` |
 | 4. CI | `.github/workflows/` re-runs the same validators | Only by changing the workflow, which needs approval and review |
-| 5. Platform controls | Branch protection, required checks, CODEOWNERS (a manual step; see `docs/operations/BRANCH_PROTECTION.md`) | Repository administrators |
+| 5. Platform controls | Branch protection, required checks, CODEOWNERS (a manual step; the pull-request rule on `main` has been observed to be enforced, the rest is unverified, see `docs/operations/BRANCH_PROTECTION.md`) | Repository administrators |
 
 Layers 4 and 5 are the real gate. Layers 1 to 3 give fast feedback.
 

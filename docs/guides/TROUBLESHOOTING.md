@@ -32,6 +32,17 @@
 - CI treats a skipped YAML or workflow check as a failure; run `npm ci` locally to reproduce.
 - The change-range rules ask for documentation, an ADR or a changelog entry that the local hook cannot always see; run `npm run validate` before pushing.
 
+## The API will not start
+
+| Symptom | Cause and fix |
+| :--- | :--- |
+| `Invalid MAYA configuration; check required variables and URL formats.` | A required variable is missing or invalid. Besides the two URLs, `MAYA_JWT_SIGNING_KEY` and `MAYA_OTP_HMAC_KEY` are required, at least 32 bytes each and different from each other. |
+| Startup fails with `The runtime database role is not restricted` (`unsafe_database_role` in the log) | `MAYA_DATABASE_URL` uses a role that is a superuser, can bypass row-level security, can create roles or databases, or owns tables (for example the migration administrator). Point it at `maya_app`. |
+| Registration, resend and forgot-password answer `503 service_unavailable` | E-mail is not configured (`MAYA_SMTP_HOST`, `MAYA_SMTP_FROM_ADDRESS`) or Redis (the rate limiter) is down. Both fail closed on purpose. |
+| Queries return no rows / `permission denied` as `maya_app` | The migrations were not applied, or a query ran without the workspace context. Use `tenant_transaction`; `permission denied for table users` on `hashed_password` is intended. |
+| `POST /auth/verify-email` answers `invalid_or_expired_code` although the code is right | Verification needs the account's password as well as the code. If the password you chose is not accepted, someone may have registered your address before you: use `POST /auth/forgot-password`; the e-mail names the username, and a successful reset makes the account yours. |
+| PostgreSQL tests report SKIPPED | `MAYA_TEST_ENV_FILE` is not set. Skipped is not passed; see the [runbook](../operations/LOCAL_DEVELOPMENT.md#running-the-postgresql-and-redis-tests). |
+
 ## Windows notes
 
 - `make` is not installed by default; use the `npm run` commands.

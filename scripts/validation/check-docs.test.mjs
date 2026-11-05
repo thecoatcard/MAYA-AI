@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { checkDocs } from './check-docs.mjs';
+import { git } from '../lib/git.mjs';
 
 const CONFIG = {
   requiredFiles: ['README.md'],
@@ -88,4 +89,31 @@ test('docs: new modules need a README or a docs/modules page', () => {
   assert.match(errors(fixture(files)).join('\n'), /backend\/app\/mcp: module has no documentation/);
   assert.deepEqual(errors(fixture({ ...files, 'backend/app/mcp/README.md': '# mcp\n' })), []);
   assert.deepEqual(errors(fixture({ ...files, 'docs/modules/mcp.md': '# mcp\n' })), []);
+});
+
+test('docs: ignored build and dependency files are not application env sources', () => {
+  const root = fixture({
+    'README.md': '# P\n',
+    'docs/CONFIG.md': '# C\n',
+    '.gitignore': '**/.next/\n**/.venv/\n',
+    'apps/web/.next/server/generated.ts': 'process.env.BUILD_INTERNAL;\n',
+    'backend/.venv/lib/dependency.py': 'import os\nos.getenv("LIBRARY_INTERNAL")\n',
+    'src/local.ts': 'process.env.REQUIRED_SOURCE;\n',
+  });
+  git(['init', '-q'], { cwd: root });
+  const findings = errors(root).join('\n');
+  assert.doesNotMatch(findings, /BUILD_INTERNAL|LIBRARY_INTERNAL/);
+  assert.match(findings, /REQUIRED_SOURCE is used but missing/);
+});
+
+test('docs: tracked source is still scanned even when an ignore pattern matches it', () => {
+  const root = fixture({
+    'README.md': '# P\n',
+    'docs/CONFIG.md': '# C\n',
+    '.gitignore': 'src/\n',
+    'src/tracked.ts': 'process.env.TRACKED_SOURCE;\n',
+  });
+  git(['init', '-q'], { cwd: root });
+  git(['add', '-f', 'src/tracked.ts'], { cwd: root });
+  assert.match(errors(root).join('\n'), /TRACKED_SOURCE is used but missing/);
 });
