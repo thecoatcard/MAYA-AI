@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     gemini_budget_task_usd_cap: Decimal | None = Field(default=None, gt=0)
     gemini_max_tool_turns_cap: int | None = Field(default=None, ge=1)
 
+    # Chat (Phase 04). Provisional defaults, not owner-approved (see docs/api/CHAT.md).
+    chat_max_message_chars: int = Field(default=8000, ge=1, le=100_000)
+    chat_rate_limit_per_minute: int = Field(default=20, ge=1, le=10_000)
+    chat_context_token_budget: int = Field(default=32_000, ge=1_000, le=1_000_000)
+
     @field_validator("jwt_signing_key", "otp_hmac_key")
     @classmethod
     def validate_secret_keys(cls, value: SecretStr) -> SecretStr:

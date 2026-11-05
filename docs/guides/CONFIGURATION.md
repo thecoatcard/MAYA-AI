@@ -39,6 +39,9 @@ When code starts reading an environment variable:
 | `MAYA_GEMINI_MAX_TOOL_TURNS_ALERT` | Per-task tool turns alert threshold; a warning only, set it below the cap in `enforce` mode | No; defaults to 10 | `10` |
 | `MAYA_GEMINI_BUDGET_TASK_USD_CAP` | Per-task hard budget cap (USD); required when enforcement mode is `enforce`; owner-approved value 1.50 | No; required in `enforce` mode | None |
 | `MAYA_GEMINI_MAX_TOOL_TURNS_CAP` | Per-task hard tool turn cap; required when enforcement mode is `enforce`; owner-approved value 10 | No; required in `enforce` mode | None |
+| `MAYA_CHAT_MAX_MESSAGE_CHARS` | Longest chat message accepted; provisional, not owner-approved | No; defaults to 8000, 1 to 100000 | `8000` |
+| `MAYA_CHAT_RATE_LIMIT_PER_MINUTE` | Chat messages per user per minute; provisional, no measured baseline exists | No; defaults to 20, 1 to 10000 | `20` |
+| `MAYA_CHAT_CONTEXT_TOKEN_BUDGET` | Soft token budget for the history sent to the model; provisional | No; defaults to 32000, 1000 to 1000000 | `32000` |
 | `POSTGRES_DB` | Compose development database | Compose | `maya` |
 | `POSTGRES_USER` | Compose bootstrap administrator, not the API login | Compose | `maya_migrator` |
 | `POSTGRES_PASSWORD` | Bootstrap password, only a non-secret local example is tracked | Compose | Set privately outside local testing |
