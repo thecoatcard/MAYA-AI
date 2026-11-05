@@ -136,7 +136,7 @@ Financial spend is tracked precisely using `Decimal` arithmetic:
   Redis writes are wrapped in `asyncio.shield` so task cancellation does not drop billing updates.
 - **Enforcement Modes:**
   - `log_only` (default): logs a warning `budget_alert_threshold_exceeded` when spend exceeds `$1.50` or tool turns exceed `10`.
-  - `enforce`: before every provider attempt (including retries, fallbacks and repair turns) `ensure_within_budget` refuses the call once the cost cap is reached (the tool-turn cap is checked for tool-capable calls only); after each call `record_usage` raises if the cap was crossed. Enforcement needs owner-approved caps (open question O6) and is not active by default.
+  - `enforce`: before every provider attempt (including retries, fallbacks and repair turns) `ensure_within_budget` refuses the call once the cost cap is reached (the tool-turn cap is checked for tool-capable calls only); after each call `record_usage` raises if the cap was crossed. The owner approved the caps on 2026-11-05 (O6: $1.50 per task, 10 tool turns); enforcement is opt-in (`MAYA_BUDGET_ENFORCEMENT_MODE=enforce`) and not active by default. In `enforce` mode set the alert thresholds below the caps.
 
 ---
 
@@ -179,5 +179,5 @@ Financial spend is tracked precisely using `Decimal` arithmetic:
 - **Context cache:** reference store and 404 purge only; see section 6.
 - **Structured output** relies on the prompt plus local validation and one repair turn; provider-side JSON mode (`response_schema`) is not used.
 - **Prices:** figures come from the master plan and several are marked unverified there; overridden model ids are priced as unknown.
-- **Budgets:** the exit gate stays open until the owner confirms per-task caps (open question O6); `log_only` is the default.
+- **Budgets:** caps approved (O6, 2026-11-05); `log_only` stays the default until the gateway runs real tasks. The exit gate still waits for the owner-run live smoke check.
 - **Ambient SDK configuration:** besides the key and Vertex mode (pinned in code), the SDK reads `GOOGLE_GENAI_HTTP_CLIENT` to pick its HTTP library; error classification works for all of them.

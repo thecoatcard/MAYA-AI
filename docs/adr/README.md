@@ -29,5 +29,7 @@ The `architecture` rule in `governance/governance.config.json` asks for an ADR (
 | [0004](0004-local-foundation.md) | Local API, web and data-service foundation | Proposed |
 | [0005](0005-own-account-authentication.md) | Own-account authentication, one-time codes and sessions | Accepted |
 | [0006](0006-tenant-isolation-with-row-level-security.md) | Tenant isolation with forced row-level security | Accepted |
+| [0007](0007-gemini-model-gateway-architecture.md) | Gemini model gateway architecture, resilience and token accounting | Proposed |
+| [0008](0008-chat-api-contract.md) | Chat API contract, idempotency and persistence | Accepted |
 
 Product-level decisions from the project plan (modular monolith, voice/task separation, permission tiers, and others) will be recorded here as ADRs when implementation starts.

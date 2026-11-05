@@ -3,9 +3,9 @@
 | Metric               | Status                                                                                                                                   |
 | :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
 | **Current Baseline** | Phase 00 governance, Phase 01 local foundation, Phase 02 schema/RLS/auth, and Phase 03 Model Gateway implemented locally on branch `feat/phase-03-gemini-model-gateway` (committed locally, not pushed) |
-| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally · Phase 03: implemented locally under owner gate exception; exit gate blocked on O6 |
+| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally · Phase 03: implemented locally under owner gate exception; O6 caps approved 2026-11-05; exit gate waits for the owner-run live smoke check |
 | **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Short Gemini smoke completed |
-| **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 O6 budget caps; Phase 04 chat contract |
+| **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 owner-run live smoke check; `pyasn1` upgrade decision (four advisories, fixed in 0.6.5) |
 | **Last Updated**     | 2026-11-05 (Phase 02 implementation)                                                                                                     |
 | **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (applied to disposable test databases and the persistent local database) and own-account authentication; no model gateway, chat, agents or voice |
 
@@ -18,7 +18,7 @@
 | [`Phase 00`](IMPLEMENTATION_PHASES/PHASE_00_GOVERNANCE.md)             | Project Governance & Development Environment          | **Implemented locally; CI unverified** | 2026-11-05      | Last recorded fast check: 7 passed, 1 skipped; GitHub CI has not run; ADRs 0001 and 0002 remain Proposed |
 | [`Phase 01`](IMPLEMENTATION_PHASES/PHASE_01_FOUNDATION.md) | Core Infrastructure & Application Foundation | **Implemented/Tested locally; extended live evidence pending** | Local closure: 2026-11-05 | Foundation, S1/S2 and short S3/S4 smoke verified. ADR-0003 Accepted. Owner revised scope to free-only; long-session/continuity still pending |
 | [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **Implemented/Tested locally** | Local: 2026-11-05 | 864 backend tests with local PostgreSQL/Redis, strict lint and types; see the [verification record](../testing/AUTH_AND_RLS.md). Started under the owner's gate exception. Persistent local database migrated; ADR-0005/0006 accepted. Not CI-verified (the workflow has never run). The owner reported (2026-11-05) that the SMTP check, e-mail delivery, registration, verification and login all work against the real mail account |
-| [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **Implemented locally; exit gate blocked on O6** | 2026-11-05      | Implemented under owner gate exception; 131 gateway and smoke-tool tests passing offline; ADR-0007 Proposed; ModelGateway with 6 typed operations, terminating fallback, exact Decimal token/cost accounting (unknown cost is `None`), Redis micro-USD budgeting with a pre-call guard, and an owner-only smoke tool. Partial: context caching is a workspace-scoped reference store only (no provider cache creation or attachment). Never run against the real provider (owner smoke check pending). Exit gate blocked on O6 budget caps. |
+| [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **Implemented locally; exit gate: owner-run live check pending** | 2026-11-05      | Implemented under owner gate exception; 131 gateway and smoke-tool tests passing offline; ADR-0007 Proposed; ModelGateway with 6 typed operations, terminating fallback, exact Decimal token/cost accounting (unknown cost is `None`), Redis micro-USD budgeting with a pre-call guard, and an owner-only smoke tool. Partial: context caching is a workspace-scoped reference store only (no provider cache creation or attachment). Never run against the real provider (owner smoke check pending). O6 caps approved 2026-11-05 ($1.50/task, 10 tool turns; enforcement opt-in). Exit gate waits for the owner-run live smoke check. |
 | [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03; public SSE/session contract requires owner decision                           |
 | [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03                                                                                |
 | [`Phase 06`](IMPLEMENTATION_PHASES/PHASE_06_BACKGROUND_TASK_ENGINE.md) | Background Task Execution Engine                      | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 05                                                                                |
@@ -44,6 +44,26 @@ live Gemini call." Scope: Phase 03 planning and implementation only. It does not
 or any paid or live Gemini call. Phase 01 stays "Implemented/Tested locally; extended live
 evidence pending". Phase 03 uses mock/fake clients and deterministic tests only; paid calls
 remain strictly blocked until a provider-enforced INR 100 cap is verified.
+
+**Phase 04 dependency-gate exception (2026-11-05).** Asked in the session: "Do you grant a
+dependency-gate exception for Phase 04 (chat) only, like the ones for Phases 02 and 03? ... The exception
+would not cover Phase 12 or any paid or live Gemini call." Owner answer: "Yes, Phase 04 only".
+Scope: Phase 04 only, while the Phase 03 live smoke check and the Phase 01 extended Gemini
+evidence stay open. It does not cover Phase 12 or any paid or live Gemini call; Phase 04 tests use
+fake clients only.
+
+**Phase 04 chat API contract (2026-11-05, task P04-T004).** Asked in the session which contract to
+approve for `POST /api/v1/chat/message`; the owner chose "Hybrid typed-event SSE": the master-plan path
+with a typed event stream (`message.accepted`, `delta`, `done`, `error`, each with an event id; Phase 05
+adds `task.*` events later without breaking clients), an optional `session_id` (the server creates a
+session and returns its id), an `Idempotency-Key` header so a reconnect never re-bills, and read-only
+session list and message history endpoints. Session create, rename and delete endpoints are not in the
+MVP. The written contract is `docs/api/CHAT.md`.
+
+**Phase 03 O6 budget caps (2026-11-05).** Asked in the session which caps to approve; the owner chose
+"Plan values: $1.50/task, 10 tool turns". Enforcement still defaults to `log_only` and is switched on
+with `MAYA_BUDGET_ENFORCEMENT_MODE=enforce`; the real spend limit today remains the provider-enforced
+INR 100 cap.
 
 **Phase 02 dependency-gate exception (2026-11-05).** The owner permitted Phase 02
 (authentication, database and RLS) implementation while the Phase 01 item
@@ -176,7 +196,7 @@ Only the account/login choice below is recorded as an owner decision. Recommenda
 | **O3**      | Team size and target calendar date | No team size or target date confirmed.                                                                                                                                                        | The 22-week roadmap is unvalidated; do not claim a committed schedule.                        | OPEN          |
 | **O4**      | MVP hosting target                 | No hosting target confirmed.                                                                                                                                                                  | Keep hosting-specific implementation choices out of scope until decided.                      | OPEN          |
 | **O5**      | Voice approvals                    | Master-plan recommendation only; owner has not confirmed it as a decision.                                                                                                                    | Do not rely on voice-approval behavior until confirmed; Phase 07 must use an approved policy. | OPEN          |
-| **O6**      | Budget ceilings                    | Master-plan values ($1.50 per task and 10 tool turns) are proposals, not owner-approved caps.                                                                                                 | Phase 03 may instrument usage, but enforcement thresholds require owner confirmation.         | OPEN          |
+| **O6** | Budget ceilings | Owner approved the master-plan values on 2026-11-05 as the per-task caps: $1.50 per task and 10 tool turns (session answer "Plan values: $1.50/task, 10 tool turns"). | Set `MAYA_BUDGET_ENFORCEMENT_MODE=enforce` with these caps before any live use; the default stays `log_only`. | APPROVED |
 
 ---
 

@@ -74,14 +74,14 @@ Evidence for the items below is the [Model Gateway architecture document](../arc
 - [x] Simulated 429 errors trigger full jitter exponential backoff (2s, 4s, 8s, 16s with uniform(0, delay), 4 retries) before fallback to secondary model.
 - [x] Simulated 5xx errors trigger immediate failover to designated secondary model without retry.
 - [x] Malformed structured outputs trigger exactly one self-repair turn with schema feedback before failover.
-- [x] Gateway contract covers text, structured output, streaming, tool calls, embeddings, token counting, and mid-stream errors (`StreamInterruptedError`). Budget enforcement mode supports `log_only` (default) and `enforce`; proposed caps ($1.50/task, 10 turns/task) implemented, final exit gate blocked on Open Question O6 owner confirmation.
+- [x] Gateway contract covers text, structured output, streaming, tool calls, embeddings, token counting, and mid-stream errors (`StreamInterruptedError`). Budget enforcement mode supports `log_only` (default) and `enforce`; caps ($1.50/task, 10 turns/task) approved by the owner on 2026-11-05 (O6); enforcement is opt-in with `MAYA_BUDGET_ENFORCEMENT_MODE=enforce`.
 - [x] Usage accounting includes thinking (`thoughts_token_count`, billed as output) and tool-use (`tool_use_prompt_token_count`, billed as input) tokens, and correctly handles cached-token pricing; unknown prices are reported as `None` with `is_estimated_cost_complete=False`, never as zero.
 - [x] Fallback traversal terminates and cannot loop (the alias graph contains the pair `orchestrator` <-> `lite` by design; traversal visits each alias once); context-cache references are strictly scoped by workspace (`maya:cache:{workspace_id}:{model_id}:{content_hash}`) and a 404 purge handler exists.
 - [ ] Eligible repeated prompts can reuse a correctly scoped provider cache: not implemented. `ContextCacheManager` is a reference store that `ModelGateway` does not use; provider cache creation, attachment, uncached retry on 404 and storage-cost metering remain open and need live verification.
 - [x] Deterministic tests use mocks/test doubles; live Gemini checks are separate in `backend/app/tools/gemini_smoke.py` (free-tier default; paid calls hard-gated behind `--confirm-paid-calls-up-to-inr-100`, never run by agents).
 - [ ] Live verification by the owner: the gateway and the real SDK adapter have never been run against the Gemini API (streaming, embeddings, error shapes, prices). Pending the owner-run smoke check.
 
-**Local scope implemented and tested offline, with the two open items above; exit gate blocked on Open Question O6 (budget caps).** All 131 gateway and smoke-tool tests pass deterministically offline. Zero regressions on existing Phase 00–02 test suites.
+**Local scope implemented and tested offline, with the two open items above; O6 resolved; exit gate waits for the owner-run live smoke check.** All 131 gateway and smoke-tool tests pass deterministically offline. Zero regressions on existing Phase 00–02 test suites.
 
 ### Phase 04 — Chat and Conversation System
 

@@ -1,6 +1,6 @@
 # Module: model gateway
 
-- **Status:** Implemented locally (Phase 03; exit gate blocked on O6)
+- **Status:** Implemented locally (Phase 03; exit gate waits for the owner-run live check)
 - **Owner:** Repository owner
 - **Location:** `backend/app/gateway/`
 - **Architecture Documentation:** [MODEL_GATEWAY.md](../../../docs/architecture/MODEL_GATEWAY.md)

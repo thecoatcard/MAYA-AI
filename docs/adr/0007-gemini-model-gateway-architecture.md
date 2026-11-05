@@ -39,7 +39,7 @@ Key requirements and challenges identified during Phase 03 planning:
    - Financial rates are stored as `Decimal` per 1M tokens. Unknown prices (`research`, `tts`, `embed-fallback`, or overridden aliases) are flagged `price_unknown=True`, report `estimated_cost_usd=None` (never `0`) and `is_estimated_cost_complete=False`. Thinking tokens are billed at the output rate and tool-use prompt tokens at the input rate.
    - USD costs convert to micro-USD integers via `ROUND_UP` to guarantee budgets never undercount.
    - Redis updates use atomic pipelines (`HINCRBY cost_micro_usd`, `tool_turns`, `total_tokens`, `unpriced_calls`, `EXPIRE 86400`) wrapped in `asyncio.shield`.
-   - `log_only` mode logs warnings when alert thresholds ($1.50 / 10 turns) are exceeded. `enforce` mode checks the caps before every provider attempt (retries, fallbacks and repair turns included) and raises `BudgetExceededError`; it needs owner-approved caps (O6).
+   - `log_only` mode logs warnings when alert thresholds ($1.50 / 10 turns) are exceeded. `enforce` mode checks the caps before every provider attempt (retries, fallbacks and repair turns included) and raises `BudgetExceededError`; the owner approved the caps (O6, 2026-11-05): $1.50 per task and 10 tool turns.
 
 5. **Context Cache References:**
    Redis stores provider cache references under `maya:cache:{workspace_id}:{model_id}:{content_hash}` with mandatory `workspace_id`, and a handler purges a reference after a provider 404. Provider cache creation, attachment to requests, uncached retry and storage-cost metering are not implemented and need live verification first.
