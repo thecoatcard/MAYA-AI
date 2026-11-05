@@ -129,7 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verify-free-tier",
         action="store_true",
-        help="Verify on free-tier without incurring charges",
+        help=(
+            "Owner asserts the configured key is a free-tier key. The tool cannot verify this: "
+            "on a paid-tier key the call is still billed (one tiny prompt)."
+        ),
     )
     parser.add_argument(
         "--confirm-paid-calls-up-to-inr-100",

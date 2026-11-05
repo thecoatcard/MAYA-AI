@@ -177,7 +177,9 @@ def test_algorithm_downgrade_and_none_are_rejected() -> None:
     with pytest.raises(TokenError):
         codec.decode_access(jwt.encode(claims, KEY, algorithm="HS512"))
     with pytest.raises(TokenError):
-        codec.decode_access(jwt.encode(claims, None, algorithm="none"))
+        # PyJWT's key typing narrows once cryptography is installed (google-auth pulls it in);
+        # passing no key is exactly what forging an unsigned token looks like.
+        codec.decode_access(jwt.encode(claims, None, algorithm="none"))  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("claim", ["iss", "aud", "sub", "jti", "exp", "iat", "typ"])

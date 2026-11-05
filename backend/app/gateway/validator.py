@@ -41,7 +41,20 @@ def parse_and_validate_json[T: BaseModel](
         model = schema.model_validate(data)
         return model, None
     except ValidationError as exc:
-        return None, f"Schema validation error: {exc}"
+        return None, _summarize_validation_error(exc)
+
+
+def _summarize_validation_error(exc: ValidationError) -> str:
+    """Summarize a validation error as ``location: message`` pairs without the offending values.
+
+    ``str(ValidationError)`` embeds ``input_value=...`` from the model output, which may contain
+    user or workspace data; only the field path and the rule message are kept.
+    """
+    parts = [
+        f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
+        for err in exc.errors(include_url=False, include_context=False, include_input=False)
+    ]
+    return "Schema validation error: " + "; ".join(parts)
 
 
 def format_repair_prompt[T: BaseModel](raw_text: str, error_message: str, schema: type[T]) -> str:

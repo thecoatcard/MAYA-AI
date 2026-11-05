@@ -7,7 +7,10 @@ import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from google.genai import errors as genai_errors
+
 from app.gateway.exceptions import (
+    GatewayError,
     GatewayFallbackExhaustedError,
     ToolCallCommitmentError,
 )
@@ -15,36 +18,68 @@ from app.gateway.registry import ModelRegistry, ModelSpec
 
 logger = logging.getLogger(__name__)
 
+# Transport libraries used by the SDK (httpx, httpx2 or aiohttp, chosen at runtime) raise their
+# own exception classes. They are recognised by class name along the MRO so that no single HTTP
+# library has to be imported here and ambient SDK configuration cannot change the classification.
+_TRANSPORT_ERROR_NAMES = frozenset(
+    {
+        "TransportError",
+        "NetworkError",
+        "ConnectError",
+        "ConnectionError",
+        "RemoteProtocolError",
+        "ReadError",
+        "WriteError",
+        "ClientConnectionError",
+        "ClientConnectorError",
+        "ClientOSError",
+        "ServerDisconnectedError",
+    }
+)
+
+
+def describe_error(exc: BaseException | None) -> str:
+    """Return a log-safe description (exception class and HTTP status only, never its text).
+
+    Provider error text can echo request content, so it is never logged or embedded in
+    gateway exceptions.
+    """
+    if exc is None:
+        return "none"
+    code = exc.code if isinstance(exc, genai_errors.APIError) else None
+    name = type(exc).__name__
+    return f"{name}({code})" if isinstance(code, int) else name
+
 
 def classify_gateway_error(exc: Exception) -> str:
-    """Classify an error from the provider API into an action category:
+    """Classify an error from the provider API into an action category.
 
-    - "retry_with_backoff": 429 (quota / rate limit) and network/socket timeouts.
-    - "failover_immediate": 5xx server errors (500, 502, 503, 504) and connection resets.
-    - "non_retryable": 400, 401, 403, and safety blocks (never retry or fall back).
+    - "retry_with_backoff": 429 (quota / rate limit), 408, and timeouts.
+    - "failover_immediate": 5xx server errors and connection-level transport failures.
+    - "non_retryable": 400, 401, 403, other 4xx, gateway errors (including budget and content
+      blocks) and anything unrecognised (fail safe, never spend money on an unknown failure).
+
+    Classification uses exception types and HTTP status codes only. It never searches the error
+    message: messages can contain identifiers or echoed content that merely looks like a status.
     """
-    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
-        return "retry_with_backoff"
-
-    # Inspect HTTP status code if present on exception (e.g. google.genai.errors.APIError)
-    code = getattr(exc, "code", None)
-    if isinstance(code, int):
-        if code == 429:
-            return "retry_with_backoff"
-        if 500 <= code < 600:
-            return "failover_immediate"
-        if code in (400, 401, 403):
-            return "non_retryable"
-
-    error_str = str(exc).lower()
-    if any(term in error_str for term in ("safety", "blocked", "harmful", "recitation")):
+    if isinstance(exc, GatewayError):
         return "non_retryable"
-    if "429" in error_str or "resource_exhausted" in error_str or "rate limit" in error_str:
+
+    if isinstance(exc, genai_errors.APIError):
+        code = exc.code
+        if isinstance(code, int):
+            if code in (408, 429):
+                return "retry_with_backoff"
+            if 500 <= code < 600:
+                return "failover_immediate"
+        return "non_retryable"
+
+    class_names = {cls.__name__ for cls in type(exc).__mro__}
+    if isinstance(exc, TimeoutError) or any("timeout" in name.lower() for name in class_names):
         return "retry_with_backoff"
-    if any(term in error_str for term in ("500", "502", "503", "504", "internal server error")):
+    if isinstance(exc, OSError) or class_names & _TRANSPORT_ERROR_NAMES:
         return "failover_immediate"
 
-    # Default unknown errors: non-retryable to fail safe
     return "non_retryable"
 
 
@@ -110,25 +145,26 @@ class ResiliencePolicy:
                     last_exception = exc
                     if is_tool_call_committed:
                         raise ToolCallCommitmentError(
-                            f"Cannot retry or fall back after tool call commitment: {exc}"
+                            "Cannot retry or fall back after tool call commitment "
+                            f"({describe_error(exc)})"
                         ) from exc
 
                     category = classify_gateway_error(exc)
 
                     if category == "non_retryable":
-                        # 400, 401, 403, safety: fail immediately
-                        raise exc
+                        # 400, 401, 403, safety, budget: fail immediately
+                        raise
 
                     if category == "retry_with_backoff":
                         if attempt < self.max_retries_per_model:
                             delay = self.base_delays[min(attempt, len(self.base_delays) - 1)]
                             jittered_delay = self.random_uniform(0.0, delay)
                             logger.warning(
-                                "gateway_retry_backoff alias=%s attempt=%d delay=%.2f reason=%s",
+                                "gateway_retry_backoff alias=%s attempt=%d delay=%.2f error=%s",
                                 alias,
                                 attempt + 1,
                                 jittered_delay,
-                                exc,
+                                describe_error(exc),
                             )
                             await self.sleep(jittered_delay)
                             continue
@@ -141,16 +177,16 @@ class ResiliencePolicy:
                         break
 
                     if category == "failover_immediate":
-                        # 5xx: immediate fallback without retries
+                        # 5xx / transport failure: immediate fallback without retries
                         logger.warning(
-                            "gateway_5xx_immediate_failover alias=%s reason=%s fallback_next=%s",
+                            "gateway_immediate_failover alias=%s error=%s fallback_next=%s",
                             alias,
-                            exc,
+                            describe_error(exc),
                             chain[alias_idx + 1] if alias_idx + 1 < len(chain) else "none",
                         )
                         break
 
         raise GatewayFallbackExhaustedError(
             f"All candidate models in fallback chain exhausted for alias '{start_alias}'. "
-            f"Last error: {last_exception}"
+            f"Last error: {describe_error(last_exception)}"
         ) from last_exception

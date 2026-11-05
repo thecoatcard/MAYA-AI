@@ -56,5 +56,12 @@ class BudgetExceededError(GatewayError):
     """Raised when a task exceeds approved financial or tool-turn budgets in enforce mode."""
 
 
+class ContentBlockedError(GatewayError):
+    """Raised when the provider blocks a prompt or response (safety, recitation, blocklist).
+
+    Blocks are never retried and never trigger fallback to another model.
+    """
+
+
 class InputSanitizationError(GatewayError):
     """Raised when input violates sanitization constraints (e.g. invalid UTF-8, length limit)."""

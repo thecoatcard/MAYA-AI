@@ -119,7 +119,8 @@ def test_unknown_price_handling_research_tts_embed_fallback() -> None:
         assert spec.price_unknown is True
         usage = TokenUsage(prompt_tokens=500, candidates_tokens=100)
         cost, complete = calculate_cost(spec, usage)
-        assert cost == Decimal("0.000000")
+        # Unknown is None, never 0.00: a zero would read as "free".
+        assert cost is None
         assert complete is False
 
 
@@ -131,7 +132,7 @@ def test_unknown_price_handling_overridden_alias() -> None:
 
     usage = TokenUsage(prompt_tokens=1_000, candidates_tokens=500)
     cost, complete = calculate_cost(spec, usage)
-    assert cost == Decimal("0.000000")
+    assert cost is None
     assert complete is False
 
 
@@ -149,7 +150,7 @@ def test_missing_needed_rates_returns_incomplete() -> None:
     )
     usage_with_output = TokenUsage(prompt_tokens=100, candidates_tokens=50)
     cost, complete = calculate_cost(incomplete_spec, usage_with_output)
-    assert cost == Decimal("0.000000")
+    assert cost is None
     assert complete is False
 
     # But if no output tokens are produced and no cached tokens, input-only works

@@ -62,9 +62,3 @@ plugins = ["pydantic.mypy"]
 # Host orchestration, metrics, offline CLIs and deterministic tests remain checked here.
 # arq_worker.py imports ARQ-only SDKs and is checked through the S1 spike environment.
 exclude = ['^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
-
-# PyJWT typing changes its AllowedPrivateKeyTypes union when cryptography is installed (transitive from google-auth).
-# In tests/unit/test_security_tokens.py:180, jwt.encode(claims, None, algorithm="none") tests rejecting algorithm 'none'.
-[[tool.mypy.overrides]]
-module = "tests.unit.test_security_tokens"
-disable_error_code = ["arg-type"]

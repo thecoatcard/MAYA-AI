@@ -60,6 +60,9 @@ class Resources:
 
     async def close(self) -> None:
         try:
-            await self.redis.aclose()
+            await self.model_gateway.aclose()
         finally:
-            await self.engine.dispose()
+            try:
+                await self.redis.aclose()
+            finally:
+                await self.engine.dispose()

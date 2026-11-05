@@ -77,5 +77,6 @@ async def verify_gateway_at_startup(
     except GatewayStartupError:
         raise
     except Exception as exc:
-        logger.error("gateway_startup_remote_check_failed reason=%s", exc)
-        raise GatewayStartupError(f"Startup model discovery failed: {exc}") from exc
+        # Only the exception class is reported: provider error text is never logged.
+        logger.error("gateway_startup_remote_check_failed error=%s", type(exc).__name__)
+        raise GatewayStartupError(f"Startup model discovery failed ({type(exc).__name__})") from exc

@@ -11,6 +11,12 @@ class TokenUsage(BaseModel):
 
     Tracks prompt, candidates, cached content, thoughts, and tool prompt tokens,
     as well as calculated financial cost and estimate flags.
+
+    ``estimated_cost_usd`` is ``None`` whenever the cost cannot be fully determined (unknown or
+    overridden model price, or a rate needed for the reported tokens is missing). An unknown
+    cost is never represented as ``0``; check ``is_estimated_cost_complete`` before using it.
+    ``is_usage_estimate`` is True when the token counts themselves are estimates (for example an
+    interrupted stream or a response that carried no usage metadata).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -21,17 +27,22 @@ class TokenUsage(BaseModel):
     tool_use_prompt_token_count: int = 0
     cached_content_token_count: int = 0
     total_token_count: int = 0
-    estimated_cost_usd: Decimal = Field(default=Decimal("0.000000"))
+    estimated_cost_usd: Decimal | None = None
     price_unknown: bool = False
-    is_estimated_cost_complete: bool = True
+    is_estimated_cost_complete: bool = False
     is_usage_estimate: bool = False
 
     @model_validator(mode="after")
     def _compute_total_tokens(self) -> Self:
-        if self.total_token_count == 0 and (self.prompt_tokens + self.candidates_tokens > 0):
-            self.total_token_count = (
-                self.prompt_tokens + self.candidates_tokens + self.thoughts_token_count
+        if self.total_token_count == 0:
+            total = (
+                self.prompt_tokens
+                + self.candidates_tokens
+                + self.thoughts_token_count
+                + self.tool_use_prompt_token_count
             )
+            if total > 0:
+                self.total_token_count = total
         return self
 
 
@@ -47,32 +58,37 @@ class GatewayResponse(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
-    estimated_cost_usd: Decimal = Field(default=Decimal("0.000000"))
+    estimated_cost_usd: Decimal | None = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
 
     @model_validator(mode="after")
     def _sync_usage(self) -> Self:
-        if (
-            self.usage.prompt_tokens > 0
-            or self.usage.candidates_tokens > 0
-            or self.usage.cached_content_token_count > 0
-            or self.usage.estimated_cost_usd != Decimal("0.000000")
-        ):
+        """Mirror the flat convenience fields and ``usage`` so either can be supplied."""
+        usage = self.usage
+        usage_populated = (
+            usage.prompt_tokens > 0
+            or usage.candidates_tokens > 0
+            or usage.cached_content_token_count > 0
+            or usage.estimated_cost_usd is not None
+        )
+        if usage_populated:
             if self.input_tokens == 0:
-                self.input_tokens = self.usage.prompt_tokens
+                self.input_tokens = usage.prompt_tokens
             if self.output_tokens == 0:
-                self.output_tokens = self.usage.candidates_tokens
+                self.output_tokens = usage.candidates_tokens
             if self.cached_tokens == 0:
-                self.cached_tokens = self.usage.cached_content_token_count
-            if self.estimated_cost_usd == Decimal("0.000000"):
-                self.estimated_cost_usd = self.usage.estimated_cost_usd
+                self.cached_tokens = usage.cached_content_token_count
+            if self.estimated_cost_usd is None:
+                self.estimated_cost_usd = usage.estimated_cost_usd
         else:
-            self.usage.prompt_tokens = self.input_tokens
-            self.usage.candidates_tokens = self.output_tokens
-            self.usage.cached_content_token_count = self.cached_tokens
-            self.usage.estimated_cost_usd = self.estimated_cost_usd
-            if self.usage.total_token_count == 0:
-                self.usage.total_token_count = self.input_tokens + self.output_tokens
+            usage.prompt_tokens = self.input_tokens
+            usage.candidates_tokens = self.output_tokens
+            usage.cached_content_token_count = self.cached_tokens
+            if self.estimated_cost_usd is not None:
+                usage.estimated_cost_usd = self.estimated_cost_usd
+                usage.is_estimated_cost_complete = True
+            if usage.total_token_count == 0:
+                usage.total_token_count = self.input_tokens + self.output_tokens
         return self
 
 

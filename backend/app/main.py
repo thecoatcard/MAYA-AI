@@ -32,13 +32,12 @@ def create_app(
         try:
             await resources.check()
             await resources.verify_runtime_role()
+            # Tests replace Resources with mocks that carry no real registry; verify only when
+            # the real gateway-bearing Resources is in use.
             if isinstance(getattr(resources, "registry", None), ModelRegistry):
-                client = (
-                    getattr(resources.model_gateway, "_client", None)
-                    if hasattr(resources, "model_gateway")
-                    else None
+                await verify_gateway_at_startup(
+                    resources.registry, configuration, client=resources.model_gateway.client
                 )
-                await verify_gateway_at_startup(resources.registry, configuration, client=client)
             service = auth_service or build_auth_service(configuration, resources)
             app.state.auth_service = service
             await service.warm_up()

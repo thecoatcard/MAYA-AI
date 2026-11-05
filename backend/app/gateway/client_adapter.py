@@ -24,8 +24,14 @@ def build_genai_client(
 ) -> genai.Client:
     """Build a Google GenAI Client configured with explicit API key and timeout.
 
-    Never reads credentials implicitly from environment variables (GEMINI_API_KEY,
-    GOOGLE_API_KEY, or GOOGLE_GENAI_USE_VERTEXAI).
+    The explicit ``api_key`` takes precedence over GEMINI_API_KEY and GOOGLE_API_KEY, and
+    ``vertexai=False`` pins the Gemini Developer API so that an ambient
+    GOOGLE_GENAI_USE_VERTEXAI=true cannot switch the client to Vertex AI mode.
+
+    SDK-level retries are disabled with ``HttpRetryOptions(attempts=1)`` ("0 or 1 means no
+    retries"). ``retry_options=None`` would NOT disable them: the SDK then applies its own
+    implicit retry on transport errors. All retry, backoff and fallback policy belongs to
+    ``ResiliencePolicy`` so that every attempt is metered and bounded.
 
     Raises:
         GatewayConfigurationError: If api_key is None or empty.
@@ -40,9 +46,10 @@ def build_genai_client(
 
     return genai.Client(
         api_key=api_key.strip(),
+        vertexai=False,
         http_options=types.HttpOptions(
             timeout=timeout_ms,
-            retry_options=None,  # Disable SDK-level retries; ModelGateway manages resilience
+            retry_options=types.HttpRetryOptions(attempts=1),
         ),
     )
 

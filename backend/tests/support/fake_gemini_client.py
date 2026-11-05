@@ -21,6 +21,13 @@ class FakeAsyncModels:
         self.default_tool_calls: list[dict[str, Any]] | None = None
         self.embedding_dimension: int = 768
         self.stream_error_after_chunk: int | None = None
+        # Errors raised when a stream is first iterated (after it was opened, before chunk 1).
+        self.stream_first_chunk_errors: dict[str, list[Exception]] = {}
+        self.stream_includes_usage: bool = True
+        self.block_prompt: bool = False
+        self.omit_usage: bool = False
+        # Streams started and not yet closed/exhausted; lets tests assert the SDK stream is closed.
+        self.open_streams: int = 0
         self.available_models: list[str] = [
             "models/gemini-3.8-flash",
             "models/gemini-4-argon",
@@ -58,6 +65,16 @@ class FakeAsyncModels:
         )
         self._check_injected_error(model)
 
+        if self.block_prompt:
+            # The real SDK returns (does not raise) when the prompt is blocked.
+            return types.GenerateContentResponse(
+                prompt_feedback=types.GenerateContentResponsePromptFeedback(
+                    block_reason=types.BlockedReason.SAFETY
+                ),
+                usage_metadata=types.GenerateContentResponseUsageMetadata(prompt_token_count=7),
+                model_version=model,
+            )
+
         if self.default_tool_calls:
             parts = [
                 types.Part.from_function_call(name=tc["name"], args=tc["args"])
@@ -84,7 +101,7 @@ class FakeAsyncModels:
                     finish_reason=types.FinishReason.STOP,
                 )
             ],
-            usage_metadata=usage,
+            usage_metadata=None if self.omit_usage else usage,
             model_version=model,
         )
 
@@ -95,6 +112,12 @@ class FakeAsyncModels:
         contents: Any,
         config: Any = None,
     ) -> AsyncIterator[types.GenerateContentResponse]:
+        """Coroutine resolving to an async iterator, exactly like the real SDK.
+
+        The real ``AsyncModels.generate_content_stream`` is ``async def`` and must be awaited
+        before ``async for``; the parity tests pin this. HTTP status errors (429, 5xx) are raised
+        here, at await time, before any chunk exists.
+        """
         self.calls.append(
             {
                 "method": "generate_content_stream",
@@ -104,39 +127,51 @@ class FakeAsyncModels:
             }
         )
         self._check_injected_error(model)
+        return self._stream_chunks(model)
 
-        # Yield chunks simulating a streaming response
-        words = self.default_text.split(" ")
-        for idx, word in enumerate(words):
-            if self.stream_error_after_chunk is not None and idx >= self.stream_error_after_chunk:
-                raise ConnectionResetError("Simulated network stream dropout")
+    async def _stream_chunks(self, model: str) -> AsyncIterator[types.GenerateContentResponse]:
+        self.open_streams += 1
+        try:
+            queued = self.stream_first_chunk_errors.get(model)
+            if queued:
+                raise queued.pop(0)
 
-            chunk_text = word + (" " if idx < len(words) - 1 else "")
-            is_last = idx == len(words) - 1
-            usage = None
-            if is_last:
-                usage = types.GenerateContentResponseUsageMetadata(
-                    prompt_token_count=self.prompt_token_count,
-                    candidates_token_count=self.candidates_token_count,
-                    cached_content_token_count=self.cached_content_token_count,
-                    thoughts_token_count=self.thoughts_token_count,
-                    tool_use_prompt_token_count=self.tool_use_prompt_token_count,
-                    total_token_count=self.prompt_token_count + self.candidates_token_count,
-                )
+            words = self.default_text.split(" ")
+            for idx, word in enumerate(words):
+                if (
+                    self.stream_error_after_chunk is not None
+                    and idx >= self.stream_error_after_chunk
+                ):
+                    raise ConnectionResetError("Simulated network stream dropout")
 
-            yield types.GenerateContentResponse(
-                candidates=[
-                    types.Candidate(
-                        content=types.Content(
-                            parts=[types.Part.from_text(text=chunk_text)],
-                            role="model",
-                        ),
-                        finish_reason=types.FinishReason.STOP if is_last else None,
+                chunk_text = word + (" " if idx < len(words) - 1 else "")
+                is_last = idx == len(words) - 1
+                usage = None
+                if is_last and self.stream_includes_usage:
+                    usage = types.GenerateContentResponseUsageMetadata(
+                        prompt_token_count=self.prompt_token_count,
+                        candidates_token_count=self.candidates_token_count,
+                        cached_content_token_count=self.cached_content_token_count,
+                        thoughts_token_count=self.thoughts_token_count,
+                        tool_use_prompt_token_count=self.tool_use_prompt_token_count,
+                        total_token_count=self.prompt_token_count + self.candidates_token_count,
                     )
-                ],
-                usage_metadata=usage,
-                model_version=model,
-            )
+
+                yield types.GenerateContentResponse(
+                    candidates=[
+                        types.Candidate(
+                            content=types.Content(
+                                parts=[types.Part.from_text(text=chunk_text)],
+                                role="model",
+                            ),
+                            finish_reason=types.FinishReason.STOP if is_last else None,
+                        )
+                    ],
+                    usage_metadata=usage,
+                    model_version=model,
+                )
+        finally:
+            self.open_streams -= 1
 
     async def embed_content(
         self,
