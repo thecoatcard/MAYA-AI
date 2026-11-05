@@ -1,5 +1,10 @@
 """MAYA AI Model Gateway package (Phase 03)."""
 
+from app.gateway.cache_manager import (
+    CACHE_KEY_PREFIX,
+    ContextCacheManager,
+    compute_content_hash,
+)
 from app.gateway.client_adapter import (
     build_genai_client,
     create_client_from_settings,
@@ -60,6 +65,8 @@ __all__ = [
     "ALLOWED_OVERRIDE_ALIASES",
     "BudgetExceededError",
     "BudgetTracker",
+    "CACHE_KEY_PREFIX",
+    "ContextCacheManager",
     "EmbeddingDimensionMismatchError",
     "EmbeddingResponse",
     "GatewayConfigurationError",
@@ -87,6 +94,7 @@ __all__ = [
     "build_genai_client",
     "calculate_cost",
     "classify_gateway_error",
+    "compute_content_hash",
     "cost_to_micro_usd",
     "create_client_from_settings",
     "format_repair_prompt",
