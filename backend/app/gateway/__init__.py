@@ -12,6 +12,7 @@ from app.gateway.exceptions import (
     GatewayError,
     GatewayFallbackExhaustedError,
     GatewayStartupError,
+    InputSanitizationError,
     StreamInterruptedError,
     StructuredOutputError,
     ToolCallCommitmentError,
@@ -25,6 +26,10 @@ from app.gateway.registry import (
     build_default_registry,
     normalize_model_id,
 )
+from app.gateway.sanitizer import (
+    sanitize_contents,
+    sanitize_text,
+)
 from app.gateway.schemas import (
     EmbeddingResponse,
     GatewayResponse,
@@ -34,6 +39,12 @@ from app.gateway.schemas import (
     ToolCallRequest,
     ToolDefinition,
     ToolGatewayResponse,
+)
+from app.gateway.validator import (
+    format_repair_prompt,
+    parse_and_validate_json,
+    strip_code_fences,
+    validate_structured_output,
 )
 
 __all__ = [
@@ -48,6 +59,7 @@ __all__ = [
     "GatewayResponse",
     "GatewayStartupError",
     "GatewayStreamChunk",
+    "InputSanitizationError",
     "MODEL_ID_PATTERN",
     "ModelRegistry",
     "ModelSpec",
@@ -63,5 +75,11 @@ __all__ = [
     "build_default_registry",
     "calculate_cost",
     "cost_to_micro_usd",
+    "format_repair_prompt",
     "normalize_model_id",
+    "parse_and_validate_json",
+    "sanitize_contents",
+    "sanitize_text",
+    "strip_code_fences",
+    "validate_structured_output",
 ]

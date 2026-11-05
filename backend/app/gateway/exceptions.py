@@ -54,3 +54,7 @@ class EmbeddingDimensionMismatchError(GatewayError):
 
 class BudgetExceededError(GatewayError):
     """Raised when a task exceeds approved financial or tool-turn budgets in enforce mode."""
+
+
+class InputSanitizationError(GatewayError):
+    """Raised when input violates sanitization constraints (e.g. invalid UTF-8, length limit)."""
