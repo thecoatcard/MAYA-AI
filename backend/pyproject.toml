@@ -8,6 +8,7 @@ dependencies = [
     "argon2-cffi==25.1.0",
     "asyncpg==0.32.0",
     "fastapi==0.162.0",
+    "google-genai==2.34.0",
     "pydantic==2.14.2",
     "pydantic-settings==2.16.2",
     "pyjwt==2.15.1",
@@ -29,6 +30,11 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.uv.exclude-newer-package]
+google-auth = "2026-10-22T00:00:00Z"
+pyasn1 = "2026-10-22T00:00:00Z"
+websockets = "2026-10-22T00:00:00Z"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -56,3 +62,9 @@ plugins = ["pydantic.mypy"]
 # Host orchestration, metrics, offline CLIs and deterministic tests remain checked here.
 # arq_worker.py imports ARQ-only SDKs and is checked through the S1 spike environment.
 exclude = ['^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
+
+# PyJWT typing changes its AllowedPrivateKeyTypes union when cryptography is installed (transitive from google-auth).
+# In tests/unit/test_security_tokens.py:180, jwt.encode(claims, None, algorithm="none") tests rejecting algorithm 'none'.
+[[tool.mypy.overrides]]
+module = "tests.unit.test_security_tokens"
+disable_error_code = ["arg-type"]
