@@ -107,6 +107,9 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         (f"{BASE}/refresh", "POST"),
         (f"{BASE}/logout", "POST"),
         (f"{BASE}/me", "GET"),
+        ("/api/v1/chat/message", "POST"),
+        ("/api/v1/chat/sessions", "GET"),
+        ("/api/v1/chat/sessions/{session_id}/messages", "GET"),
     }
 
 

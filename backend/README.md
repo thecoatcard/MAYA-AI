@@ -3,7 +3,9 @@
 Implemented: typed configuration, JSON logs with generated request/trace IDs, async PostgreSQL/Redis pools,
 startup/shutdown cleanup, public health probes, the [database schema with forced row-level security](../docs/architecture/DATA_MODEL.md)
 and Alembic migrations, and own-account [authentication](../docs/api/AUTH.md) (registration with e-mail codes, login,
-password recovery, refresh rotation, logout). Chat, model calls, tasks, agents and voice are not implemented.
+password recovery, refresh rotation, logout), the offline-verified Gemini [model gateway](../docs/architecture/MODEL_GATEWAY.md)
+and the persisted streaming [chat API](../docs/api/CHAT.md). Nothing has run against the real Gemini API. Tasks,
+agents and voice are not implemented.
 
 ## Run locally
 

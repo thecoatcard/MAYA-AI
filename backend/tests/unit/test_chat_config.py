@@ -26,7 +26,7 @@ def test_chat_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     ("name", "value"),
     [
         ("chat_max_message_chars", 0),
-        ("chat_max_message_chars", 100_001),
+        ("chat_max_message_chars", 16_001),
         ("chat_rate_limit_per_minute", 0),
         ("chat_context_token_budget", 999),
     ],

@@ -9,5 +9,9 @@ transactions with the transaction-local `app.workspace_id` that row-level securi
 connected role is not privileged and owns nothing. Schema changes are Alembic revisions in `migrations/`, run with the
 separate migration role (`MAYA_MIGRATION_DATABASE_URL`), which the running API never uses.
 
+`repositories/` holds data access built on a tenant transaction. `chat.py` reads and writes `sessions` and
+`messages` for one workspace and one user: literal SQL with bound parameters only, nothing commits (the caller owns
+the transaction), and a session of another user is indistinguishable from a missing one.
+
 See the [data model, roles and migration commands](../../../docs/architecture/DATA_MODEL.md) and
 [ADR-0006](../../../docs/adr/0006-tenant-isolation-with-row-level-security.md).

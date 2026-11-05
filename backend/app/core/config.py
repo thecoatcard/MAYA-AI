@@ -75,8 +75,9 @@ class Settings(BaseSettings):
     gemini_budget_task_usd_cap: Decimal | None = Field(default=None, gt=0)
     gemini_max_tool_turns_cap: int | None = Field(default=None, ge=1)
 
-    # Chat (Phase 04). Provisional defaults, not owner-approved (see docs/api/CHAT.md).
-    chat_max_message_chars: int = Field(default=8000, ge=1, le=100_000)
+    # Chat (Phase 04). Provisional defaults, not owner-approved (see docs/api/CHAT.md). The upper
+    # bound keeps a worst-case JSON body (4-byte characters) inside the 64 KiB request limit.
+    chat_max_message_chars: int = Field(default=8000, ge=1, le=16_000)
     chat_rate_limit_per_minute: int = Field(default=20, ge=1, le=10_000)
     chat_context_token_budget: int = Field(default=32_000, ge=1_000, le=1_000_000)
 

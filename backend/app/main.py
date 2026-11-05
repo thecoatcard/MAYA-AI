@@ -48,6 +48,9 @@ def create_app(
             logger.info("application_stopped")
 
     app = FastAPI(title="MAYA AI", version="0.1.0", debug=False, lifespan=lifespan)
+    # Routes read the configuration the application was created with, not a second copy built
+    # from the process environment (which would ignore an env file passed to ``python -m app``).
+    app.state.settings = configuration
 
     @app.middleware("http")
     async def correlate_request(
