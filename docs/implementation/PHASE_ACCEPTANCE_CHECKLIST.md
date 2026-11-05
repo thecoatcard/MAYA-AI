@@ -68,14 +68,18 @@ Phase 02 does not implement the secrets vault or audit-chain enforcement. Their 
 
 ### Phase 03 — Gemini AI Integration & Model Gateway
 
-- [ ] MVP aliases are configured and startup availability checks do not fail on post-MVP aliases; SDK model names are normalized as required.
-- [ ] Simulated 429 errors trigger full jitter exponential backoff before fallback.
-- [ ] Simulated 5xx errors trigger immediate failover to designated secondary model.
-- [ ] Malformed structured outputs trigger exactly one self-repair turn before failover.
-- [ ] Gateway contract covers text, structured output, streaming, tool calls, embeddings, token counting, and mid-stream errors. Budget enforcement uses only owner-approved limits.
-- [ ] Usage accounting includes thinking and tool-use tokens and correctly handles cached-token pricing.
-- [ ] Fallback traversal terminates and cannot loop; context-cache references are scoped by workspace.
-- [ ] Deterministic tests use mocks; live Gemini checks are separate and require external-service approval.
+Evidence for the items below is the [Model Gateway architecture document](../architecture/MODEL_GATEWAY.md), [ADR-0007](../adr/0007-gemini-model-gateway-architecture.md), and the 78 gateway-specific unit tests (plus smoke tool test). Deterministic offline doubles (`FakeGeminiClient`) verify all fallbacks, jittered backoff, 5xx failover, structured repair, streaming errors, context caching, and token/budget math. No live or paid network calls were made by agents; live validation is reserved for owner execution via `backend/app/tools/gemini_smoke.py`.
+
+- [x] MVP aliases are configured and startup availability checks do not fail on post-MVP aliases; SDK model names are normalized as required. Configuration overrides for REST model IDs validated against safe patterns.
+- [x] Simulated 429 errors trigger full jitter exponential backoff (2s, 4s, 8s, 16s with uniform(0, delay), 4 retries) before fallback to secondary model.
+- [x] Simulated 5xx errors trigger immediate failover to designated secondary model without retry.
+- [x] Malformed structured outputs trigger exactly one self-repair turn with schema feedback before failover.
+- [x] Gateway contract covers text, structured output, streaming, tool calls, embeddings, token counting, and mid-stream errors (`StreamInterruptedError`). Budget enforcement mode supports `log_only` (default) and `enforce`; proposed caps ($1.50/task, 10 turns/task) implemented, final exit gate blocked on Open Question O6 owner confirmation.
+- [x] Usage accounting includes thinking (`thoughts_token_count`) and tool-use (`tool_use_prompt_token_count`) tokens, and correctly handles cached-token pricing; unknown prices marked explicitly and never counted as zero.
+- [x] Fallback traversal terminates and cannot loop (acyclic directed graph verified); context-cache references are strictly scoped by workspace (`maya:cache:{workspace_id}:{model_id}:{content_hash}`) with automatic 404 recovery.
+- [x] Deterministic tests use mocks/test doubles; live Gemini checks are separate in `backend/app/tools/gemini_smoke.py` (free-tier default; paid calls hard-gated behind `--confirm-paid-calls-up-to-inr-100`, never run by agents).
+
+**Local scope implemented and tested; exit gate blocked on Open Question O6 (budget caps).** All 78 gateway tests pass deterministically offline. Zero regressions on existing Phase 00–02 test suites.
 
 ### Phase 04 — Chat and Conversation System
 

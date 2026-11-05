@@ -20,3 +20,17 @@ server response. Exit status: 0 delivered, 1 delivery failed, 2 not run.
 
 "Accepted by the server" is not "arrived": check the inbox. The automated tests for this tool use a mocked SMTP library
 and never contact a server.
+
+## `gemini_smoke`: owner-run Gemini diagnostic check
+
+Tests live API connectivity and model resolution for the configured Gemini key. **Agents must not run it**: it may contact external services and incur costs. Run it yourself:
+
+```powershell
+uv run --directory backend python -m app.tools.gemini_smoke --alias orchestrator
+```
+
+Safety gates:
+- Free-tier verification by default (`--verify-free-tier`), stopping cleanly on 429 quota exhaustion.
+- Any paid operation requires explicit owner confirmation: `--confirm-paid-calls-up-to-inr-100` (hard spend cap of INR 100).
+- The tool never prints or logs the API key.
+- Automated tests for this tool use an offline mock client (`tests.support.fake_gemini_client`) and never contact the network.

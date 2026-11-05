@@ -243,3 +243,12 @@ class GatewayResponse(BaseModel):
 
 - **Demonstrated Proof:** Deterministic tests cover fallback, startup validation, API operation contracts, and token/cost accounting. Any live-service evidence is separately approved and reported.
 - **Dependent Phase Unlocked:** Phases 04 and 05 may begin after this phase and their other prerequisites pass. This phase cannot pass its exit gate while the budget-limit decision is open if budget enforcement remains required.
+
+---
+
+## K. Implementation Status (2026-11-05)
+
+- **Status:** Implemented locally; exit gate blocked on Open Question O6 owner confirmation.
+- **Reference Documentation:** [Model Gateway Architecture](../../architecture/MODEL_GATEWAY.md), [ADR-0007](../../adr/0007-gemini-model-gateway-architecture.md).
+- **Test Evidence:** 78 deterministic offline unit tests in `backend/tests/gateway/` covering all 6 operations, jittered backoff, 5xx failover, structured repair, streaming drops, context cache 404 recovery, and exact decimal micro-USD token metering. Zero regressions across existing test suite.
+- **Diagnostic Tooling:** Owner-only CLI smoke tool implemented at `backend/app/tools/gemini_smoke.py` (free-tier default; paid calls hard-gated behind `--confirm-paid-calls-up-to-inr-100`; never executed by agents).
