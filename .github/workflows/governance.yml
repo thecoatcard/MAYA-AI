@@ -2,6 +2,12 @@ name: Governance
 
 # Runs the same validators as the local Git hooks, so every contributor and agent is held
 # to the same checks. Branch protection should require the "validate" job.
+#
+# The job also provisions what the application checks need: Python 3.12 with the locked backend
+# environment, the web dependencies, and PostgreSQL 17 (pgvector) plus Redis service containers, so
+# the tenant-isolation and authentication tests run for real instead of being skipped. The images
+# are the digest-pinned ones from docker-compose.yml. All passwords below are the public local
+# example values; nothing here is a secret.
 on:
   pull_request:
   push:
@@ -18,7 +24,38 @@ jobs:
   validate:
     name: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17@sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8
+        env:
+          POSTGRES_DB: maya
+          POSTGRES_USER: maya_migrator
+          POSTGRES_PASSWORD: example-migration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U maya_migrator -d maya"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      # Read by the service tests (backend/tests/conftest.py). Required mode makes a missing
+      # service a failure instead of a silent skip.
+      MAYA_TEST_POSTGRES_ADMIN_URL: postgresql+asyncpg://maya_migrator:example-migration-only@127.0.0.1:5432/maya
+      MAYA_TEST_POSTGRES_APP_URL: postgresql+asyncpg://maya_app:example-runtime-only@127.0.0.1:5432/maya
+      MAYA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      MAYA_REQUIRE_POSTGRES_TESTS: "1"
+      POSTGRES_APP_PASSWORD: example-runtime-only
     steps:
       - name: Check out (full history for change-range checks)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,6 +71,28 @@ jobs:
 
       - name: Install pinned dev dependencies
         run: npm ci --ignore-scripts
+
+      - name: Install web dependencies
+        # Same command as the local runbook; the lockfile pins every package.
+        run: npm ci --prefix apps/web
+
+      - name: Install uv (pinned) into a private virtual environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/uv-tool"
+          "$RUNNER_TEMP/uv-tool/bin/pip" install --disable-pip-version-check uv==0.12.17
+          echo "$RUNNER_TEMP/uv-tool/bin" >> "$GITHUB_PATH"
+
+      - name: Install the locked backend environment (Python 3.12)
+        run: |
+          uv sync --directory backend --locked --python 3.12
+          echo "$GITHUB_WORKSPACE/backend/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Create the runtime database role (same script as the local containers)
+        env:
+          PGPASSWORD: example-migration-only
+        run: |
+          command -v psql >/dev/null || sudo apt-get install -y --no-install-recommends postgresql-client
+          psql "postgresql://maya_migrator@127.0.0.1:5432/maya" -v ON_ERROR_STOP=1 -f docker/postgres/init.sql
 
       - name: Validate pull request
         if: github.event_name == 'pull_request'
