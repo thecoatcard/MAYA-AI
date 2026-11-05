@@ -16,11 +16,11 @@ Centralized model gateway abstracting AI operations behind stable role aliases (
 - `registry.py` (`ModelRegistry`): role alias specifications, model normalization, and terminating fallback chain traversal.
 - `resilience.py` (`ResiliencePolicy`): backoff logic (429 retries with full jitter, immediate 5xx failover, tool call commitment guards).
 - `cost_tracker.py` (`BudgetTracker`): exact Decimal cost math, integer micro-USD conversions, atomic Redis increments, and cancellation shielding.
-- `cache_manager.py` (`ContextCacheManager`): multi-tenant context cache management (`maya:cache:{workspace_id}:{model_id}:{content_hash}`) with 404 recovery.
-- `sanitizer.py`: UTF-8 verification, lone surrogate rejection, and ASCII control character stripping.
+- `cache_manager.py` (`ContextCacheManager`): workspace-scoped Redis store for provider cache references (`maya:cache:{workspace_id}:{model_id}:{content_hash}`) with a 404 purge handler. Not yet used by `ModelGateway`; provider cache creation and attachment are not implemented.
+- `sanitizer.py`: UTF-8 verification, lone surrogate rejection, and ASCII control character stripping in strings and nested lists/dicts (typed SDK objects pass through).
 - `validator.py`: Pydantic structured output validation, code fence stripping, and self-repair prompt generation.
 - `startup.py`: startup configuration validation and config-gated remote model discovery.
-- `client_adapter.py`: explicit SDK client factory without implicit environment credential leakage.
+- `client_adapter.py`: explicit SDK client factory (explicit key, `vertexai=False`, SDK retries disabled with `HttpRetryOptions(attempts=1)`).
 - `exceptions.py`: complete typed exception hierarchy.
 
 ## Dependencies
@@ -45,6 +45,8 @@ Settings are documented in the [configuration reference](../../../docs/guides/CO
 
 - 429 rate limits and timeouts back off with full jitter across 4 retries before falling back.
 - 5xx errors trigger immediate failover to the secondary fallback model.
-- 400, 401, 403, and safety blocks fail immediately without fallback.
-- Stream interruptions raise `StreamInterruptedError` and record estimated usage without falling back.
-- Once tool calls have started emitting, no retry or fallback is permitted (`ToolCallCommitmentError`).
+- 400, 401, 403, and provider content blocks (`ContentBlockedError`) fail immediately without fallback.
+- Streams retry or fall back only until the first chunk; later failures, cancellation and early close record estimated usage, and failures raise `StreamInterruptedError`.
+- `generate_with_tools` is non-streaming, so tool calls are never seen from an attempt that is later retried; `ToolCallCommitmentError` guards the policy for a future streaming variant.
+- Errors are classified by type and status code only; logs and exceptions carry the exception class and HTTP status, never provider text.
+- Unknown cost is `None` (never `0`); in enforce mode the budget is checked before every provider attempt.

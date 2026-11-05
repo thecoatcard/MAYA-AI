@@ -15,7 +15,7 @@ Key requirements and challenges identified during Phase 03 planning:
 3. **Tool Call Commitment:** Once a model turn emits tool calls, non-idempotent side effects may be triggered; therefore, retries or fallbacks after tool calls have started must be strictly forbidden (`ToolCallCommitmentError`).
 4. **Structured Output Self-Repair:** JSON responses failing Pydantic schema validation require exactly one corrective retry turn providing the schema and error description before failing closed.
 5. **Accurate Financial Metering:** Floating-point rounding drift is unacceptable for billing and budget enforcement. Token usage must use exact `Decimal` math and integer micro-USD in Redis (`HINCRBY`) shielded against task cancellation.
-6. **Multi-Tenant Context Caching:** Large workspace context caches must be isolated by `workspace_id`, with automatic 404 recovery when provider-side caches expire before local Redis TTLs.
+6. **Multi-Tenant Context Caching:** Provider context-cache references must be isolated by `workspace_id`, and a reference the provider no longer recognizes (404) must be purged. Creating and attaching provider caches is deferred (see Consequences).
 7. **Offline-First Safety:** Agents must never incur unexpected financial charges. Automated tests and agents must run strictly offline using high-fidelity test doubles (`FakeGeminiClient`), while live checks require an owner-run smoke tool with an explicit INR 100 confirmation gate.
 
 ## Decision
@@ -27,29 +27,32 @@ Key requirements and challenges identified during Phase 03 planning:
    - `generate_structured`: strict Pydantic model validation with exactly one self-repair turn.
    - `generate_with_tools`: tool call generation without local tool execution.
    - `embed_content`: strictly enforces 768 output dimensions with opt-in fallback only.
-   - `count_tokens`: offline token estimation / counting.
+   - `count_tokens`: provider token counting (retries on 429 and timeouts, same model only).
 
 2. **Model Registry & Terminating Fallback Graph:**
-   All operations target logical aliases rather than hardcoded model strings. Enabled aliases resolve terminating paths (`orchestrator` -> `lite`; `heavy` -> `orchestrator` -> `lite`; `lite` -> `orchestrator`; `embed` -> `embed-fallback`). Startup validation rejects unresolvable, cyclic, or disabled fallback targets. Model ID overrides are permitted via validated configuration for REST aliases only.
+   All operations target logical aliases rather than hardcoded model strings. Enabled aliases resolve terminating paths (`orchestrator` -> `lite`; `heavy` -> `orchestrator` -> `lite`; `lite` -> `orchestrator`; `embed` -> `embed-fallback`). Startup validation rejects unknown or disabled fallback targets; the alias graph contains the pair `orchestrator` <-> `lite` by design, so traversal visits each alias at most once and always terminates. Model ID overrides are permitted via validated configuration for REST aliases only.
 
 3. **Injected Resilience Policy:**
    `ResiliencePolicy` implements 4 retries for 429 and timeouts with base delays `(2.0, 4.0, 8.0, 16.0)` and full jitter (`uniform(0, delay)`). Clock, sleep, and random generators are injected to ensure 100% deterministic test execution.
 
 4. **Exact Decimal Accounting and Redis Budgeting:**
-   - Financial rates are stored as `Decimal` per 1M tokens. Unknown prices (`research`, `tts`, `embed-fallback`, or overridden aliases) are flagged `price_unknown=True` and `is_estimated_cost_complete=False`.
+   - Financial rates are stored as `Decimal` per 1M tokens. Unknown prices (`research`, `tts`, `embed-fallback`, or overridden aliases) are flagged `price_unknown=True`, report `estimated_cost_usd=None` (never `0`) and `is_estimated_cost_complete=False`. Thinking tokens are billed at the output rate and tool-use prompt tokens at the input rate.
    - USD costs convert to micro-USD integers via `ROUND_UP` to guarantee budgets never undercount.
-   - Redis updates use atomic pipelines (`HINCRBY cost_micro_usd`, `HINCRBY tool_turns`, `HINCRBY total_tokens`, `EXPIRE 86400`) wrapped in `asyncio.shield`.
-   - `log_only` mode logs warnings when alert thresholds ($1.50 / 10 turns) are exceeded; `enforce` mode raises `BudgetExceededError`.
+   - Redis updates use atomic pipelines (`HINCRBY cost_micro_usd`, `tool_turns`, `total_tokens`, `unpriced_calls`, `EXPIRE 86400`) wrapped in `asyncio.shield`.
+   - `log_only` mode logs warnings when alert thresholds ($1.50 / 10 turns) are exceeded. `enforce` mode checks the caps before every provider attempt (retries, fallbacks and repair turns included) and raises `BudgetExceededError`; it needs owner-approved caps (O6).
 
-5. **Context Cache Management & 404 Recovery:**
-   Redis stores provider cache references under `maya:cache:{workspace_id}:{model_id}:{content_hash}` with mandatory `workspace_id`. If a provider returns 404, the local key is purged and the request retries uncached.
+5. **Context Cache References:**
+   Redis stores provider cache references under `maya:cache:{workspace_id}:{model_id}:{content_hash}` with mandatory `workspace_id`, and a handler purges a reference after a provider 404. Provider cache creation, attachment to requests, uncached retry and storage-cost metering are not implemented and need live verification first.
 
 6. **Input Sanitization:**
-   All inputs are validated for UTF-8 encodability (lone surrogates rejected), ASCII control characters stripped (preserving `\n`, `\r`, `\t`), and length limits enforced.
+   All inputs are validated for UTF-8 encodability (lone surrogates rejected), ASCII control characters stripped (preserving `\n`, `\r`, `\t`), and an optional length limit that callers opt into.
 
 7. **Lifespan Integration & Owner-Only Smoke Tool:**
    - FastAPI lifespan runs offline registry checks on startup. Remote model discovery is disabled by default (`gemini_verify_models_on_startup=False`) and gracefully skipped if no key is set.
-   - A standalone diagnostic tool (`backend/app/tools/gemini_smoke.py`) is provided for repository owner execution only, guarded by `--confirm-paid-calls-up-to-inr-100`.
+   - A standalone diagnostic tool (`backend/app/tools/gemini_smoke.py`) is provided for repository owner execution only, guarded by `--confirm-paid-calls-up-to-inr-100`. It calls the SDK directly and does not exercise the gateway's own paths.
+
+8. **Client Construction and Error Handling:**
+   The SDK client is built with an explicit key, `vertexai=False` and `HttpRetryOptions(attempts=1)`, so ambient environment variables cannot change the mode and the SDK cannot retry on its own. Errors are classified by type and status code only, and logs and gateway exceptions never contain provider error text.
 
 ## Consequences
 
@@ -63,3 +66,5 @@ Key requirements and challenges identified during Phase 03 planning:
 ### Negative / Trade-offs
 - Redis is required for atomic multi-turn task budgeting and context cache tracking (mocked in unit tests; verified via test containers).
 - Secondary embedding fallback produces a non-comparable vector space, necessitating `allow_fallback=False` by default.
+- The gateway has never been run against the real provider; offline doubles are pinned to the SDK's calling convention by contract tests, but provider behavior is unverified until the owner runs the smoke tool.
+- Context caching is partial (reference store only); structured output does not use provider JSON mode.

@@ -13,9 +13,10 @@ Phase 02 added the [application schema with forced row-level security](DATA_MODE
 [authentication](../security/AUTHENTICATION.md) ([API](../api/AUTH.md)). Phase 03 added the centralized
 [Model Gateway](MODEL_GATEWAY.md) ([ADR-0007](../adr/0007-gemini-model-gateway-architecture.md)) providing
 role alias resolution, terminating fallback graph, exact Decimal token metering and Redis budgeting,
-workspace context caching with 404 recovery, input sanitization, structured output self-repair, and an
-owner-run diagnostic smoke tool. The gateway is verified offline with mock contracts and unit tests;
-no live external Gemini calls have been executed. There is no browser login or
+a workspace-scoped store for provider cache references (cache creation and attachment are not implemented),
+input sanitization, structured output self-repair, and an owner-run diagnostic smoke tool. The gateway is
+verified offline with test doubles pinned to the SDK's calling convention; it has never been run against the
+real provider and no live external Gemini calls have been executed. There is no browser login or
 browser-to-API product flow or agent engine yet.
 
 [S3 voice readiness](SPIKE_S3_GEMINI_LIVE.md) and
