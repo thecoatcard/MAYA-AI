@@ -10,6 +10,9 @@ from app.core.config import Settings
 from app.core.redis import create_redis_client
 from app.db.session import create_database_engine
 from app.db.tenant import verify_runtime_role
+from app.gateway.cost_tracker import BudgetTracker
+from app.gateway.model_gateway import ModelGateway
+from app.gateway.registry import ModelRegistry, build_default_registry
 
 logger = logging.getLogger("maya")
 
@@ -24,6 +27,13 @@ class Resources:
         self.engine = create_database_engine(settings)
         self.redis = create_redis_client(settings)
         self.timeout = settings.probe_timeout_seconds
+        self.registry: ModelRegistry = build_default_registry(settings.gemini_model_overrides)
+        self.budget_tracker = BudgetTracker(self.redis, settings)
+        self.model_gateway = ModelGateway(
+            registry=self.registry,
+            settings=settings,
+            budget_tracker=self.budget_tracker,
+        )
 
     async def check(self) -> None:
         try:

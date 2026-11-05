@@ -13,6 +13,8 @@ from app.core.config import Settings
 from app.core.http import MaxBodySizeMiddleware
 from app.core.logging import configure_logging, request_id_context, trace_id_context
 from app.core.resources import Resources
+from app.gateway.registry import ModelRegistry
+from app.gateway.startup import verify_gateway_at_startup
 
 logger = logging.getLogger("maya")
 
@@ -30,6 +32,13 @@ def create_app(
         try:
             await resources.check()
             await resources.verify_runtime_role()
+            if isinstance(getattr(resources, "registry", None), ModelRegistry):
+                client = (
+                    getattr(resources.model_gateway, "_client", None)
+                    if hasattr(resources, "model_gateway")
+                    else None
+                )
+                await verify_gateway_at_startup(resources.registry, configuration, client=client)
             service = auth_service or build_auth_service(configuration, resources)
             app.state.auth_service = service
             await service.warm_up()

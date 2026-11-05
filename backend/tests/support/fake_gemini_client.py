@@ -21,6 +21,12 @@ class FakeAsyncModels:
         self.default_tool_calls: list[dict[str, Any]] | None = None
         self.embedding_dimension: int = 768
         self.stream_error_after_chunk: int | None = None
+        self.available_models: list[str] = [
+            "models/gemini-3.8-flash",
+            "models/gemini-4-argon",
+            "models/gemini-3.5-flash-lite",
+            "models/gemini-embedding-2",
+        ]
         self.prompt_token_count: int = 100
         self.candidates_token_count: int = 50
         self.cached_content_token_count: int = 0
@@ -169,6 +175,10 @@ class FakeAsyncModels:
         )
         self._check_injected_error(model)
         return types.CountTokensResponse(total_tokens=42)
+
+    async def list(self) -> list[types.Model]:
+        self.calls.append({"method": "list"})
+        return [types.Model(name=m) for m in self.available_models]
 
 
 class FakeAio:
