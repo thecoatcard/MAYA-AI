@@ -4,7 +4,23 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- Environment-variable documentation checks now inspect tracked and non-ignored source files instead of generated Next.js bundles and Python dependency environments. Regression tests retain checks for undocumented source variables, including tracked files matched by ignore patterns.
+- Phase 01 documentation now matches generic health bodies, resource-test path and direct router mounting. The owner revised acceptance to free-tier-only, retaining provider-enforced paid caps before future paid use; extended lifetime/continuity evidence remains pending.
+- All 587 nonexistent future-artifact references in Phases 02–16 are explicitly labelled planned without removing paths or requirements, creating dummy files, or changing validators; documentation validation now passes.
+
 ### Added
+
+- Extended user-run free-tier lifecycle launcher with bounded real-GoAway resumption and synthetic nonce continuity verification through AUDIO output transcription. 111 isolated mocked checks pass; extended live evidence still requires user execution.
+
+- Phase 01 local foundation: typed FastAPI settings, redacted JSON logs, async data-service lifecycles and health probes, a pinned Next.js 15/React 19 web shell, deterministic tests and dependency lockfiles.
+- Digest-pinned local PostgreSQL 17/pgvector and Redis 7.4 AOF infrastructure, loopback-only ports, separate runtime login, and foundation setup/API/architecture documentation.
+- Opt-in S1/S2 synthetic benchmark harnesses, deterministic tests and raw measured reports: isolated Celery/ARQ with LangGraph, plus workspace/user-filtered pgvector HNSW against exact ground truth. ADR-0003 is owner-accepted for the compatible Celery candidate. The initial S2 perfect-recall run was invalidated and superseded after correcting prepared-plan reuse.
+- S3/S4 tooling: offline PCM/event replay and embedding analysis, plus separately locked google-genai 2.34.0 async SDK adapters for independent text sessions, bounded resumption/cleanup and three separate 768-dimension embedding requests. Mocked validation and a subsequent user-run short live smoke are documented; paid execution remains blocked pending the owner's INR 100 hard spending-cap requirement.
+- User-run free-tier Gemini smoke evidence: three actual 768-dimensional vectors and audio from both separate text methods (484/453 ms first audio), completed in 11.078 seconds. Lifetime/resumption, independent billing verification and paid caps remain unverified; no full live-acceptance claim is made.
+- Separately approved user-run free-tier smoke launcher with interactive no-billing confirmations, hidden key input, fixed Developer API endpoint, disabled retries/reconnects/fallback, bounded requests and redacted evidence. Model calls remain unexecuted by agents; billing status is user-attested, not programmatically verified.
+- Phase 01 compatible queue validation: isolated Celery 5.6.3/Kombu 5.7.0/redis-py 8.1.0 completed 80 tasks and recovered after worker loss without runtime downgrades. Native revoke did not yield observed terminal cancellation within four seconds. ADR-0003 is owner-accepted; Phase 06 must implement durable cooperative cancellation and terminal reconciliation.
 
 - Canonical AI-agent instructions in `AGENTS.md`, with thin entry points for Claude Code, GitHub Copilot, Google Antigravity, Cursor, Gemini CLI and OpenAI Codex, verified against vendor documentation (`docs/governance/AI_AGENT_COMPATIBILITY.md`).
 - Governance policies, 12 reusable workflows and 9 development roles under `governance/`, plus a generator that produces the per-tool skills, prompts, rules and subagents and fails on drift.
@@ -13,3 +29,4 @@ All notable changes to this project are recorded here. The format follows [Keep 
 - Documentation templates, ADR process with two initial ADRs, onboarding, configuration reference, troubleshooting and branch protection guides.
 - Repository audit (`docs/governance/REPOSITORY_AUDIT.md`) and setup validation report (`docs/governance/SETUP_VALIDATION_REPORT.md`).
 - Initial project plan, `MAYA_AI_FINAL_PLAN.md`.
+- Implementation phase plans, roadmap, dependencies, status, acceptance checklist and agent assignments under `docs/implementation/`, with `START_HERE.md` as the entry point for a new session and `REVIEW_FINDINGS_2026-11-05.md` recording review findings; a subset of Phase 01–04 findings has since been addressed, with remaining blockers noted in the report.

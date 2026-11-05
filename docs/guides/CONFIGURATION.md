@@ -2,7 +2,9 @@
 
 ## Application environment variables
 
-The application is not implemented yet, so it reads **no environment variables**, and `.env.example` defines none.
+The local foundation reads typed settings from process variables. Dotenv loading is
+explicit: use `python -m app --env-file` to select a file. Agents use only the root
+example, never private dotenv files. Compose uses its own explicit `--env-file`.
 
 When code starts reading an environment variable:
 
@@ -12,9 +14,28 @@ When code starts reading an environment variable:
 
 | Variable | Purpose | Required | Example value |
 | :--- | :--- | :--- | :--- |
-| *(none yet)* | | | |
+| `MAYA_DATABASE_URL` | Required asyncpg URL for the non-admin runtime login | Yes | Root example, loopback port 15432 |
+| `MAYA_REDIS_URL` | Redis connection URL without query/fragment overrides | Yes | `redis://127.0.0.1:16379/0` |
+| `MAYA_MIGRATION_DATABASE_URL` | Separate migration-role URL, unused by the API | No | Root example; role must differ from runtime |
+| `MAYA_PROBE_TIMEOUT_SECONDS` | Combined readiness timeout and pool/connect timeout | No; defaults to 2, greater than 0 and at most 30 | `2` |
+| `POSTGRES_DB` | Compose development database | Compose | `maya` |
+| `POSTGRES_USER` | Compose bootstrap administrator, not the API login | Compose | `maya_migrator` |
+| `POSTGRES_PASSWORD` | Bootstrap password, only a non-secret local example is tracked | Compose | Set privately outside local testing |
+| `POSTGRES_APP_PASSWORD` | Runtime login password used at first initialization | Compose | Set privately outside local testing |
+| `POSTGRES_PORT` | Loopback host port for PostgreSQL | No | `15432` |
+| `REDIS_PORT` | Loopback host port for Redis | No | `16379` |
 
 Never put real secrets in `.env.example` or in this document. Real values live in an untracked `.env` file or a secret manager.
+
+Settings reject missing/invalid connection URLs and hide inputs in validation errors.
+Connection strings are `SecretStr` values; the runtime never uses migration credentials.
+The local [runbook](../operations/LOCAL_DEVELOPMENT.md) explains first initialization,
+password changes and safe shutdown. Gemini and SMTP settings are not consumed yet.
+
+The documentation validator discovers environment-variable reads in tracked and
+non-ignored source files. Generated build output and dependency environments ignored
+by Git are not application sources. Tracked files remain checked even when an ignore
+pattern matches them. Outside Git, directory-based scanning remains available.
 
 ## Governance configuration
 

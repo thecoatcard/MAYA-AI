@@ -1,6 +1,21 @@
 # System overview
 
-> **Status: planned. No part of the MAYA AI application is implemented yet.** This page summarises the intended architecture so contributors share one picture. The authoritative detail, decisions and roadmap are in [MAYA_AI_FINAL_PLAN.md](../../MAYA_AI_FINAL_PLAN.md). When a component is built, move its description from "planned" to a module page under `docs/modules/`, describing the implemented behavior.
+> **Status: local foundation implemented; product features remain planned.** The authoritative product detail, decisions and roadmap are in [MAYA_AI_FINAL_PLAN.md](../../MAYA_AI_FINAL_PLAN.md).
+
+## Implemented foundation
+
+The [backend](../../backend/README.md) provides typed configuration, redacted JSON logs,
+resource lifecycles and public [health probes](../api/HEALTH.md). The
+[web scaffold](../../apps/web/README.md) provides a static overview, not chat or auth.
+Local PostgreSQL/pgvector and Redis AOF are described in the
+[data-store state](DATA_MODEL.md) and [runbook](../operations/LOCAL_DEVELOPMENT.md).
+There is no browser-to-API product flow, application schema, RLS, model gateway or agent engine yet.
+
+[S3 voice readiness](SPIKE_S3_GEMINI_LIVE.md) and
+[S4 embedding readiness](SPIKE_S4_EMBEDDINGS.md) have offline fixture analyzers
+and separately locked actual SDK adapters validated with mocked clients.
+They have not contacted Gemini or verified live behavior; the owner's hard spending-cap
+requirement blocks live execution. No voice bridge or model gateway is implemented.
 
 ## What MAYA AI is meant to be
 

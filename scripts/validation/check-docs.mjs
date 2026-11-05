@@ -13,6 +13,7 @@ import { ROOT, EXIT, walk, exists, isDirectory, readText, listDirs, isMain, argV
 import { loadConfig } from '../lib/config.mjs';
 import { analyze } from '../lib/markdown.mjs';
 import { matchesAny } from '../lib/glob.mjs';
+import { isRepo, workingFiles } from '../lib/git.mjs';
 
 const PATH_TOKEN = /^(?:\.\/)?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+$/;
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -106,8 +107,10 @@ export function collectEnvVars(root, cfg) {
     /os\.getenv\(\s*['"]([A-Z][A-Z0-9_]*)['"]/g,
     /environ\.get\(\s*['"]([A-Z][A-Z0-9_]*)['"]/g,
   ];
-  for (const f of walk(root)) {
+  const sources = isRepo(root) ? workingFiles(root) : walk(root);
+  for (const f of sources) {
     if (!matchesAny(f, cfg.env.sourceGlobs) || matchesAny(f, cfg.env.excludeGlobs)) continue;
+    if (!exists(root, f) || !fs.lstatSync(path.join(root, f)).isFile()) continue;
     const text = readText(root, f);
     for (const re of patterns) {
       for (const m of text.matchAll(re)) if (!used.has(m[1])) used.set(m[1], f);

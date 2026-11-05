@@ -10,7 +10,10 @@ How to set up this repository, for people and for AI coding agents.
 | Node.js | 22 or newer (developed on 24) | All governance automation |
 | npm | bundled with Node.js | Task runner and the pinned `yaml` dev dependency |
 
-Python, Docker and the other application tools are not needed yet because there is no application code. When the backend or web project is added, its toolchain becomes a prerequisite and this page must be updated in the same change.
+For the implemented local foundation, also install Python 3.12, uv, Docker Desktop
+with Linux containers and Node.js 22.12+ or 24+. Follow the
+[local runbook](../operations/LOCAL_DEVELOPMENT.md) to start the API, web and data services.
+Dependency installation and infrastructure changes require human approval when performed by agents.
 
 ## One-command setup
 
