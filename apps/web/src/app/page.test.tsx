@@ -4,32 +4,32 @@ import { describe, expect, it } from "vitest";
 
 import Home from "./page";
 
-describe("foundation page", () => {
-  it("shows the foundation without presenting planned features as available", () => {
+describe("MAYA landing page", () => {
+  it("shows the honest available and planned capabilities", () => {
     render(<Home />);
     expect(
       screen.getByRole("heading", {
-        name: "A foundation for what comes next.",
+        name: "A digital employee that asks before it acts.",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Foundation only")).toBeInTheDocument();
-    expect(screen.getAllByText("Planned")).toHaveLength(3);
+    expect(screen.getAllByText("Available")).toHaveLength(2);
+    expect(screen.getAllByText("Planned")).toHaveLength(2);
+    expect(screen.getByText("Agent tasks with approvals")).toBeInTheDocument();
+    expect(screen.getByText("Voice workspace")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /sign in|send|record/i }),
-    ).not.toBeInTheDocument();
+      screen.queryByText(/testimonials|active users|saved hours/i),
+    ).toBeNull();
   });
 
-  it("provides navigation to existing sections", () => {
+  it("provides sign-in and create-account actions", () => {
     render(<Home />);
-    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute(
+    expect(screen.getAllByRole("link", { name: "Sign in" })[0]).toHaveAttribute(
       "href",
-      "/",
+      "/login",
     );
-    expect(screen.getByRole("link", { name: "Roadmap" })).toHaveAttribute(
-      "href",
-      "#roadmap",
-    );
-    expect(document.getElementById("roadmap")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("link", { name: "Create account" })[0],
+    ).toHaveAttribute("href", "/register");
   });
 });

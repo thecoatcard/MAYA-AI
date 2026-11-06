@@ -66,7 +66,7 @@ several concurrent correct submissions consumes the code.
   verified, and opens its session only if that version is still current, so a login that was
   in flight during a reset cannot create a live session or write back an old hash. This relies
   on a password change always getting a different timestamp (microsecond resolution).
-- Token responses carry `Cache-Control: no-store`.
+- Token responses carry `Cache-Control: no-store`. The browser opts into a scoped HttpOnly refresh cookie through `X-Maya-Refresh-Transport: cookie`; see [ADR-0009](../adr/0009-refresh-cookie-transport.md) for the exact contract. Legacy JSON transport remains available to callers that omit the header.
 - Expiry is evaluated against one injected clock, in code and in SQL parameters.
 
 ## Not revealing which accounts exist
@@ -187,8 +187,8 @@ migrations as a **non-superuser** owner found and fixed a real defect (the funct
   `MAYA_JWT_SIGNING_KEY` and `MAYA_OTP_HMAC_KEY` in the root example are public placeholders
   for loopback use only and pass validation.
 - No second factor, no breached-password check, no account lockout notification e-mail.
-- Tokens are returned in JSON; where a browser client keeps them (and any cookie, CSRF or
-  CORS policy) is decided with the login UI, which does not exist yet.
+- The browser's refresh token is held in an HttpOnly, SameSite=Strict cookie scoped to `/api/v1/auth`; the access token stays in memory. CSRF relies on the strict same-site policy plus the required custom transport header; no CORS is configured. Do not enable permissive CORS without revisiting this design.
+- **Per-address limits behind the Next.js proxy are deferred until hosting is chosen.** Requests share the proxy peer address. `X-Forwarded-For` is ignored because Next.js preserves a client-supplied value, making it spoofable. At hosting time, only a front reverse proxy that overwrites the header can provide a trusted client address; until then no proxy-address behavior is trusted.
 - E-mail goes out from a background task without a queue: if the process stops between the
   response and the send, the code is lost and the user must request another. Real SMTP delivery
   was verified by the owner (reported 2026-11-05) with the

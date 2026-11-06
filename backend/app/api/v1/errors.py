@@ -18,6 +18,7 @@ from app.core.security import Overloaded, PasswordPolicyViolation
 from app.db.repositories.chat import InvalidCursor, SessionNotFound
 from app.services.chat_service import (
     ChatError,
+    ChatStreamLimitReached,
     ChatUnavailable,
     ChatValidationError,
     IdempotencyKeyRequired,
@@ -70,6 +71,8 @@ async def _chat_error(request: Request, exc: Exception) -> JSONResponse:
         return _error(400, "idempotency_key_required")
     if isinstance(exc, RequestInProgress):
         return _error(409, "request_in_progress")
+    if isinstance(exc, ChatStreamLimitReached):
+        return _error(429, "concurrent_stream_limit", {"Retry-After": "1"})
     if isinstance(exc, IdempotencyKeyReused):
         return _error(422, "idempotency_key_reused")
     if isinstance(exc, ModelUnavailable):

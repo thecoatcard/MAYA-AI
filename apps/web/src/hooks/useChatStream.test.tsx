@@ -717,6 +717,7 @@ describe("error event", () => {
   it.each([
     "content_blocked",
     "stream_interrupted",
+    "reply_deadline_exceeded",
     "model_unavailable",
     "internal_error",
   ])(
@@ -738,6 +739,15 @@ describe("error event", () => {
       }
     },
   );
+
+  it("explains a reply deadline in its own words", async () => {
+    const { result, stream } = setup();
+    stream.mockImplementationOnce(async () =>
+      play([accepted(), errorEvent("reply_deadline_exceeded", true)]),
+    );
+    await send(result, "Hi");
+    expect(result.current.error?.message).toContain("took too long");
+  });
 
   it("shows model_unavailable with no text as an interrupted reply with only Ask again", async () => {
     const { result, stream } = setup();
@@ -892,7 +902,7 @@ describe("failed before the server accepted the message", () => {
     });
     await send(result, "Hi");
     expect(result.current.error?.code).toBe("not_authenticated");
-    expect(result.current.error?.message).toContain("Sign-in is not built yet");
+    expect(result.current.error?.message).toContain("Sign in to continue");
     expect(result.current.canRetry).toBe(false);
   });
 
@@ -1314,16 +1324,18 @@ describe("which failures allow a same-key Retry", () => {
     expect(result.current.messages[0]?.state).toBe("unconfirmed");
   });
 
-  it("refuses an unsafe API address with a clear error and sends nothing", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://api.example.test");
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useChatStream());
+  it("offers a same-key retry for a concurrent stream limit", async () => {
+    const { result, stream } = setup();
+    stream.mockImplementation(async () => {
+      throw new ApiError(429, "concurrent_stream_limit", {
+        retryAfterSeconds: 1,
+      });
+    });
     await send(result, "Hi");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.current.error?.code).toBe("configuration_error");
-    expect(result.current.error?.message).toContain("https");
-    expect(result.current.canRetry).toBe(false);
+    expect(result.current.error?.code).toBe("concurrent_stream_limit");
+    expect(result.current.error?.message).toContain("Too many replies");
+    expect(result.current.canRetry).toBe(true);
+    expect(result.current.error?.retryAfterSeconds).toBe(1);
     expect(result.current.messages[0]?.state).toBe("failed");
   });
 });

@@ -2,13 +2,14 @@ import React from "react";
 import {
   act,
   fireEvent,
-  render,
+  render as rtlRender,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setAccessToken } from "../../lib/auth-session";
+import { getAccessToken, setAccessToken } from "../../lib/auth-session";
 import {
   acceptedFrame,
   controllableStream,
@@ -23,6 +24,15 @@ import { THEME_STORAGE_KEY } from "./ThemeToggle";
 
 beforeEach(() => {
   window.localStorage.clear();
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url === "/api/v1/auth/refresh") {
+      return new Response(null, { status: 401 });
+    }
+    if (url.startsWith("/api/v1/chat/sessions")) {
+      return jsonResponse({ items: [], next_cursor: null });
+    }
+    return new Response(null, { status: 401 });
+  });
 });
 
 afterEach(() => {
@@ -39,6 +49,10 @@ function box(): HTMLTextAreaElement {
   }) as HTMLTextAreaElement;
 }
 
+function render(ui: React.ReactElement) {
+  return rtlRender(<div className="maya-app">{ui}</div>);
+}
+
 async function typeAndSend(text: string) {
   fireEvent.change(box(), { target: { value: text } });
   await act(async () => {
@@ -46,40 +60,66 @@ async function typeAndSend(text: string) {
   });
 }
 
+function stubWorkspaceFetch(
+  handler: (url: string, init?: RequestInit) => Promise<Response>,
+  sessions: (url: string) => Response = () =>
+    jsonResponse({ items: [], next_cursor: null }),
+) {
+  const fetchMock = vi.fn(handler);
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    if (url.startsWith("/api/v1/chat/sessions") && !url.includes("/messages")) {
+      return Promise.resolve(sessions(url));
+    }
+    return fetchMock(url, init);
+  });
+  return fetchMock;
+}
+
 describe("not signed in", () => {
-  it("says sign-in is not built yet and offers nothing that pretends otherwise", () => {
-    const fetchMock = vi.fn();
+  it("checks the refresh cookie before offering sign-in", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
     render(<ChatWorkspace />);
     expect(
-      screen.getByRole("heading", {
-        name: "Sign-in is not built yet",
+      await screen.findByRole("heading", {
+        name: "Sign in to chat",
         level: 2,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Planned")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: /send|sign in|log in/i }),
-    ).toBeNull();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login",
+    );
     expect(
       screen.getByRole("link", { name: "Back to overview" }),
     ).toHaveAttribute("href", "/");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/refresh",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        headers: expect.objectContaining({
+          Accept: "application/json",
+          "X-Maya-Refresh-Transport": "cookie",
+        }),
+      }),
+    );
   });
 
-  it("has a page heading and landmarks", () => {
+  it("has a page heading and landmarks", async () => {
     render(<ChatWorkspace />);
     expect(
-      screen.getByRole("heading", { name: "Chat", level: 1 }),
+      await screen.findByRole("heading", { name: "Chat", level: 1 }),
     ).toBeInTheDocument();
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("main")).toBeInTheDocument();
   });
 
-  it("does not call the API when rendered (nothing happens at build or load time)", () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("does not start a chat message before the user asks", () => {
+    const fetchMock = stubWorkspaceFetch(async () =>
+      jsonResponse({ items: [], next_cursor: null }),
+    );
     setAccessToken("some-token-value");
     render(<ChatWorkspace />);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -104,16 +144,89 @@ describe("signed in", () => {
   it("appears when the token is set after the page loaded, and goes away when cleared", async () => {
     setAccessToken(null);
     render(<ChatWorkspace />);
+    await screen.findByRole("heading", { name: "Sign in to chat" });
     expect(screen.queryByRole("textbox")).toBeNull();
     act(() => setAccessToken("late-token-value"));
     expect(box()).toBeInTheDocument();
     act(() => setAccessToken(null));
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByText("Sign-in is not built yet")).toBeInTheDocument();
+    expect(screen.getByText("Sign in to chat")).toBeInTheDocument();
+  });
+
+  it("revokes a refresh token and clears the in-memory session on sign out", async () => {
+    setAccessToken("workspace-test-token");
+    const fetchMock = stubWorkspaceFetch(
+      async () => new Response(null, { status: 204 }),
+    );
+    render(<ChatWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Sign in to chat" }),
+      ).toBeInTheDocument();
+    });
+    expect(getAccessToken()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0] as unknown as
+      [string, RequestInit] | undefined;
+    if (request === undefined) {
+      throw new Error("logout request was not sent");
+    }
+    expect(request[0]).toBe("/api/v1/auth/logout");
+    expect(request[1].body).toBeUndefined();
+    expect(request[1].headers).toMatchObject({
+      "X-Maya-Refresh-Transport": "cookie",
+    });
+  });
+
+  it("clears the local session and reports when server logout fails", async () => {
+    setAccessToken("workspace-test-token");
+    stubWorkspaceFetch(async () => {
+      throw new TypeError("network unavailable");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "the server could not revoke the session",
+    );
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it("traps focus in the mobile history drawer and restores focus after Escape", async () => {
+    const media = {
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", () => media);
+    render(<ChatWorkspace />);
+
+    const trigger = screen.getByRole("button", {
+      name: "Open conversation history",
+    });
+    fireEvent.click(trigger);
+    const drawer = screen.getByRole("dialog", {
+      name: "Conversation history",
+    });
+    const close = within(drawer).getByRole("button", {
+      name: "Close conversation drawer",
+    });
+    const signOutButton = within(drawer).getByRole("button", {
+      name: "Sign out",
+    });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(signOutButton, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("sends a message and streams the reply into the thread", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = stubWorkspaceFetch(async () =>
       sseResponse([
         acceptedFrame(),
         deltaFrame("Here is "),
@@ -121,7 +234,6 @@ describe("signed in", () => {
         doneFrame(),
       ]),
     );
-    vi.stubGlobal("fetch", fetchMock);
     const { container } = render(<ChatWorkspace />);
     await typeAndSend("What is the plan?");
     await waitFor(() =>
@@ -151,11 +263,12 @@ describe("signed in", () => {
 
   it("shows Stop while the reply streams and stops the request", async () => {
     const controlled = controllableStream();
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      void init;
-      return sseResponse(controlled.stream);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubWorkspaceFetch(
+      async (_url: string, init?: RequestInit) => {
+        void init;
+        return sseResponse(controlled.stream);
+      },
+    );
     render(<ChatWorkspace />);
     await typeAndSend("Long question");
     controlled.push(acceptedFrame());
@@ -183,23 +296,20 @@ describe("signed in", () => {
 
   it("offers only Ask again after an error event, and asks again with a new key", async () => {
     const calls: RequestInit[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        calls.push(init ?? {});
-        return calls.length === 1
-          ? sseResponse([
-              acceptedFrame(),
-              deltaFrame("Par"),
-              errorFrame("stream_interrupted", true),
-            ])
-          : sseResponse([
-              acceptedFrame(),
-              deltaFrame("Whole reply"),
-              doneFrame(),
-            ]);
-      }),
-    );
+    stubWorkspaceFetch(async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return calls.length === 1
+        ? sseResponse([
+            acceptedFrame(),
+            deltaFrame("Par"),
+            errorFrame("stream_interrupted", true),
+          ])
+        : sseResponse([
+            acceptedFrame(),
+            deltaFrame("Whole reply"),
+            doneFrame(),
+          ]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     const alert = await screen.findByRole("alert");
@@ -223,22 +333,19 @@ describe("signed in", () => {
 
   it("retries an unknown outcome with the same key and replaces the partial text", async () => {
     const calls: RequestInit[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        calls.push(init ?? {});
-        return calls.length === 1
-          ? new Response("<html>Bad Gateway</html>", {
-              status: 502,
-              headers: { "Content-Type": "text/html" },
-            })
-          : sseResponse([
-              acceptedFrame({ replayed: true }),
-              deltaFrame("Stored reply"),
-              doneFrame(),
-            ]);
-      }),
-    );
+    stubWorkspaceFetch(async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return calls.length === 1
+        ? new Response("<html>Bad Gateway</html>", {
+            status: 502,
+            headers: { "Content-Type": "text/html" },
+          })
+        : sseResponse([
+            acceptedFrame({ replayed: true }),
+            deltaFrame("Stored reply"),
+            doneFrame(),
+          ]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     const alert = await screen.findByRole("alert");
@@ -265,11 +372,8 @@ describe("signed in", () => {
   });
 
   it("restores the text to the composer when the server refuses a message", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({ error: "validation_error", fields: ["content"] }, 422),
-      ),
+    stubWorkspaceFetch(async () =>
+      jsonResponse({ error: "validation_error", fields: ["content"] }, 422),
     );
     render(<ChatWorkspace />);
     await typeAndSend("Keep my words");
@@ -285,11 +389,8 @@ describe("signed in", () => {
   it("shows the Retry-After wait for a rate limit and counts it down beside a disabled Retry", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () =>
-          jsonResponse({ error: "rate_limited" }, 429, { "Retry-After": "3" }),
-        ),
+      stubWorkspaceFetch(async () =>
+        jsonResponse({ error: "rate_limited" }, 429, { "Retry-After": "3" }),
       );
       render(<ChatWorkspace />);
       await typeAndSend("Hi");
@@ -315,16 +416,41 @@ describe("signed in", () => {
   });
 
   it("starts a new conversation and focuses the composer", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([acceptedFrame(), deltaFrame("Reply"), doneFrame()]),
-      ),
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    let sessionReads = 0;
+    stubWorkspaceFetch(
+      async () =>
+        sseResponse([
+          acceptedFrame({ sessionId }),
+          deltaFrame("Reply"),
+          doneFrame(),
+        ]),
+      () => {
+        sessionReads += 1;
+        return jsonResponse({
+          items:
+            sessionReads === 1
+              ? []
+              : [
+                  {
+                    id: sessionId,
+                    title: "First conversation",
+                    channel: "text",
+                    status: "active",
+                    created_at: new Date().toISOString(),
+                  },
+                ],
+          next_cursor: null,
+        });
+      },
     );
     render(<ChatWorkspace />);
     await typeAndSend("First");
     await screen.findByText("Reply");
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(
+      await screen.findByRole("button", { name: "First conversation" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /New conversation/ }));
     expect(screen.queryByText("Reply")).toBeNull();
     expect(
       screen.getByRole("heading", { name: "Start a conversation" }),
@@ -332,12 +458,108 @@ describe("signed in", () => {
     expect(document.activeElement).toBe(box());
   });
 
+  it("loads paginated history and continues the selected session", async () => {
+    const sessionId = "22222222-2222-4222-8222-222222222222";
+    const session = {
+      id: sessionId,
+      title: "Earlier planning",
+      channel: "text",
+      status: "active",
+      created_at: new Date().toISOString(),
+    };
+    const earlierSession = {
+      ...session,
+      id: "44444444-4444-4444-8444-444444444444",
+      title: "Older conversation",
+      created_at: "2020-01-01T00:00:00Z",
+    };
+    const messageRequests: string[] = [];
+    const fetchMock = stubWorkspaceFetch(
+      async (url, init) => {
+        messageRequests.push(url);
+        if (url.includes("/messages")) {
+          if (url.includes("cursor=older")) {
+            return jsonResponse({
+              items: [
+                {
+                  id: "assistant-2",
+                  role: "assistant",
+                  content: "Second page reply",
+                  created_at: "2026-01-02T00:00:00Z",
+                },
+              ],
+              next_cursor: null,
+            });
+          }
+          return jsonResponse({
+            items: [
+              {
+                id: "user-1",
+                role: "user",
+                content: "First page question",
+                created_at: "2026-01-01T00:00:00Z",
+              },
+            ],
+            next_cursor: "older",
+          });
+        }
+        if (url.endsWith("/chat/message")) {
+          const body = JSON.parse(String(init?.body)) as {
+            session_id?: string;
+          };
+          expect(body.session_id).toBe(sessionId);
+          return sseResponse([
+            acceptedFrame({ sessionId }),
+            deltaFrame("Continued reply"),
+            doneFrame(),
+          ]);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      },
+      (url) =>
+        url.includes("cursor=next")
+          ? jsonResponse({ items: [earlierSession], next_cursor: null })
+          : jsonResponse({ items: [session], next_cursor: "next" }),
+    );
+    render(<ChatWorkspace />);
+
+    const sessionButton = await screen.findByRole("button", {
+      name: "Earlier planning",
+    });
+    expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(
+      await screen.findByRole("button", { name: "Older conversation" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Earlier" }),
+    ).toBeInTheDocument();
+    fireEvent.click(sessionButton);
+    expect(await screen.findByText("First page question")).toBeInTheDocument();
+    expect(await screen.findByText("Second page reply")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Earlier planning" }),
+    ).toBeInTheDocument();
+    expect(sessionButton).toHaveAttribute("aria-current", "page");
+    const messagePageRequests = messageRequests.filter((url) =>
+      url.includes("/messages"),
+    );
+    expect(messagePageRequests).toHaveLength(2);
+    expect(
+      messagePageRequests.some((url) => url.includes("cursor=older")),
+    ).toBe(true);
+
+    await typeAndSend("Continue this thread");
+    expect(await screen.findByText("Continued reply")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/chat/message",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("clears the conversation when the token disappears mid-session", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([acceptedFrame(), deltaFrame("Reply"), doneFrame()]),
-      ),
+    stubWorkspaceFetch(async () =>
+      sseResponse([acceptedFrame(), deltaFrame("Reply"), doneFrame()]),
     );
     render(<ChatWorkspace />);
     await typeAndSend("First");
@@ -365,15 +587,12 @@ describe("focus after a notice action", () => {
 
   it("moves focus to the composer after Retry", async () => {
     let call = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        call += 1;
-        return call === 1
-          ? proxyDown()
-          : sseResponse([acceptedFrame(), deltaFrame("ok"), doneFrame()]);
-      }),
-    );
+    stubWorkspaceFetch(async () => {
+      call += 1;
+      return call === 1
+        ? proxyDown()
+        : sseResponse([acceptedFrame(), deltaFrame("ok"), doneFrame()]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     const retry = await screen.findByRole("button", { name: "Retry" });
@@ -389,15 +608,12 @@ describe("focus after a notice action", () => {
 
   it("moves focus to the composer after Ask again in the notice", async () => {
     let call = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        call += 1;
-        return call === 1
-          ? sseResponse([acceptedFrame(), errorFrame("internal_error", true)])
-          : sseResponse([acceptedFrame(), deltaFrame("fine"), doneFrame()]);
-      }),
-    );
+    stubWorkspaceFetch(async () => {
+      call += 1;
+      return call === 1
+        ? sseResponse([acceptedFrame(), errorFrame("internal_error", true)])
+        : sseResponse([acceptedFrame(), deltaFrame("fine"), doneFrame()]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     const askAgain = await screen.findByRole("button", { name: "Ask again" });
@@ -410,11 +626,8 @@ describe("focus after a notice action", () => {
   });
 
   it("moves focus to the composer after Dismiss", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({ error: "validation_error", fields: ["content"] }, 422),
-      ),
+    stubWorkspaceFetch(async () =>
+      jsonResponse({ error: "validation_error", fields: ["content"] }, 422),
     );
     render(<ChatWorkspace />);
     await typeAndSend("Edit me");
@@ -428,19 +641,16 @@ describe("focus after a notice action", () => {
 
   it("moves focus to the composer after the inline Ask again", async () => {
     let call = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        call += 1;
-        return call === 1
-          ? sseResponse([
-              acceptedFrame(),
-              deltaFrame("cut"),
-              errorFrame("stream_interrupted", true),
-            ])
-          : sseResponse([acceptedFrame(), deltaFrame("whole"), doneFrame()]);
-      }),
-    );
+    stubWorkspaceFetch(async () => {
+      call += 1;
+      return call === 1
+        ? sseResponse([
+            acceptedFrame(),
+            deltaFrame("cut"),
+            errorFrame("stream_interrupted", true),
+          ])
+        : sseResponse([acceptedFrame(), deltaFrame("whole"), doneFrame()]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
@@ -463,28 +673,25 @@ describe("Ask again after an interrupted reply", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const calls: RequestInit[] = [];
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (_url: string, init?: RequestInit) => {
-          calls.push(init ?? {});
-          if (calls.length === 1) {
-            // Ends without done or error: the client retries on its own.
-            return sseResponse([acceptedFrame(), deltaFrame("Half")]);
-          }
-          if (calls.length === 2) {
-            return sseResponse([
-              acceptedFrame({ replayed: true }),
-              deltaFrame("Half an answer"),
-              doneFrame("interrupted"),
-            ]);
-          }
+      stubWorkspaceFetch(async (_url: string, init?: RequestInit) => {
+        calls.push(init ?? {});
+        if (calls.length === 1) {
+          // Ends without done or error: the client retries on its own.
+          return sseResponse([acceptedFrame(), deltaFrame("Half")]);
+        }
+        if (calls.length === 2) {
           return sseResponse([
-            acceptedFrame(),
-            deltaFrame("Full answer"),
-            doneFrame(),
+            acceptedFrame({ replayed: true }),
+            deltaFrame("Half an answer"),
+            doneFrame("interrupted"),
           ]);
-        }),
-      );
+        }
+        return sseResponse([
+          acceptedFrame(),
+          deltaFrame("Full answer"),
+          doneFrame(),
+        ]);
+      });
       render(<ChatWorkspace />);
       await typeAndSend("Question");
       await act(async () => {
@@ -517,16 +724,13 @@ describe("Ask again after an interrupted reply", () => {
 
   it("shows model_unavailable with no text as Ask again only, never a same-key Retry", async () => {
     const calls: RequestInit[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        calls.push(init ?? {});
-        return sseResponse([
-          acceptedFrame(),
-          errorFrame("model_unavailable", true),
-        ]);
-      }),
-    );
+    stubWorkspaceFetch(async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return sseResponse([
+        acceptedFrame(),
+        errorFrame("model_unavailable", true),
+      ]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
     const alert = await screen.findByRole("alert");
@@ -548,15 +752,12 @@ describe("Ask again after an interrupted reply", () => {
   });
 
   it("stays available inline after the notice is dismissed, and only then", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([
-          acceptedFrame(),
-          deltaFrame("cut"),
-          errorFrame("model_unavailable", true),
-        ]),
-      ),
+    stubWorkspaceFetch(async () =>
+      sseResponse([
+        acceptedFrame(),
+        deltaFrame("cut"),
+        errorFrame("model_unavailable", true),
+      ]),
     );
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
@@ -574,19 +775,16 @@ describe("Ask again after an interrupted reply", () => {
 
   it("is not offered once a new message has been sent", async () => {
     let call = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        call += 1;
-        return call === 1
-          ? sseResponse([
-              acceptedFrame(),
-              deltaFrame("cut"),
-              errorFrame("stream_interrupted", false),
-            ])
-          : sseResponse([acceptedFrame(), deltaFrame("next"), doneFrame()]);
-      }),
-    );
+    stubWorkspaceFetch(async () => {
+      call += 1;
+      return call === 1
+        ? sseResponse([
+            acceptedFrame(),
+            deltaFrame("cut"),
+            errorFrame("stream_interrupted", false),
+          ])
+        : sseResponse([acceptedFrame(), deltaFrame("next"), doneFrame()]);
+    });
     render(<ChatWorkspace />);
     await typeAndSend("One");
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
@@ -602,15 +800,12 @@ describe("a message that may have been received", () => {
   });
 
   it("keeps the bubble and does not put the text back when the error is dismissed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response("<html>Gateway Timeout</html>", {
-            status: 504,
-            headers: { "Content-Type": "text/html" },
-          }),
-      ),
+    stubWorkspaceFetch(
+      async () =>
+        new Response("<html>Gateway Timeout</html>", {
+          status: 504,
+          headers: { "Content-Type": "text/html" },
+        }),
     );
     const { container } = render(<ChatWorkspace />);
     await typeAndSend("Send me once");
@@ -638,12 +833,9 @@ describe("a message that may have been received", () => {
   it("leads with Retry for a lost connection and labels the message Not confirmed", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => {
-          throw new TypeError("Failed to fetch");
-        }),
-      );
+      stubWorkspaceFetch(async () => {
+        throw new TypeError("Failed to fetch");
+      });
       render(<ChatWorkspace />);
       await typeAndSend("Hello");
       await act(async () => {
@@ -667,11 +859,12 @@ describe("a different sign-in", () => {
   it("clears the conversation, the draft and the request when the token changes to another token", async () => {
     setAccessToken("token-of-user-a");
     const controlled = controllableStream();
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      void init;
-      return sseResponse(controlled.stream);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubWorkspaceFetch(
+      async (_url: string, init?: RequestInit) => {
+        void init;
+        return sseResponse(controlled.stream);
+      },
+    );
     render(<ChatWorkspace />);
     await typeAndSend("Private question from A");
     controlled.push(acceptedFrame());
@@ -696,11 +889,8 @@ describe("a different sign-in", () => {
 
   it("does nothing when the same token is set again", async () => {
     setAccessToken("steady-token");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([acceptedFrame(), deltaFrame("Kept"), doneFrame()]),
-      ),
+    stubWorkspaceFetch(async () =>
+      sseResponse([acceptedFrame(), deltaFrame("Kept"), doneFrame()]),
     );
     render(<ChatWorkspace />);
     await typeAndSend("Hello");
@@ -713,11 +903,8 @@ describe("a different sign-in", () => {
 describe("token handling", () => {
   it("never writes the token to localStorage, sessionStorage or cookies", async () => {
     setAccessToken("super-secret-token-value");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([acceptedFrame(), deltaFrame("ok"), doneFrame()]),
-      ),
+    stubWorkspaceFetch(async () =>
+      sseResponse([acceptedFrame(), deltaFrame("ok"), doneFrame()]),
     );
     render(<ChatWorkspace />);
     await typeAndSend("Hi");
@@ -736,7 +923,7 @@ describe("token handling", () => {
 describe("theme", () => {
   it("follows the system by default and lets the user choose, remembering the choice", () => {
     const { container } = render(<ChatWorkspace />);
-    const root = container.querySelector(".maya-chat");
+    const root = container.querySelector(".maya-app");
     expect(root).not.toHaveAttribute("data-maya-theme");
     expect(
       screen.getByRole("button", { name: "Follow system theme" }),
@@ -761,7 +948,7 @@ describe("theme", () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, "light");
     const { container } = render(<ChatWorkspace />);
     await waitFor(() =>
-      expect(container.querySelector(".maya-chat")).toHaveAttribute(
+      expect(container.querySelector(".maya-app")).toHaveAttribute(
         "data-maya-theme",
         "light",
       ),
@@ -777,7 +964,7 @@ describe("theme", () => {
     });
     const { container } = render(<ChatWorkspace />);
     fireEvent.click(screen.getByRole("button", { name: "Dark theme" }));
-    expect(container.querySelector(".maya-chat")).toHaveAttribute(
+    expect(container.querySelector(".maya-app")).toHaveAttribute(
       "data-maya-theme",
       "dark",
     );

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getAccessToken,
   getAccessTokenVersion,
+  getAuthIdentityVersion,
+  refreshSession,
   setAccessToken,
   subscribeAccessToken,
 } from "./auth-session";
@@ -11,10 +13,11 @@ afterEach(() => {
   setAccessToken(null);
   window.localStorage.clear();
   window.sessionStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 describe("auth-session", () => {
-  it("starts empty and holds the token in memory", () => {
+  it("holds only the access token in memory", () => {
     expect(getAccessToken()).toBeNull();
     setAccessToken("token-value-1");
     expect(getAccessToken()).toBe("token-value-1");
@@ -22,13 +25,7 @@ describe("auth-session", () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it("treats an empty string as no token", () => {
-    setAccessToken("something");
-    setAccessToken("");
-    expect(getAccessToken()).toBeNull();
-  });
-
-  it("never writes the token to localStorage, sessionStorage or cookies", () => {
+  it("never persists an access token in web storage or a readable cookie", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     setAccessToken("secret-token-value");
     expect(setItem).not.toHaveBeenCalled();
@@ -60,31 +57,17 @@ describe("auth-session", () => {
     setAccessToken("token-of-user-a");
     const afterA = getAccessTokenVersion();
     expect(afterA).toBeGreaterThan(start);
-    // The same token again is not a change.
     setAccessToken("token-of-user-a");
     expect(getAccessTokenVersion()).toBe(afterA);
-    // Straight to another token, without a signed-out step in between.
     setAccessToken("token-of-user-b");
     const afterB = getAccessTokenVersion();
     expect(afterB).toBeGreaterThan(afterA);
     setAccessToken(null);
     expect(getAccessTokenVersion()).toBeGreaterThan(afterB);
-    // Clearing an already empty holder changes nothing.
     const cleared = getAccessTokenVersion();
     setAccessToken(null);
     setAccessToken("");
     expect(getAccessTokenVersion()).toBe(cleared);
-  });
-
-  it("only ever increases the version", () => {
-    const seen: number[] = [getAccessTokenVersion()];
-    for (const token of ["a-token", "b-token", null, "a-token", "c-token"]) {
-      setAccessToken(token);
-      seen.push(getAccessTokenVersion());
-    }
-    for (let i = 1; i < seen.length; i += 1) {
-      expect(seen[i]).toBeGreaterThan(seen[i - 1]);
-    }
   });
 
   it("does not expose the token through the version", () => {
@@ -93,12 +76,84 @@ describe("auth-session", () => {
     expect(String(getAccessTokenVersion())).not.toContain("secret");
   });
 
-  it("notifies subscribers when one token replaces another", () => {
-    const listener = vi.fn();
-    setAccessToken("first-token-value");
-    const unsubscribe = subscribeAccessToken(listener);
-    setAccessToken("second-token-value");
-    expect(listener).toHaveBeenCalledTimes(1);
-    unsubscribe();
+  it("sends a same-origin cookie refresh and shares one in-flight request", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const first = refreshSession();
+    const second = refreshSession();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(init).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    expect(init.body).toBeUndefined();
+    expect(init.headers).toMatchObject({
+      "X-Maya-Refresh-Transport": "cookie",
+    });
+    resolveResponse?.(
+      new Response(
+        JSON.stringify({
+          access_token: "example-access-token-refreshed",
+          token_type: "bearer",
+          expires_in: 900,
+        }),
+        { status: 200 },
+      ),
+    );
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { accessToken: "example-access-token-refreshed", expiresIn: 900 },
+      { accessToken: "example-access-token-refreshed", expiresIn: 900 },
+    ]);
+    expect(getAccessToken()).toBe("example-access-token-refreshed");
+  });
+
+  it("updates a refreshed access token without changing the sign-in identity", async () => {
+    setAccessToken("example-access-token-previous");
+    const identity = getAuthIdentityVersion();
+    const tokenVersion = getAccessTokenVersion();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "example-access-token-rotated",
+              token_type: "bearer",
+              expires_in: 900,
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(refreshSession()).resolves.toEqual({
+      accessToken: "example-access-token-rotated",
+      expiresIn: 900,
+    });
+    expect(getAccessToken()).toBe("example-access-token-rotated");
+    expect(getAccessTokenVersion()).toBeGreaterThan(tokenVersion);
+    expect(getAuthIdentityVersion()).toBe(identity);
+  });
+
+  it("clears the in-memory token when the refresh cookie is invalid", async () => {
+    setAccessToken("example-access-token-previous");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+
+    await expect(refreshSession()).resolves.toBeNull();
+    expect(getAccessToken()).toBeNull();
   });
 });

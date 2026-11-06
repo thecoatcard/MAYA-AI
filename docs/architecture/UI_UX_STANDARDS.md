@@ -1,6 +1,6 @@
 # UI/UX standards: look, feel and motion
 
-- **Status:** Proposed (direction only). The owner accepts or adjusts it before the first UI work that ships to users.
+- **Status:** Direction A — Quiet Instrument chosen by the owner on 2026-11-06. These standards remain the review gate for all web UI.
 - **Applies to:** every screen in `apps/web`, from the first sign-in page to the Phase 14 surfaces.
 - **Not in this document:** mock-ups, final colours or a chosen typeface. None exist yet. The first UI task produces a design brief and the owner picks a direction (see "Process").
 
@@ -96,7 +96,7 @@ Each state also shows a text label for assistive technology and for reduced moti
 
 ## 7. Typography
 
-- One family chosen for the brand (a second for code only), self-hosted. No external font service or CDN: the web app deliberately contacts nothing external today.
+- One family chosen for the brand (a second for code only), self-hosted. No external font service or CDN: the web app deliberately contacts nothing external today. The owner chose `system-ui` on 2026-11-06 as an explicit exception to the system-stack anti-goal.
 - Body at 16 px or larger with 1.5 line height; measure of 60 to 75 characters for reading text.
 - Numbers in tables, costs, timings and diffs use tabular figures. Code and payloads use a monospace face with clear distinction between similar characters.
 

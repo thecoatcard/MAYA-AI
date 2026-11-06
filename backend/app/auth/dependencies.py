@@ -21,7 +21,12 @@ def get_auth_service(request: Request) -> AuthService:
 
 
 def client_address(request: Request) -> str:
-    """The direct peer. Proxy headers are ignored until a trusted-proxy setting is approved."""
+    """Use only the direct peer; forwarded headers are untrusted behind the Next proxy.
+
+    The proxy leaves a client-supplied ``X-Forwarded-For`` intact, so it cannot
+    identify a trustworthy source address for per-address limits. Revisit when
+    the hosting target provides a front proxy that overwrites that header.
+    """
     return request.client.host if request.client is not None else "unknown"
 
 

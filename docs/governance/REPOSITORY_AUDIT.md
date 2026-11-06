@@ -99,7 +99,7 @@ No duplicated, conflicting or outdated agent rules exist, because none exist. Th
 Each tool's entry points were checked against its official documentation on 2026-11-05 rather than assumed. Results are in `docs/governance/AI_AGENT_COMPATIBILITY.md`. Two findings changed the layout requested in the setup brief:
 
 - **Antigravity** reads `.agents/` (plural). The `.agent/` folder is accepted only as a legacy path for rules, and Antigravity's own migration page says legacy workflows stop working on **2026-10-19**, which has passed. So workflows are delivered as skills in `.agents/skills/`, and no `.agent/workflows/` is created.
-- **Codex** does not read a `.codex/` folder for instructions. `AGENTS.md` is its entry point, so no `.codex/README.md` is created.
+- **Codex** does not read a `.codex/` folder for instructions. `AGENTS.md` is its entry point, so no Codex-specific README is created.
 
 ## 8. Recommended setup (what was built)
 

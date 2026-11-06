@@ -60,9 +60,9 @@ function tokens(text: string): Record<string, string> {
   return out;
 }
 
-const lightBlock = block(".maya-chat {");
+const lightBlock = block(".maya-app {");
 const darkMediaBlock = block("@media (prefers-color-scheme: dark)");
-const darkAttrBlock = block('.maya-chat[data-maya-theme="dark"]');
+const darkAttrBlock = block('.maya-app[data-maya-theme="dark"]');
 const light = tokens(lightBlock.text);
 const darkMedia = tokens(darkMediaBlock.text);
 const darkAttr = tokens(darkAttrBlock.text);
@@ -120,6 +120,11 @@ describe("tokens", () => {
 
   it("defines the same colour roles in the dark theme as in the light theme", () => {
     expect(colourKeys.length).toBeGreaterThan(20);
+    expect(
+      Object.keys(darkAttr)
+        .filter((key) => colourKeys.includes(key))
+        .sort(),
+    ).toEqual([...colourKeys].sort());
     for (const key of colourKeys) {
       expect(
         darkAttr[key],
@@ -134,7 +139,7 @@ describe("tokens", () => {
 
   it("only changes the light theme when the user has not chosen light", () => {
     expect(darkMediaBlock.text).toContain(
-      '.maya-chat:not([data-maya-theme="light"])',
+      '.maya-app:not([data-maya-theme="light"])',
     );
   });
 
@@ -171,6 +176,30 @@ describe("contrast of the real token pairs (WCAG 2.2 AA)", () => {
       ["text on bg", c("text"), c("bg"), 4.5],
       ["text on surface", c("text"), c("surface"), 4.5],
       ["text on raised", c("text"), c("raised"), 4.5],
+      [
+        "text on glass over darkest light-theme surface",
+        c("text"),
+        over(c("glass-surface"), c("bg")),
+        4.5,
+      ],
+      [
+        "text on glass over lightest light-theme surface",
+        c("text"),
+        over(c("glass-surface"), c("raised")),
+        4.5,
+      ],
+      [
+        "text on raised glass over darkest light-theme surface",
+        c("text"),
+        over(c("glass-raised"), c("bg")),
+        4.5,
+      ],
+      [
+        "text on raised glass over lightest light-theme surface",
+        c("text"),
+        over(c("glass-raised"), c("raised")),
+        4.5,
+      ],
       ["text on code", c("text"), c("code-bg"), 4.5],
       ["text on hover", c("text"), c("hover"), 4.5],
       ["text on error notice", c("text"), dangerSoftOnSurface, 4.5],
@@ -270,7 +299,7 @@ describe("motion", () => {
 
   it("has a reduced-motion equivalent that stops every animation and timed transition", () => {
     const reduced = block("@media (prefers-reduced-motion: reduce)").text;
-    expect(reduced).toContain(".maya-chat *");
+    expect(reduced).toContain(".maya-app *");
     expect(reduced).toMatch(/animation:\s*none\s*!important/);
     expect(reduced).toMatch(/transition-duration:\s*0\.01ms\s*!important/);
   });
@@ -281,14 +310,37 @@ describe("motion", () => {
     expect(source).toContain("maya-pending__label");
   });
 
+  it("allows only named infinite loops with written purposes and static fallbacks", () => {
+    expect(css).toContain(
+      "Shimmer keeps history loading legible without a spinner.",
+    );
+    expect(css).toContain(
+      "Ambient motion is only a subtle landing-page orientation cue.",
+    );
+    expect(css).toContain(
+      '.maya-app[data-page-hidden="true"] .maya-home::before',
+    );
+    expect(css).toContain("animation-play-state: paused");
+    const reduced = block("@media (prefers-reduced-motion: reduce)").text;
+    expect(reduced).toMatch(/animation:\s*none\s*!important/);
+  });
+
   it("does not loop an animation next to body text", () => {
     const caret = block(".maya-caret {").text;
     expect(caret).not.toContain("infinite");
     const loops = Array.from(
       css.matchAll(/animation:[^;]*infinite[^;]*;/g),
-    ).map((m) => m[0]);
-    expect(loops).toHaveLength(1);
-    expect(loops[0]).toContain("maya-pulse");
+    ).map((match) => match[0]);
+    expect(loops).toHaveLength(3);
+    expect(loops.join(" ")).toContain("maya-pulse");
+    expect(loops.join(" ")).toContain("maya-shimmer");
+    expect(loops.join(" ")).toContain("maya-ambient");
+    expect(css).toContain(
+      "Shimmer keeps history loading legible without a spinner.",
+    );
+    expect(css).toContain(
+      "Ambient motion is only a subtle landing-page orientation cue.",
+    );
   });
 });
 
@@ -333,10 +385,6 @@ describe("accessibility and safety of the stylesheet", () => {
     // Measured at 360 px before this rule: the brand link 39 px, the signed-out
     // link 23 px.
     const touch = block("@media (pointer: coarse), (max-width: 40rem)").text;
-    const rule = touch.match(
-      /((?:\.[\w-]+,\s*)+\.[\w-]+)\s*\{[^}]*min-height:\s*var\(--maya-touch\)/g,
-    );
-    const selectors = (rule ?? []).join(" ");
     for (const name of [
       ".maya-btn",
       ".maya-theme__option",
@@ -348,8 +396,9 @@ describe("accessibility and safety of the stylesheet", () => {
     ]) {
       expect(touch, `${name} has a touch rule`).toContain(name);
     }
-    expect(selectors).toContain(".maya-brand");
-    expect(selectors).toContain(".maya-signedout__link");
+    expect(touch).toMatch(
+      /\.maya-brand,[\s\S]*?\.maya-msg__action\s*\{[^}]*min-height:\s*var\(--maya-touch\)/,
+    );
   });
 
   it("lets the stand-alone link center its text so a taller box looks right", () => {
@@ -367,6 +416,20 @@ describe("accessibility and safety of the stylesheet", () => {
 
   it("styles the forced-colors mode so state does not depend on shadows", () => {
     expect(css).toContain("@media (forced-colors: active)");
+  });
+
+  it("provides solid fallbacks for every frosted surface", () => {
+    expect(css).toContain("@supports not (backdrop-filter: blur(1px))");
+    expect(css).toContain("@media (prefers-reduced-transparency: reduce)");
+    expect(css).toContain(
+      ".maya-chat__header {\n    background: var(--maya-raised)",
+    );
+    expect(css).toContain(
+      ".maya-chat__dock {\n    background: var(--maya-raised)",
+    );
+    expect(css).toContain(
+      ".maya-sidebar.is-open {\n    background: var(--maya-raised)",
+    );
   });
 });
 

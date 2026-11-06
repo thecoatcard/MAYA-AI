@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setAccessToken } from "../../lib/auth-session";
@@ -11,15 +11,25 @@ afterEach(() => {
 });
 
 describe("/chat page", () => {
-  it("renders the not-signed-in state without calling the API", () => {
-    const fetchMock = vi.fn();
+  it("checks the refresh cookie before showing the signed-out state", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<ChatPage />);
+    rtlRender(
+      <div className="maya-app">
+        <ChatPage />
+      </div>,
+    );
     expect(
-      screen.getByRole("heading", { name: "Sign-in is not built yet" }),
+      await screen.findByRole("heading", { name: "Sign in to chat" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/refresh",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+      }),
+    );
   });
 
   it("has a title and a description that match what exists", () => {

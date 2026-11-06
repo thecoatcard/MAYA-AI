@@ -159,7 +159,11 @@ async def stack(app_engine: AsyncEngine, admin_engine: AsyncEngine) -> AsyncIter
     finally:
         await client.aclose()
         for workspace in value.workspaces:  # the keys this test created
-            for pattern in (f"maya:chat:idem:{workspace}:*", f"maya:rl:chat-message:{workspace}:*"):
+            for pattern in (
+                f"maya:chat:idem:{workspace}:*",
+                f"maya:chat:streams:{workspace}:*",
+                f"maya:rl:chat-message:{workspace}:*",
+            ):
                 async for name in redis.scan_iter(match=pattern):
                     await redis.delete(name)
         await redis.aclose()

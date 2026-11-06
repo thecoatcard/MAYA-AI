@@ -39,6 +39,8 @@ secrets/
 CLAUDE.local.md
 AGENTS.local.md
 .codemie/
+docs/codemie/
+.playwright-mcp/
 
 # Logs and OS files
 *.log

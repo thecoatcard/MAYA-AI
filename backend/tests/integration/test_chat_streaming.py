@@ -39,6 +39,7 @@ from app.api.v1.chat import (
 )
 from app.auth.dependencies import get_principal
 from app.auth.models import Principal
+from app.core.chat_streams import ChatStreamLease, ChatStreamLimiterUnavailable
 from app.core.clock import Clock
 from app.core.config import Settings
 from app.db.repositories.chat import (
@@ -58,7 +59,7 @@ from app.services.chat_idempotency import (
     State,
     request_hash,
 )
-from app.services.chat_service import ChatService, ChatStorage
+from app.services.chat_service import ChatService, ChatStorage, ChatStreamLimitReached
 from tests.support.auth import FakeRateLimiter, Harness, build_harness
 from tests.support.clock import ManualClock
 from tests.support.fake_gemini_client import FakeAsyncModels, FakeGeminiClient
@@ -113,6 +114,38 @@ class MemoryDatabase:
         if self._chat.unavailable:
             raise ConnectionRefusedError(PROVIDER_MARKER)
         yield cast(AsyncConnection, None)
+
+
+class MemoryChatStreamLimiter:
+    def __init__(self) -> None:
+        self._leases: dict[str, set[str]] = {}
+        self.unavailable = False
+        self.lease_seconds: list[int] = []
+
+    def active(self) -> int:
+        return sum(len(leases) for leases in self._leases.values())
+
+    async def acquire(
+        self, workspace_id: UUID, user_id: UUID, *, limit: int, lease_seconds: int
+    ) -> ChatStreamLease | None:
+        if self.unavailable:
+            raise ChatStreamLimiterUnavailable
+        self.lease_seconds.append(lease_seconds)
+        key = f"{workspace_id}:{user_id}"
+        leases = self._leases.setdefault(key, set())
+        if len(leases) >= limit:
+            return None
+        member = uuid4().hex
+        leases.add(member)
+        return ChatStreamLease(key, member)
+
+    async def release(self, lease: ChatStreamLease) -> None:
+        leases = self._leases.get(lease.key)
+        if leases is None:
+            return
+        leases.discard(lease.member)
+        if not leases:
+            del self._leases[lease.key]
 
 
 def _offset(cursor: str | None) -> int:
@@ -345,6 +378,7 @@ class World:
     chat: MemoryChat
     store: MemoryIdempotencyStore
     limiter: FakeRateLimiter
+    stream_limiter: MemoryChatStreamLimiter
     fake: FakeGeminiClient
     models: ScriptedModels
     gateway: ModelGateway
@@ -377,6 +411,7 @@ async def make_world(*, with_client: bool = True, **settings: Any) -> AsyncItera
         chat=MemoryChat(),
         store=MemoryIdempotencyStore(),
         limiter=FakeRateLimiter(harness.clock),
+        stream_limiter=MemoryChatStreamLimiter(),
         fake=fake,
         models=models,
         gateway=gateway,
@@ -395,6 +430,7 @@ async def make_world(*, with_client: bool = True, **settings: Any) -> AsyncItera
             settings=world.settings,
             limiter=world.limiter,
             idempotency=world.store,
+            stream_limiter=world.stream_limiter,
             clock=cast(Clock, world.clock),
             monotonic=world.ticker,
             repositories=world.chat.repository,
@@ -763,7 +799,7 @@ async def test_a_message_without_a_session_creates_one_and_streams_the_reply(wor
     response = await send(world, account, "  Summarize\n the   open   risks.  ")
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "no-store, no-transform"
     assert response.headers["x-accel-buffering"] == "no"
     frames = events(response)
     assert names(frames) == ["message.accepted", *["delta"] * 4, "done"]
@@ -1216,7 +1252,149 @@ async def wait_until(condition: Callable[[], bool], *, attempts: int = 10_000) -
     pytest.fail("the condition was never reached")
 
 
-async def begin(world: World, account: Account, content: str = "hello") -> Any:
+async def test_active_stream_limit_releases_the_key_and_lease_when_a_slot_frees(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    first = await begin(world, account)
+    second = await begin(world, account)
+    blocked_key = new_key()
+
+    with pytest.raises(ChatStreamLimitReached):
+        await begin(world, account, key=blocked_key)
+
+    await first.close()
+    await second.close()
+    retried = await begin(world, account, key=blocked_key)
+    accepted = parse_sse(await retried.events().__anext__())[0]
+    assert accepted.event == "message.accepted"
+    assert accepted.data["replayed"] is False
+    await retried.close()
+
+
+async def test_full_stream_limit_is_a_retryable_429_before_storage(world: World) -> None:
+    account = await sign_in(world)
+    first = await world.stream_limiter.acquire(
+        account.workspace_id, account.user_id, limit=2, lease_seconds=150
+    )
+    second = await world.stream_limiter.acquire(
+        account.workspace_id, account.user_id, limit=2, lease_seconds=150
+    )
+    assert first is not None and second is not None
+
+    response = await send(world, account)
+
+    assert (response.status_code, response.json()) == (
+        429,
+        {"error": "concurrent_stream_limit"},
+    )
+    assert response.headers["Retry-After"] == "1"
+    assert world.chat.messages == []
+    assert stream_calls(world) == []
+    await world.stream_limiter.release(first)
+    await world.stream_limiter.release(second)
+
+
+async def test_a_stream_limiter_outage_answers_503_and_frees_the_key(world: World) -> None:
+    # The key is claimed before the slot is taken; if Redis fails in between, a
+    # same-key retry (which CHAT.md tells the client to make) must not get 409.
+    account = await sign_in(world)
+    key = new_key()
+    world.stream_limiter.unavailable = True
+    failed = await send(world, account, key=key)
+    assert (failed.status_code, failed.json()) == (503, {"error": "chat_unavailable"})
+    assert world.store.records == {} and world.chat.messages == []
+    world.stream_limiter.unavailable = False
+    retried = await send(world, account, key=key)
+    assert retried.status_code == 200
+    assert names(events(retried))[-1] == "done"
+
+
+async def test_the_stream_lease_outlives_the_reply_deadline(world: World) -> None:
+    account = await sign_in(world)
+    await send(world, account)
+    assert world.stream_limiter.lease_seconds == [world.settings.chat_reply_deadline_seconds + 30]
+
+
+async def test_a_completed_reply_frees_its_stream_slot(world: World) -> None:
+    account = await sign_in(world)
+    assert names(events(await send(world, account)))[-1] == "done"
+    assert world.stream_limiter.active() == 0
+
+
+async def test_a_turn_closed_mid_stream_frees_its_stream_slot(world: World) -> None:
+    account = await sign_in(world)
+    world.models.script = [chunk("one "), chunk("two "), chunk("three", tokens=(2, 3))]
+    turn = await begin(world, account)
+    stream = turn.events()
+    await stream.__anext__()  # message.accepted
+    await stream.__anext__()  # first delta
+    assert world.stream_limiter.active() == 1
+    await turn.close()
+    assert world.stream_limiter.active() == 0
+
+
+async def test_a_failed_user_message_write_frees_the_key_and_the_slot() -> None:
+    async with make_world() as world:
+        account = await sign_in(world)
+        world.chat.unavailable = True
+        failed = await send(world, account)
+        assert failed.status_code == 503
+        assert world.stream_limiter.active() == 0 and world.store.records == {}
+
+
+async def test_chat_passes_the_approved_output_token_limit_to_the_gateway() -> None:
+    async with make_world(chat_max_output_tokens=1024) as world:
+        account = await sign_in(world)
+        assert names(events(await send(world, account)))[-1] == "done"
+        assert stream_calls(world)[0]["config"].max_output_tokens == 1024
+
+
+async def test_reply_deadline_stops_a_silent_provider_and_replays_its_failure() -> None:
+    async with make_world(chat_reply_deadline_seconds=1) as world:
+        account = await sign_in(world)
+        world.models.script = [asyncio.Event()]
+        key = new_key()
+
+        frames = events(await send(world, account, key=key))
+
+        assert names(frames) == ["message.accepted", "error"]
+        assert frames[-1].data == {
+            "code": "reply_deadline_exceeded",
+            "retryable": True,
+        }
+        assert world.fake.aio.models.open_streams == 0
+        assert world.store.records[next(iter(world.store.records))].state == "failed"
+        assert world.stream_limiter.active() == 0
+
+
+async def test_a_timeout_inside_the_provider_is_not_the_reply_deadline(world: World) -> None:
+    account = await sign_in(world)
+    world.models.script = [TimeoutError("provider read timed out")]
+
+    frames = events(await send(world, account))
+
+    assert names(frames) == ["message.accepted", "error"]
+    assert frames[-1].data["code"] != "reply_deadline_exceeded"
+    assert world.stream_limiter.active() == 0
+
+
+async def test_the_reply_deadline_spans_the_whole_reply_and_keeps_the_text() -> None:
+    async with make_world(chat_reply_deadline_seconds=1) as world:
+        account = await sign_in(world)
+        world.models.script = [chunk("partial "), asyncio.Event()]
+
+        frames = events(await send(world, account))
+
+        assert names(frames) == ["message.accepted", "delta", "error"]
+        assert frames[-1].data["code"] == "stream_interrupted"
+        assert [m.content for m in world.chat.rows("orchestrator")] == ["partial "]
+        assert world.stream_limiter.active() == 0
+
+
+async def begin(
+    world: World, account: Account, content: str = "hello", *, key: str | None = None
+) -> Any:
     service = ChatService(
         principal=Principal(account.user_id, account.workspace_id, "admin", uuid4()),
         database=world.chat.database(),
@@ -1225,12 +1403,14 @@ async def begin(world: World, account: Account, content: str = "hello") -> Any:
         settings=world.settings,
         limiter=world.limiter,
         idempotency=world.store,
+        stream_limiter=world.stream_limiter,
         clock=cast(Clock, world.clock),
         monotonic=world.ticker,
         repositories=world.chat.repository,
     )
     return await service.begin_message(
-        idempotency_keys=[new_key()], body=json.dumps({"content": content}).encode()
+        idempotency_keys=[new_key() if key is None else key],
+        body=json.dumps({"content": content}).encode(),
     )
 
 

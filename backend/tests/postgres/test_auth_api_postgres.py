@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -168,3 +169,67 @@ async def test_the_full_lifecycle_runs_on_the_restricted_role_only(
     async with app_engine.connect() as connection:
         role = (await connection.execute(text("SELECT current_user"))).scalar_one()
     assert role == "maya_app"
+
+
+async def test_refresh_cookie_rotates_and_revokes_a_postgres_session(
+    world: tuple[httpx.AsyncClient, Harness, AsyncEngine],
+) -> None:
+    client, harness, admin = world
+    account = await onboard(client, harness, admin, 0)
+    command = account["command"]
+    cookie_mode = {"X-Maya-Refresh-Transport": "cookie"}
+    login = await client.post(
+        f"{BASE}/token",
+        json={"username": command.username, "password": command.password},
+        headers=cookie_mode,
+    )
+    assert login.status_code == 200
+    assert "refresh_token" not in login.json()
+    parsed = SimpleCookie()
+    parsed.load(login.headers["set-cookie"])
+    old_token = parsed["maya_refresh"].value
+
+    refreshed = await client.post(
+        f"{BASE}/refresh",
+        headers={**cookie_mode, "Cookie": f"maya_refresh={old_token}"},
+    )
+    assert refreshed.status_code == 200
+    assert "refresh_token" not in refreshed.json()
+    parsed.load(refreshed.headers["set-cookie"])
+    new_token = parsed["maya_refresh"].value
+    assert new_token != old_token
+
+    replay = await client.post(
+        f"{BASE}/refresh",
+        headers={**cookie_mode, "Cookie": f"maya_refresh={old_token}"},
+    )
+    assert (replay.status_code, replay.json()) == (401, {"error": "invalid_token"})
+    assert "Max-Age=0" in replay.headers["set-cookie"]
+    assert (
+        await client.post(
+            f"{BASE}/refresh",
+            headers={**cookie_mode, "Cookie": f"maya_refresh={new_token}"},
+        )
+    ).status_code == 401
+
+    next_login = await client.post(
+        f"{BASE}/token",
+        json={"username": command.username, "password": command.password},
+        headers=cookie_mode,
+    )
+    parsed.load(next_login.headers["set-cookie"])
+    logout_token = parsed["maya_refresh"].value
+    logout = await client.post(
+        f"{BASE}/logout",
+        headers={**cookie_mode, "Cookie": f"maya_refresh={logout_token}"},
+    )
+    assert logout.status_code == 204
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    after_logout = await client.post(
+        f"{BASE}/refresh",
+        headers={**cookie_mode, "Cookie": f"maya_refresh={logout_token}"},
+    )
+    assert (after_logout.status_code, after_logout.json()) == (
+        401,
+        {"error": "invalid_token"},
+    )

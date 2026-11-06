@@ -41,6 +41,13 @@ const rateLimited = (seconds: number | null) =>
     retryAfterSeconds: seconds,
   });
 
+const concurrentStreamLimit = (seconds: number | null) =>
+  error({
+    code: "concurrent_stream_limit",
+    message: "Too many replies are already running for this account.",
+    retryAfterSeconds: seconds,
+  });
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -102,6 +109,17 @@ describe("ChatNotice live region", () => {
     countdownObserver.disconnect();
     expect(alertMutations).toBe(0);
     expect(countdownMutations).toBeGreaterThan(0);
+  });
+
+  it("shows a wait message for concurrent stream capacity", () => {
+    notice({ error: concurrentStreamLimit(1) });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Too many replies are already running for this account. Try again in about 1 second.",
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 

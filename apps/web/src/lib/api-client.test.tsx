@@ -11,7 +11,6 @@ import {
   sseResponse,
 } from "../components/chat/chat-test-utils";
 import {
-  ApiConfigurationError,
   ApiError,
   CHAT_MAX_MESSAGE_CHARS,
   DEFAULT_API_BASE_URL,
@@ -48,85 +47,21 @@ function stubFetch(response: Response | (() => Response)) {
 }
 
 describe("base URL", () => {
-  it("defaults to the local API", () => {
+  it("uses the same-origin proxy by default", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "");
     expect(getApiBaseUrl()).toBe(DEFAULT_API_BASE_URL);
+    expect(DEFAULT_API_BASE_URL).toBe("");
   });
 
-  it("uses NEXT_PUBLIC_API_BASE_URL and trims trailing slashes", () => {
+  it("ignores browser-visible API origin configuration", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.example.test//");
-    expect(getApiBaseUrl()).toBe("https://api.example.test");
-  });
-
-  it.each([
-    "http://127.0.0.1:8000",
-    "http://localhost:8000/",
-    "http://localhost",
-    "http://[::1]:8000",
-    "HTTP://LOCALHOST:3000",
-    "https://api.example.test",
-    "https://127.0.0.1:8443",
-    "/api-proxy",
-    "/",
-  ])("accepts %s", (value) => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", value);
-    expect(() => getApiBaseUrl()).not.toThrow();
-  });
-
-  it.each([
-    "http://api.example.test",
-    "http://api.example.test:8000/",
-    "http://10.0.0.5:8000",
-    "http://192.168.1.20",
-    "http://127.0.0.1.evil.example",
-    "http://localhost.evil.example",
-    "http://localhost@evil.example",
-    "http://evil.example/localhost",
-    "http://[::2]:8000",
-    "http://0.0.0.0:8000",
-    "HTTP://API.EXAMPLE.TEST",
-    "http:api.example.test",
-    "http://",
-  ])("refuses the plain-http, non-loopback address %s", (value) => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", value);
-    expect(() => getApiBaseUrl()).toThrow(ApiConfigurationError);
-  });
-
-  it("explains the problem without repeating the configured value", () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://secret-host.example");
-    try {
-      getApiBaseUrl();
-      throw new Error("expected getApiBaseUrl to throw");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ApiConfigurationError);
-      expect((error as Error).message).toContain("https");
-      expect((error as Error).message).not.toContain("secret-host");
-    }
+    expect(getApiBaseUrl()).toBe("");
   });
 });
 
-describe("a plain-http API address is refused before anything is sent", () => {
-  it("never puts the token on the wire for streamChatMessage", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://api.example.test");
-    const fetchMock = stubFetch(sseResponse([acceptedFrame(), doneFrame()]));
-    await expect(
-      streamChatMessage({ content: "Hi", idempotencyKey: "key-12345678" }),
-    ).rejects.toBeInstanceOf(ApiConfigurationError);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("never puts the token on the wire for the read endpoints", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://api.example.test");
-    const fetchMock = stubFetch(jsonResponse({ items: [], next_cursor: null }));
-    await expect(listSessions()).rejects.toBeInstanceOf(ApiConfigurationError);
-    await expect(listMessages(SESSION)).rejects.toBeInstanceOf(
-      ApiConfigurationError,
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("works against a same-origin proxy path", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "/api-proxy");
+describe("same-origin API proxy", () => {
+  it("sends the chat request to the same-origin path", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.example.test");
     const fetchMock = stubFetch(sseResponse([acceptedFrame(), doneFrame()]));
     await collect(
       await streamChatMessage({
@@ -134,8 +69,30 @@ describe("a plain-http API address is refused before anything is sent", () => {
         idempotencyKey: "key-12345678",
       }),
     );
-    const [url] = fetchMock.mock.calls[0] as unknown as [string];
-    expect(url).toBe("/api-proxy/api/v1/chat/message");
+    const calls = fetchMock.mock.calls as unknown as Array<
+      [string, RequestInit]
+    >;
+    expect(calls[0]?.[0]).toBe("/api/v1/chat/message");
+    const [, init] = calls[0] ?? ["", {}];
+    expect((init.headers as Record<string, string>).Authorization).toMatch(
+      /^Bearer /,
+    );
+  });
+
+  it("uses same-origin paths for the read endpoints", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://api.example.test");
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ items: [], next_cursor: null }),
+    );
+    await listSessions();
+    await listMessages(SESSION);
+    const calls = fetchMock.mock.calls as unknown as Array<
+      [string, RequestInit]
+    >;
+    expect(calls.map((call) => call[0])).toEqual([
+      "/api/v1/chat/sessions",
+      `/api/v1/chat/sessions/${SESSION}/messages`,
+    ]);
   });
 });
 
@@ -362,6 +319,7 @@ describe("streamChatMessage errors", () => {
     [404, "session_not_found"],
     [409, "request_in_progress"],
     [422, "idempotency_key_reused"],
+    [429, "concurrent_stream_limit"],
     [503, "model_unavailable"],
     [503, "chat_unavailable"],
   ])("maps %i %s to a typed ApiError", async (status, code) => {
@@ -398,6 +356,23 @@ describe("streamChatMessage errors", () => {
       status: 429,
       code: "rate_limited",
       retryAfterSeconds: 17,
+    });
+  });
+
+  it("reads Retry-After on the concurrent stream limit", async () => {
+    stubFetch(
+      jsonResponse({ error: "concurrent_stream_limit" }, 429, {
+        "Retry-After": "1",
+      }),
+    );
+    const error = (await streamChatMessage({
+      content: "Hi",
+      idempotencyKey: "key-12345678",
+    }).catch((e: unknown) => e)) as ApiError;
+    expect(error).toMatchObject({
+      status: 429,
+      code: "concurrent_stream_limit",
+      retryAfterSeconds: 1,
     });
   });
 
@@ -523,7 +498,9 @@ describe("read endpoints", () => {
   });
 
   it("encodes the session id in the path", async () => {
-    const fetchMock = stubFetch(jsonResponse({ items: [], next_cursor: null }));
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ items: [], next_cursor: null }),
+    );
     await listMessages("a/b?c");
     const [url] = fetchMock.mock.calls[0] as unknown as [string];
     expect(url).toContain("/sessions/a%2Fb%3Fc/messages");

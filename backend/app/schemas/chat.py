@@ -30,7 +30,13 @@ _LINE_BREAK_ESCAPES: Final = {
 Channel = Literal["web", "voice", "desktop"]
 Role = Literal["user", "assistant"]
 FinishReason = Literal["stop", "max_tokens", "interrupted"]
-ErrorCode = Literal["content_blocked", "stream_interrupted", "model_unavailable", "internal_error"]
+ErrorCode = Literal[
+    "content_blocked",
+    "reply_deadline_exceeded",
+    "stream_interrupted",
+    "model_unavailable",
+    "internal_error",
+]
 
 
 class ChatMessageRequest(BaseModel):

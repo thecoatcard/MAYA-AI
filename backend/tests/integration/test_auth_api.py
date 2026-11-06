@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -17,6 +18,7 @@ from tests.support.fake_store import FakeAuthStore
 from tests.support.settings import make_settings
 
 BASE = "/api/v1/auth"
+COOKIE_TRANSPORT = {"X-Maya-Refresh-Transport": "cookie"}
 HEADERS_THAT_MUST_MATCH = ("content-type", "content-length")
 
 
@@ -62,14 +64,16 @@ class Api:
         return dict(response.json())
 
 
-def make_api(*, email: bool = True) -> Iterator[Api]:
+def make_api(
+    *, email: bool = True, settings_overrides: dict[str, Any] | None = None
+) -> Iterator[Api]:
     harness = build_harness(FakeAuthStore(), email=email, events=LoggingAuthEvents())
     with patch("app.main.Resources") as factory:
         resources = factory.return_value
         resources.check = AsyncMock(return_value=None)
         resources.close = AsyncMock()
         resources.verify_runtime_role = AsyncMock(return_value=None)
-        app = create_app(make_settings(), auth_service=harness.service)
+        app = create_app(make_settings(**(settings_overrides or {})), auth_service=harness.service)
         with TestClient(app) as client:
             yield Api(client, harness, app)
 
@@ -84,8 +88,23 @@ def api_without_email() -> Iterator[Api]:
     yield from make_api(email=False)
 
 
+@pytest.fixture
+def api_with_insecure_cookie() -> Iterator[Api]:
+    yield from make_api(settings_overrides={"auth_cookie_secure": False})
+
+
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def refresh_cookie(response: Any) -> str:
+    parsed = SimpleCookie()
+    parsed.load(response.headers["set-cookie"])
+    return parsed["maya_refresh"].value
+
+
+def cookie_header(token: str) -> dict[str, str]:
+    return {"Cookie": f"maya_refresh={token}"}
 
 
 def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> None:
@@ -143,6 +162,116 @@ def test_the_whole_account_lifecycle_over_http(api: Api) -> None:
     again = api.login(account)
     assert api.post("logout", refresh_token=again["refresh_token"]).status_code == 204
     assert api.client.get(f"{BASE}/me", headers=bearer(again["access_token"])).status_code == 401
+
+
+def test_cookie_transport_login_sets_an_http_only_refresh_cookie(api: Api) -> None:
+    account = api.register_and_verify()
+    response = api.client.post(
+        f"{BASE}/token",
+        json={"username": account["username"], "password": GOOD_PASSWORD},
+        headers=COOKIE_TRANSPORT,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["token_type"] == "bearer"
+    assert "refresh_token" not in response.json()
+    cookie = SimpleCookie()
+    cookie.load(response.headers["set-cookie"])
+    morsel = cookie["maya_refresh"]
+    assert morsel["httponly"] is True
+    assert morsel["samesite"].lower() == "strict"
+    assert morsel["path"] == "/api/v1/auth"
+    assert morsel["max-age"] == "604800"
+    assert morsel["secure"] is True
+
+
+def test_cookie_refresh_rotates_and_reuse_revokes_the_session(api: Api) -> None:
+    account = api.register_and_verify()
+    login = api.client.post(
+        f"{BASE}/token",
+        json={"username": account["username"], "password": GOOD_PASSWORD},
+        headers=COOKIE_TRANSPORT,
+    )
+    old_cookie = refresh_cookie(login)
+
+    rotated = api.client.post(
+        f"{BASE}/refresh",
+        headers={**COOKIE_TRANSPORT, **cookie_header(old_cookie)},
+    )
+    assert rotated.status_code == 200
+    assert "refresh_token" not in rotated.json()
+    new_cookie = refresh_cookie(rotated)
+    assert new_cookie != old_cookie
+
+    replay = api.client.post(
+        f"{BASE}/refresh",
+        headers={**COOKIE_TRANSPORT, **cookie_header(old_cookie)},
+    )
+    assert replay.status_code == 401
+    assert replay.json() == {"error": "invalid_token"}
+    assert "Max-Age=0" in replay.headers["set-cookie"]
+    assert (
+        api.client.post(
+            f"{BASE}/refresh",
+            headers={**COOKIE_TRANSPORT, **cookie_header(new_cookie)},
+        ).status_code
+        == 401
+    )
+
+
+def test_missing_cookie_fails_with_invalid_token_and_clears_cookie(api: Api) -> None:
+    response = api.client.post(f"{BASE}/refresh", headers=COOKIE_TRANSPORT)
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "invalid_token"}
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert "Path=/api/v1/auth" in response.headers["set-cookie"]
+
+
+def test_cookie_logout_clears_and_revokes_the_session(api: Api) -> None:
+    account = api.register_and_verify()
+    login = api.client.post(
+        f"{BASE}/token",
+        json={"username": account["username"], "password": GOOD_PASSWORD},
+        headers=COOKIE_TRANSPORT,
+    )
+    refresh_token = refresh_cookie(login)
+
+    logout = api.client.post(
+        f"{BASE}/logout",
+        headers={**COOKIE_TRANSPORT, **cookie_header(refresh_token)},
+    )
+    assert logout.status_code == 204
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    failed_refresh = api.client.post(
+        f"{BASE}/refresh",
+        headers={**COOKIE_TRANSPORT, **cookie_header(refresh_token)},
+    )
+    assert failed_refresh.status_code == 401
+
+
+def test_cookie_secure_flag_follows_the_setting(api_with_insecure_cookie: Api) -> None:
+    account = api_with_insecure_cookie.register_and_verify()
+    response = api_with_insecure_cookie.client.post(
+        f"{BASE}/token",
+        json={"username": account["username"], "password": GOOD_PASSWORD},
+        headers=COOKIE_TRANSPORT,
+    )
+
+    cookie = SimpleCookie()
+    cookie.load(response.headers["set-cookie"])
+    assert cookie["maya_refresh"]["secure"] == ""
+
+
+def test_legacy_refresh_and_logout_still_use_json_tokens(api: Api) -> None:
+    account = api.register_and_verify()
+    tokens = api.login(account)
+    refreshed = api.post("refresh", refresh_token=tokens["refresh_token"])
+    assert refreshed.status_code == 200
+    assert "refresh_token" in refreshed.json()
+    assert "set-cookie" not in refreshed.headers
+    assert api.post("logout", refresh_token=refreshed.json()["refresh_token"]).status_code == 204
 
 
 def test_password_recovery_over_http_ends_every_session(api: Api) -> None:

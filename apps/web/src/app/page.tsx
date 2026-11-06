@@ -1,92 +1,112 @@
-import { Layers3, MessageSquare, Mic, Workflow } from "lucide-react";
-import Link from "next/link";
-import React from "react";
+"use client";
 
-const roadmap = [
-  {
-    title: "Conversations",
-    description: "Secure accounts and persisted text chat.",
-    icon: MessageSquare,
-  },
-  {
-    title: "Task orchestration",
-    description: "Verified work with human approval at the right boundaries.",
-    icon: Workflow,
-  },
-  {
-    title: "Voice workspace",
-    description: "A voice-first interface connected to the task engine.",
-    icon: Mic,
-  },
-];
+import { Layers3 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+import {
+  ThemeToggle,
+  readStoredTheme,
+  storeTheme,
+  type ThemePreference,
+} from "../components/chat/ThemeToggle";
+
+const capabilityList = [
+  { title: "Accounts and sign-in", status: "Available" },
+  { title: "Text chat with history", status: "Available" },
+  { title: "Agent tasks with approvals", status: "Planned" },
+  { title: "Voice workspace", status: "Planned" },
+] as const;
 
 export default function Home() {
+  const [theme, setTheme] = useState<ThemePreference>("system");
+
+  useEffect(() => {
+    const stored = readStoredTheme();
+    setTheme(stored);
+    storeTheme(stored);
+
+    const app = document.querySelector<HTMLElement>(".maya-app");
+    const updateVisibility = () => {
+      if (app !== null) {
+        app.dataset.pageHidden = String(document.hidden);
+      }
+    };
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+
+  const changeTheme = (next: ThemePreference) => {
+    setTheme(next);
+    storeTheme(next);
+  };
+
   return (
-    <div className="mx-auto min-h-screen max-w-6xl px-6 py-8 sm:px-12">
-      <header className="flex flex-wrap items-center justify-between gap-6 border-b border-white/10 pb-6">
-        <Link
-          href="/"
-          className="flex items-center gap-3 font-semibold tracking-widest"
-        >
-          <Layers3 aria-hidden="true" className="text-teal-300" />
+    <div className="maya-chat maya-home">
+      <header className="maya-home__header">
+        <Link href="/" className="maya-brand" aria-label="MAYA AI home">
+          <Layers3 aria-hidden="true" size={18} />
           MAYA AI
         </Link>
-        <nav
-          aria-label="Main navigation"
-          className="flex gap-6 text-sm text-slate-300"
-        >
-          <Link href="/" aria-current="page">
-            Overview
+        <nav className="maya-home__nav" aria-label="Main navigation">
+          <Link className="maya-btn maya-btn--quiet" href="/login">
+            Sign in
           </Link>
-          <a href="#roadmap">Roadmap</a>
+          <Link
+            className="maya-btn maya-btn--primary maya-ripple"
+            href="/register"
+          >
+            Create account
+          </Link>
+          <ThemeToggle value={theme} onChange={changeTheme} />
         </nav>
       </header>
-      <main>
-        <section aria-labelledby="welcome-heading" className="py-20 sm:py-28">
-          <p className="mb-6 inline-block rounded-full border border-teal-300/30 px-4 py-2 text-sm text-teal-200">
-            Foundation only
-          </p>
-          <h1
-            id="welcome-heading"
-            className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-6xl"
-          >
-            A foundation for what comes next.
+      <main className="maya-home__main">
+        <section aria-labelledby="maya-home-title">
+          <p className="maya-home__eyebrow">MAYA AI · Text workspace</p>
+          <h1 className="maya-home__title" id="maya-home-title">
+            A digital employee that asks before it acts.
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300">
-            MAYA AI is taking shape. This local scaffold establishes the web and
-            API foundations. Accounts, chat, agents, and voice are not available
-            yet.
+          <p className="maya-home__intro">
+            Start with an account and a text conversation. Tasks with approvals
+            and a voice workspace are planned; they will appear here when they
+            are available.
           </p>
-        </section>
-        <section
-          id="roadmap"
-          aria-labelledby="roadmap-heading"
-          className="pb-20"
-        >
-          <h2 id="roadmap-heading" className="mb-6 text-xl font-semibold">
-            On the roadmap
-          </h2>
-          <div className="grid gap-5 md:grid-cols-3">
-            {roadmap.map(({ title, description, icon: Icon }) => (
-              <article
-                key={title}
-                className="rounded-2xl border border-white/10 bg-white/5 p-6"
-              >
-                <Icon aria-hidden="true" className="mb-6 text-teal-300" />
-                <h3 className="font-semibold">{title}</h3>
-                <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                  {description}
-                </p>
-                <p className="mt-6 text-xs uppercase tracking-widest text-slate-400">
-                  Planned
-                </p>
-              </article>
-            ))}
+          <div className="maya-home__actions">
+            <Link
+              className="maya-btn maya-btn--primary maya-ripple"
+              href="/login"
+            >
+              Sign in
+            </Link>
+            <Link className="maya-btn" href="/register">
+              Create account
+            </Link>
           </div>
         </section>
+        <section aria-label="What is available">
+          <ol className="maya-home__list">
+            {capabilityList.map((item, index) => (
+              <li className="maya-home__item" key={item.title}>
+                <span className="maya-home__number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span>{item.title}</span>
+                <span
+                  className="maya-home__status"
+                  data-state={item.status.toLowerCase()}
+                >
+                  {item.status}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
       </main>
-      <footer className="border-t border-white/10 py-6 text-sm text-slate-400">
-        Local development foundation. Not a production-ready product.
+      <footer className="maya-home__footer">
+        MAYA keeps planned capabilities clearly separate from what works today.
       </footer>
     </div>
   );

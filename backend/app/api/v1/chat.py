@@ -22,6 +22,7 @@ from starlette.types import Receive, Scope, Send
 
 from app.auth.dependencies import TenantDatabase, get_principal, get_tenant_database
 from app.auth.models import Principal
+from app.core.chat_streams import ChatStreamLimiter, RedisChatStreamLimiter
 from app.core.clock import SystemClock
 from app.core.config import Settings
 from app.core.ratelimit import RateLimiter, RedisRateLimiter
@@ -64,6 +65,10 @@ async def get_idempotency_store(request: Request) -> IdempotencyStore:
     return RedisIdempotencyStore(request.app.state.resources.redis)
 
 
+async def get_chat_stream_limiter(request: Request) -> ChatStreamLimiter:
+    return RedisChatStreamLimiter(request.app.state.resources.redis)
+
+
 async def get_chat_service(
     principal: Annotated[Principal, Depends(get_principal)],
     database: Annotated[TenantDatabase, Depends(get_tenant_database)],
@@ -72,6 +77,7 @@ async def get_chat_service(
     settings: Annotated[Settings, Depends(get_chat_settings)],
     limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
     idempotency: Annotated[IdempotencyStore, Depends(get_idempotency_store)],
+    stream_limiter: Annotated[ChatStreamLimiter, Depends(get_chat_stream_limiter)],
 ) -> ChatService:
     """The caller's chat service. ``get_principal`` is listed first, so a missing or invalid
     token is rejected before anything else is looked at."""
@@ -83,6 +89,7 @@ async def get_chat_service(
         settings=settings,
         limiter=limiter,
         idempotency=idempotency,
+        stream_limiter=stream_limiter,
     )
 
 
@@ -105,7 +112,9 @@ class EventStreamResponse(StreamingResponse):
         super().__init__(
             turn.events(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+            # no-transform stops a compressing proxy (the Next.js rewrite gzips by
+            # default) from holding events back until its buffer fills.
+            headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"},
         )
         self._turn = turn
 
@@ -142,7 +151,7 @@ _POST_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"description": "session_not_found"},
     409: {"description": "request_in_progress"},
     422: {"description": "validation_error or idempotency_key_reused"},
-    429: {"description": "rate_limited (Retry-After header)"},
+    429: {"description": "rate_limited or concurrent_stream_limit (Retry-After header)"},
     503: {"description": "model_unavailable or chat_unavailable"},
 }
 

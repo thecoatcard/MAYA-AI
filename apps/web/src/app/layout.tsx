@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import React from "react";
 
 import "./globals.css";
+import "../components/chat/chat.css";
 
 export const metadata: Metadata = {
-  title: "MAYA AI | Foundation",
-  description: "The local development foundation for MAYA AI.",
+  title: "MAYA AI | Quiet Instrument",
+  description: "A calm workspace for text conversations with MAYA AI.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="maya-app">{children}</div>
+      </body>
     </html>
   );
 }

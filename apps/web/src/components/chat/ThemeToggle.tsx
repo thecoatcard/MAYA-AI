@@ -23,6 +23,14 @@ export function readStoredTheme(): ThemePreference {
 }
 
 export function storeTheme(theme: ThemePreference): void {
+  const app = document.querySelector<HTMLElement>(".maya-app");
+  if (app !== null) {
+    if (theme === "system") {
+      delete app.dataset.mayaTheme;
+    } else {
+      app.dataset.mayaTheme = theme;
+    }
+  }
   try {
     if (theme === "system") {
       window.localStorage.removeItem(THEME_STORAGE_KEY);

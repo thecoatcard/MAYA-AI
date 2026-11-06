@@ -2,11 +2,11 @@
 
 - **Base path:** `/api/v1/auth`
 - **Authentication:** none for the first eight endpoints; `Authorization: Bearer <access token>` for `GET /me`
-- **Status:** Implemented and tested locally. Browser login UI: planned (none exists).
+- **Status:** Implemented locally. The web client uses cookie transport for refresh tokens; deterministic API tests cover cookie and legacy JSON modes.
 
 Bodies are JSON with unknown fields rejected. Errors are `{"error": "<code>"}`; validation errors
 are `{"error": "validation_error", "fields": ["<field>"]}` and never repeat submitted values.
-The password, one-time code and tokens appear only in the documented request and response bodies.
+The password and one-time code appear only in documented requests. Refresh tokens appear in JSON only for callers using legacy transport; cookie-mode responses never include one.
 Design rationale and limits: [authentication security](../security/AUTHENTICATION.md).
 
 Normalization: usernames are trimmed and lower-cased (`a-z`, `0-9`, `_`, `.`, `-`, 3 to 32 characters);
@@ -37,7 +37,7 @@ A password that breaks the policy is answered `422` with `password_too_short`, `
 ## POST /resend-verification
 
 `{"email": "..."}` → `202 {"status": "accepted"}` whether or not the address exists or is verified.
-A code is sent only for an unverified account and not within 60 seconds of the previous one.
+A code is sent only for an unverified account and not within `MAYA_OTP_RESEND_COOLDOWN_SECONDS` of the previous one. Successful responses include `Retry-After` with the configured cooldown.
 
 ## POST /verify-email
 
@@ -55,11 +55,13 @@ Username and password login. No code is needed at login.
 { "username": "alice", "password": "correct horse battery staple" }
 ```
 
-`200` (with `Cache-Control: no-store`):
+Without the `X-Maya-Refresh-Transport: cookie` header, `200` (with `Cache-Control: no-store`):
 
 ```json
 { "access_token": "<jwt>", "refresh_token": "<jwt>", "token_type": "bearer", "expires_in": 900 }
 ```
+
+With `X-Maya-Refresh-Transport: cookie`, the response omits `refresh_token` and sets the `maya_refresh` cookie. The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/api/v1/auth`, has `Max-Age` equal to the refresh-token TTL, and is `Secure` when `MAYA_AUTH_COOKIE_SECURE=true`. The JSON contains only `access_token`, `token_type`, and `expires_in`.
 
 `401 invalid_credentials` for an unknown user or a wrong password; `403 email_not_verified` for a correct
 password on an unverified account; `429 rate_limited` with `Retry-After`.
@@ -77,13 +79,14 @@ The password is checked first (`422` with `password_too_short`, `password_too_lo
 
 ## POST /refresh
 
-`{"refresh_token": "<jwt>"}` → `200` with a new token pair. The old refresh token stops working.
-Reusing an already-used refresh token returns `401 invalid_token` **and** revokes the whole session.
+Without the transport header, `{"refresh_token": "<jwt>"}` → `200` with a new token pair. The old refresh token stops working.
+With `X-Maya-Refresh-Transport: cookie`, no body is needed: the cookie is rotated and the response omits the refresh token from JSON. Reusing an already-used refresh token returns `401 invalid_token` **and** revokes the whole session; cookie mode also clears the cookie.
 
 ## POST /logout
 
-`{"refresh_token": "<jwt>"}` → `204`. Revokes that session only; idempotent; works with an expired
+Without the transport header, `{"refresh_token": "<jwt>"}` → `204`. Revokes that session only; idempotent; works with an expired
 refresh token. `401 invalid_token` if the token is not a valid refresh token.
+With `X-Maya-Refresh-Transport: cookie`, the endpoint revokes the cookie's session when a cookie is present, clears it in every case, and returns `204`, including when no cookie is present.
 
 ## GET /me
 
@@ -109,3 +112,9 @@ is live. Used by clients and tests to confirm the principal.
 New in this version; `/me`, `/resend-verification`, `/refresh`, `/logout`, `/verify-email`, `/forgot-password`
 and `/reset-password` are additions to the plan's single `/auth/token` endpoint. `/token` takes a JSON body
 (not an OAuth2 form) and is a password login, not the OAuth code flow the plan sketched for an external provider.
+
+## Browser CSRF and rate-limit notes
+
+Cookie-mode refresh and logout require `X-Maya-Refresh-Transport: cookie` and use `SameSite=Strict`. A cross-origin page cannot send the custom header without a CORS preflight; this API does not configure CORS. Do not enable permissive CORS without revisiting the CSRF design.
+
+Behind the Next.js rewrite, `request.client.host` is the proxy peer (`127.0.0.1`) for all forwarded requests. `client_address` deliberately ignores `X-Forwarded-For`: Next.js preserves a client-supplied value, so it cannot identify a trustworthy source address for per-address limits. Those limits therefore share one proxy-peer bucket until the hosting target is selected. At that time, a front reverse proxy that overwrites `X-Forwarded-For` can become the trusted source; no behavior change is made before then.

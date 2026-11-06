@@ -40,6 +40,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.auth.errors import RateLimited
 from app.auth.models import Principal
+from app.core.chat_streams import (
+    ChatStreamLease,
+    ChatStreamLimiter,
+    ChatStreamLimiterUnavailable,
+)
 from app.core.clock import Clock, SystemClock
 from app.core.config import Settings
 from app.core.ratelimit import Limit, RateLimiter, RateLimiterUnavailable
@@ -113,6 +118,7 @@ CLAIM_REFRESH_SECONDS: Final = 60.0
 _UNSAFE_TEXT = re.compile(r"[\x00\ud800-\udfff]")
 _RETRYABLE: Final[dict[ErrorCode, bool]] = {
     "content_blocked": False,
+    "reply_deadline_exceeded": True,
     "stream_interrupted": True,
     "model_unavailable": True,
     "internal_error": False,
@@ -160,7 +166,19 @@ class ChatUnavailable(ChatError):
     """Redis (idempotency, rate limit) or the database is unreachable (503). Chat fails closed."""
 
 
+class ChatStreamLimitReached(ChatError):
+    """The caller already has the configured number of active replies (429)."""
+
+
 # ------------------------------------------------------------------------------ storage ports
+
+
+class _ReplyDeadlineExceeded(Exception):
+    """The approved reply deadline passed while waiting for the model.
+
+    Separate from ``TimeoutError`` so a timeout raised inside the gateway or the
+    SDK is not reported as the chat deadline.
+    """
 
 
 class ChatStorage(Protocol):
@@ -266,6 +284,9 @@ class _Wiring:
     gateway: ModelGateway
     registry: ModelRegistry
     idempotency: IdempotencyStore
+    stream_limiter: ChatStreamLimiter
+    reply_deadline_seconds: int
+    max_output_tokens: int
     monotonic: Callable[[], float]
 
 
@@ -275,6 +296,7 @@ class _Plan:
     claim: IdempotencyRecord  # the in_progress record; carries the three ids and the hash
     session_id: UUID
     window: ContextWindow
+    stream_lease: ChatStreamLease
 
     @property
     def user_message_id(self) -> UUID:
@@ -396,6 +418,7 @@ class _LiveTurn:
             ORCHESTRATOR_ALIAS,
             plan.window.contents,
             system_instruction=plan.window.system_instruction,
+            max_output_tokens=self._w.max_output_tokens,
             workspace_id=self._w.principal.workspace_id,
         )
         try:
@@ -409,11 +432,34 @@ class _LiveTurn:
                     replayed=False,
                 ),
             )
-            async for chunk in stream:
+            # The deadline covers waiting for the model only. It must never fire while
+            # this generator is suspended at a yield (the server writing to a slow
+            # client), because a cancellation there lands outside this code and the
+            # client would get no error frame.
+            loop = asyncio.get_running_loop()
+            deadline_at = loop.time() + self._w.reply_deadline_seconds
+            chunks = aiter(stream)
+            while True:
+                remaining = deadline_at - loop.time()
+                if remaining <= 0:
+                    raise _ReplyDeadlineExceeded
+                wait = asyncio.timeout(remaining)
+                try:
+                    async with wait:
+                        chunk = await anext(chunks)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    if wait.expired():
+                        raise _ReplyDeadlineExceeded from None
+                    raise
                 text = self._observe(chunk)
                 if text:
                     yield encode_sse(next(sequence), "delta", DeltaEvent(text=text))
                 await self._keep_claim_alive()
+        except _ReplyDeadlineExceeded:
+            logger.warning("chat_reply_deadline_exceeded chunks=%d", progress.chunks)
+            failure = "reply_deadline_exceeded"
         except StreamInterruptedError as error:
             logger.error("chat_stream_interrupted chunks=%d", error.chunks_yielded)
             if isinstance(error.partial_usage, TokenUsage):
@@ -489,6 +535,8 @@ class _LiveTurn:
         if failure == "stream_interrupted":
             return _Interrupted(failure)
         received = self._progress.chunks > 0
+        if failure == "reply_deadline_exceeded":
+            return _Interrupted("stream_interrupted") if received else _Failed(failure)
         if failure == "internal_error":
             return _Interrupted(failure) if received else _Failed(failure)
         # content_blocked and model_unavailable are only reported before the first chunk. Once
@@ -527,8 +575,17 @@ class _LiveTurn:
         if self._finalizer is None:
             if not isinstance(outcome, _Failed):
                 self._summary = self._summarize(outcome)
-            self._finalizer = self._spawn(self._persist(outcome))
+            self._finalizer = self._spawn(self._persist_and_release(outcome))
         return self._finalizer
+
+    async def _persist_and_release(self, outcome: _Outcome) -> _Finalized:
+        try:
+            return await self._persist(outcome)
+        finally:
+            try:
+                await self._w.stream_limiter.release(self._plan.stream_lease)
+            except ChatStreamLimiterUnavailable:
+                logger.warning("chat_stream_lease_release_failed")
 
     def _summarize(self, outcome: _Outcome) -> _Summary:
         progress = self._progress
@@ -668,6 +725,7 @@ class ChatService:
         settings: Settings,
         limiter: RateLimiter,
         idempotency: IdempotencyStore,
+        stream_limiter: ChatStreamLimiter,
         clock: Clock | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         repositories: ChatStorageFactory = ChatRepository,
@@ -679,6 +737,7 @@ class ChatService:
         self._settings = settings
         self._limiter = limiter
         self._idempotency = idempotency
+        self._stream_limiter = stream_limiter
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._repositories = repositories
         self._contexts = ContextManager()
@@ -690,6 +749,9 @@ class ChatService:
             gateway=gateway,
             registry=registry,
             idempotency=idempotency,
+            stream_limiter=stream_limiter,
+            reply_deadline_seconds=settings.chat_reply_deadline_seconds,
+            max_output_tokens=settings.chat_max_output_tokens,
             monotonic=monotonic,
         )
 
@@ -704,7 +766,11 @@ class ChatService:
         """
         try:
             return await self._begin(idempotency_keys, body)
-        except (IdempotencyUnavailable, RateLimiterUnavailable):
+        except (
+            IdempotencyUnavailable,
+            RateLimiterUnavailable,
+            ChatStreamLimiterUnavailable,
+        ):
             logger.error("chat_redis_unavailable")
             raise ChatUnavailable from None
         except (SQLAlchemyError, OSError) as error:
@@ -736,14 +802,33 @@ class ChatService:
         if existing is not None:
             return await self._answer_repeat(existing, claim)
 
+        # From here until the turn exists, any exit (a full slot, Redis failing,
+        # a failed write, the client going away) must free the key: nothing has
+        # been stored yet, and a retry with the same key has to be able to start.
+        lease: ChatStreamLease | None = None
         try:
+            lease = await self._stream_limiter.acquire(
+                self._principal.workspace_id,
+                self._principal.user_id,
+                limit=self._settings.chat_max_concurrent_streams_per_user,
+                lease_seconds=self._settings.chat_reply_deadline_seconds + 30,
+            )
+            if lease is None:
+                raise ChatStreamLimitReached
             session_id, window = await self._store_user_message(command, claim, spec)
         except BaseException:
-            # Nothing was stored (the transaction rolled back), so the key must not stay blocked.
             with suppress(IdempotencyUnavailable):
                 await asyncio.shield(self._idempotency.release(scope, claim))
+            if lease is not None:
+                await self._release_stream_lease(lease)
             raise
-        return _LiveTurn(self._wiring, _Plan(scope, claim, session_id, window))
+        return _LiveTurn(self._wiring, _Plan(scope, claim, session_id, window, lease))
+
+    async def _release_stream_lease(self, lease: ChatStreamLease) -> None:
+        try:
+            await asyncio.shield(self._stream_limiter.release(lease))
+        except ChatStreamLimiterUnavailable:
+            logger.warning("chat_stream_lease_release_failed")
 
     def _orchestrator_spec(self) -> ModelSpec:
         try:

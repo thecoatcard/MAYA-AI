@@ -1,11 +1,14 @@
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.auth.dependencies import client_address, get_auth_service, get_principal
+from app.auth.errors import InvalidToken
 from app.auth.models import Principal
 from app.auth.schemas import (
     AcceptedResponse,
+    CookieTokenResponse,
     EmailRequest,
     LoginRequest,
     MeResponse,
@@ -18,11 +21,15 @@ from app.auth.schemas import (
     VerifyEmailRequest,
 )
 from app.auth.service import AuthService, RegisterCommand
+from app.core.config import Settings
 from app.core.email import OutboundEmail
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 Service = Annotated[AuthService, Depends(get_auth_service)]
+REFRESH_COOKIE = "maya_refresh"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+REFRESH_TRANSPORT_HEADER = "X-Maya-Refresh-Transport"
 
 
 def _queue(
@@ -53,10 +60,16 @@ async def register(
 
 @router.post("/resend-verification", status_code=202, response_model=AcceptedResponse)
 async def resend_verification(
-    body: EmailRequest, request: Request, background: BackgroundTasks, service: Service
+    body: EmailRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: Service,
 ) -> AcceptedResponse:
     message = await service.resend_verification(body.email, client_address(request))
     _queue(background, service, message)
+    settings: Settings = request.app.state.settings
+    response.headers["Retry-After"] = str(settings.otp_resend_cooldown_seconds)
     return AcceptedResponse()
 
 
@@ -76,14 +89,68 @@ def _no_store(response: Response) -> None:
     response.headers["Pragma"] = "no-cache"
 
 
-@router.post("/token", response_model=TokenResponse)
+def _uses_refresh_cookie(request: Request) -> bool:
+    return request.headers.get(REFRESH_TRANSPORT_HEADER, "").strip().lower() == "cookie"
+
+
+def _set_refresh_cookie(response: Response, token: str, settings: Settings) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        max_age=settings.refresh_token_ttl_seconds,
+        path=REFRESH_COOKIE_PATH,
+        secure=settings.auth_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _clear_refresh_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        REFRESH_COOKIE,
+        path=REFRESH_COOKIE_PATH,
+        secure=settings.auth_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _invalid_cookie_refresh(settings: Settings) -> JSONResponse:
+    response = JSONResponse(
+        status_code=401,
+        content={"error": "invalid_token"},
+        headers={
+            "WWW-Authenticate": "Bearer",
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+        },
+    )
+    _clear_refresh_cookie(response, settings)
+    return response
+
+
+def _missing_legacy_body() -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": "validation_error", "fields": ["body"]},
+    )
+
+
+@router.post("/token", response_model=None)
 async def token(
     body: LoginRequest, request: Request, response: Response, service: Service
-) -> TokenResponse:
+) -> TokenResponse | CookieTokenResponse:
     pair = await service.login(
         body.username, body.password.get_secret_value(), client_address(request)
     )
     _no_store(response)
+    if _uses_refresh_cookie(request):
+        settings: Settings = request.app.state.settings
+        _set_refresh_cookie(response, pair.refresh_token, settings)
+        return CookieTokenResponse(
+            access_token=pair.access_token,
+            expires_in=pair.expires_in,
+        )
     return TokenResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,
@@ -110,10 +177,39 @@ async def reset_password(
     return PasswordResetResponse()
 
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, response: Response, service: Service) -> TokenResponse:
-    pair = await service.refresh(body.refresh_token)
+@router.post("/refresh", response_model=None)
+async def refresh(
+    request: Request,
+    response: Response,
+    service: Service,
+    body: RefreshRequest | None = None,
+) -> TokenResponse | CookieTokenResponse | JSONResponse:
+    cookie_transport = _uses_refresh_cookie(request)
+    settings: Settings | None = request.app.state.settings if cookie_transport else None
+    refresh_token = (
+        request.cookies.get(REFRESH_COOKIE)
+        if cookie_transport
+        else None
+        if body is None
+        else body.refresh_token
+    )
+    if refresh_token is None:
+        if settings is not None:
+            return _invalid_cookie_refresh(settings)
+        return _missing_legacy_body()
+    try:
+        pair = await service.refresh(refresh_token)
+    except InvalidToken:
+        if settings is not None:
+            return _invalid_cookie_refresh(settings)
+        raise
     _no_store(response)
+    if settings is not None:
+        _set_refresh_cookie(response, pair.refresh_token, settings)
+        return CookieTokenResponse(
+            access_token=pair.access_token,
+            expires_in=pair.expires_in,
+        )
     return TokenResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,
@@ -121,8 +217,25 @@ async def refresh(body: RefreshRequest, response: Response, service: Service) ->
     )
 
 
-@router.post("/logout", status_code=204)
-async def logout(body: RefreshRequest, service: Service) -> Response:
+@router.post("/logout", status_code=204, response_model=None)
+async def logout(
+    request: Request,
+    service: Service,
+    body: RefreshRequest | None = None,
+) -> Response:
+    if _uses_refresh_cookie(request):
+        settings: Settings = request.app.state.settings
+        refresh_token = request.cookies.get(REFRESH_COOKIE)
+        if refresh_token is not None:
+            try:
+                await service.logout(refresh_token)
+            except InvalidToken:
+                pass
+        response = Response(status_code=204)
+        _clear_refresh_cookie(response, settings)
+        return response
+    if body is None:
+        return _missing_legacy_body()
     await service.logout(body.refresh_token)
     return Response(status_code=204)
 

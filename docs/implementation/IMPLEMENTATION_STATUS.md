@@ -3,11 +3,11 @@
 | Metric               | Status                                                                                                                                   |
 | :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
 | **Current Baseline** | Phase 00 governance, Phase 01 local foundation, Phase 02 schema/RLS/auth, Phase 03 Model Gateway and Phase 04 chat implemented locally on branch `feat/phase-04-chat-conversations` (committed locally, not pushed; Phase 02 and 03 are earlier commits of the same branch line) |
-| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally · Phase 03: implemented locally under owner gate exception; O6 caps approved 2026-11-05; exit gate waits for the owner-run live smoke check · Phase 04: implemented locally under the owner's gate exception; never run against the real Gemini API; no browser or end-to-end acceptance |
-| **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Short Gemini smoke completed |
-| **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 owner-run live smoke check; `pyasn1` upgrade decision (four advisories, fixed in 0.6.5); Phase 04 owner decisions (chat limits, browser-to-API connectivity, stream cap and reply deadline), login UI and browser acceptance |
-| **Last Updated**     | 2026-11-05 (Phase 04 implementation)                                                                                                     |
-| **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (applied to disposable test databases and the persistent local database) own-account authentication, an offline-verified model gateway and a persisted streaming chat API with a chat page (no login UI yet); no agents or voice |
+| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally · Phase 03: implemented locally under owner gate exception; O6 caps approved 2026-11-05; exit gate waits for the owner-run live smoke check · Phase 04: local implementation complete; web checks pass, backend full-suite verification is blocked by unavailable local services, and authenticated browser acceptance remains pending |
+| **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Phase 03 owner-run Gemini smoke and Phase 04 authenticated browser acceptance remain pending |
+| **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 owner-run live smoke check; `pyasn1` upgrade decision (four advisories, fixed in 0.6.5); Phase 04 owner-run live/browser acceptance |
+| **Last Updated**     | 2026-11-06 (Phase 04 owner decisions and local implementation)                                                                         |
+| **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (applied to disposable test databases and the persistent local database), own-account authentication, an offline-verified model gateway, persisted streaming chat, a same-origin API proxy and minimal login UI; no agents or voice |
 
 ---
 
@@ -19,7 +19,7 @@
 | [`Phase 01`](IMPLEMENTATION_PHASES/PHASE_01_FOUNDATION.md) | Core Infrastructure & Application Foundation | **Implemented/Tested locally; extended live evidence pending** | Local closure: 2026-11-05 | Foundation, S1/S2 and short S3/S4 smoke verified. ADR-0003 Accepted. Owner revised scope to free-only; long-session/continuity still pending |
 | [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **Implemented/Tested locally** | Local: 2026-11-05 | 864 backend tests with local PostgreSQL/Redis, strict lint and types; see the [verification record](../testing/AUTH_AND_RLS.md). Started under the owner's gate exception. Persistent local database migrated; ADR-0005/0006 accepted. Not CI-verified (the workflow has never run). The owner reported (2026-11-05) that the SMTP check, e-mail delivery, registration, verification and login all work against the real mail account |
 | [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **Implemented locally; exit gate: owner-run live check pending** | 2026-11-05      | Implemented under owner gate exception; 131 gateway and smoke-tool tests passing offline; ADR-0007 Proposed; ModelGateway with 6 typed operations, terminating fallback, exact Decimal token/cost accounting (unknown cost is `None`), Redis micro-USD budgeting with a pre-call guard, and an owner-only smoke tool. Partial: context caching is a workspace-scoped reference store only (no provider cache creation or attachment). Never run against the real provider (owner smoke check pending). O6 caps approved 2026-11-05 ($1.50/task, 10 tool turns; enforcement opt-in). Exit gate waits for the owner-run live smoke check. |
-| [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **Implemented locally; exit gate: owner decisions and browser evidence pending** | 2026-11-05 | Implemented under the owner's gate exception with the owner-approved contract ([CHAT.md](../api/CHAT.md), [ADR-0008](../adr/0008-chat-api-contract.md)). 1383 backend tests pass against real PostgreSQL and Redis (388 are Phase 04 tests); 691 web tests pass; strict lint and types. Fake Gemini clients only: never run against the real Gemini API. The chat page was never used in a browser or against the running API (no login UI; CORS or proxy undecided). Limits (8000 characters, 20 per minute, 32000 context tokens) are provisional; no per-user stream cap or reply deadline yet. |
+| [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **Implemented locally; exit gate: owner-run live and authenticated browser evidence pending** | 2026-11-06 | Owner decisions are recorded in section 2. Web lint, typecheck, build and all 711 web tests pass; 151 deterministic backend auth/chat/proxy tests pass. The full backend run recorded 962 passed, 5 failed (Redis unavailable) and 446 errors (PostgreSQL setup unavailable). Fake Gemini clients only; never run against the real Gemini API. Public landing screenshots were captured; authenticated browser acceptance against the API remains pending. |
 | [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03                                                                                |
 | [`Phase 06`](IMPLEMENTATION_PHASES/PHASE_06_BACKGROUND_TASK_ENGINE.md) | Background Task Execution Engine                      | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 05                                                                                |
 | [`Phase 07`](IMPLEMENTATION_PHASES/PHASE_07_SECURITY_APPROVALS.md)     | Security, Permissions & Human Approval                | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 06                                                                                |
@@ -36,6 +36,41 @@
 ---
 
 ## 2. Owner Decisions and Open Questions
+
+**Phase 04 owner decisions (2026-11-06; owner responses verbatim).**
+
+- a) `Approve: MAYA_CHAT_MAX_MESSAGE_CHARS=8000; MAYA_CHAT_RATE_LIMIT_PER_MINUTE=20; MAYA_CHAT_CONTEXT_TOKEN_BUDGET=32000`
+- b) `Approve same-origin proxy/Next.js rewrites (recommended)`
+- c) `Approve: 2 concurrent streams per user; 120-second reply deadline; max_output_tokens=2048`
+- d) `Approve building a minimal login UI against the existing Phase 02 auth API`
+- e) `Approve adding Playwright as a dev dependency for browser acceptance`
+- f) Typeface: `Approve system-ui; no external font or dependency`
+- f) CSP: `Defer CSP until hosting/runtime target is confirmed (recommended)`
+- g) `Defer migration pending query-volume evidence (recommended)`
+- Earlier UI direction: `Reuse the existing /chat design system; accept system-ui as an explicit exception (recommended)`; superseded by the later Direction A decision below.
+
+**Phase 04 web, UI, refresh-cookie and hosting decisions (2026-11-06; owner responses verbatim).**
+
+1. `Fix the Phase 04 web gaps: account pages, chat history sidebar, landing redesign, staying signed in across reloads.`
+2. `Design direction: "A — Quiet Instrument".`
+3. `"Material UI" means "Material feel, bina library (Recommended)": elevation levels, press ripple, state layers and Material-style easing, built from our own tokens. No MUI or any other new package.`
+4. `Glassmorphism: "Sirf floating layers (Recommended)": frosted glass only on the sticky header, the composer dock, menus or popovers, and the mobile drawer. Message content, cards and forms stay flat with hairline borders. Provide a solid fallback under prefers-reduced-transparency: reduce, @supports not (backdrop-filter: blur(1px)) and forced-colors.`
+5. `Motion: "Purposeful, rich (Recommended)": route/page enter transitions, message enter, streaming caret, sidebar slide, press ripple, skeleton loading, and one subtle ambient background on the landing page. CSS only (no animation library). Animate transform and opacity only. Give every animation a static equivalent under prefers-reduced-motion, and pause ambient loops when the tab is hidden.`
+6. `Refresh token: "HttpOnly cookie via proxy (Recommended)" (Level 3, approved for exactly the design in section 2).`
+7. `M4 (per-IP auth limits collapse behind the Next proxy): "Hosting tak defer + document (Recommended)". Document only, no behaviour change.`
+8. `Earlier approvals still in force: typeface system-ui (no external fonts); CSP deferred; Playwright may be added as a dev dependency for browser acceptance (decision (e) in IMPLEMENTATION_STATUS section 2). Record it if you add it.`
+
+The login UI, server-side same-origin rewrite, approved chat limits, account routes,
+refresh-cookie transport, chat-history UI and selected visual direction are implemented
+locally. Web lint, typecheck, production build and all 711 web tests passed; the focused
+deterministic backend auth/chat/proxy set passed 151 tests. The full backend suite could not
+be verified because the Docker daemon was unavailable: it recorded 962 passed, 5 Redis
+failures and 446 PostgreSQL setup errors. Public landing screenshots, a keyboard path to
+login, reduced-motion behavior, forced-colors detection and a post-load CLS check were
+observed in the browser. The authenticated API flow, SSE-through-proxy check, 200% zoom and
+mobile drawer browser walkthrough remain unverified. CSP and the history-index migration
+remain deferred. Phase 04 stays open pending the owner-run Gemini check and authenticated
+browser evidence; agents must not run the live check.
 
 **Phase 03 dependency-gate exception (2026-11-05).** "Owner decision: I grant a
 dependency-gate exception for Phase 03 planning and implementation only, while the Phase 01

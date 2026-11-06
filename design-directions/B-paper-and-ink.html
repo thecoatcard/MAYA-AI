@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction B — Paper and Ink</title>
+<style>
+/* Direction B: Paper and Ink. Light-first warm paper, near-black ink, one clay
+   accent. Editorial: no chat bubbles, the conversation reads like a document. */
+:root{
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --t-cap:.75rem; --t-small:.875rem; --t-body:1.0625rem; --t-head:1.25rem; --t-title:1.75rem; --t-display:3.25rem;
+  --s1:.25rem; --s2:.5rem; --s3:.75rem; --s4:1rem; --s6:1.5rem; --s8:2rem; --s12:3rem; --s16:4rem;
+  --r-sm:4px; --r-md:8px;
+  --dur-fast:150ms; --ease-out:cubic-bezier(.16,1,.3,1);
+  /* light */
+  --bg:#f6f3ee; --surface:#fbf9f5; --raised:#ffffff; --hover:#eee9e1;
+  --border:#e2dbd0; --border-strong:#c4b9a8;
+  --text:#1c1915; --muted:#5a5248; --faint:#7a7064;
+  --accent:#a8461f; --accent-text:#fffaf6; --accent-soft:rgb(168 70 31 / .07);
+  --focus:#a8461f; --danger:#b3261e; --ok:#2f6b3a;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#161412; --surface:#1c1a17; --raised:#24211d; --hover:#2b2723;
+  --border:#332e28; --border-strong:#4d453c;
+  --text:#ede7de; --muted:#b5aa9b; --faint:#958a7c;
+  --accent:#e8946a; --accent-text:#2a1206; --accent-soft:rgb(232 148 106 / .09);
+  --focus:#e8946a; --danger:#f2877e; --ok:#8fcf98;
+}}
+:root[data-theme="dark"]{
+  --bg:#161412; --surface:#1c1a17; --raised:#24211d; --hover:#2b2723;
+  --border:#332e28; --border-strong:#4d453c;
+  --text:#ede7de; --muted:#b5aa9b; --faint:#958a7c;
+  --accent:#e8946a; --accent-text:#2a1206; --accent-soft:rgb(232 148 106 / .09);
+  --focus:#e8946a; --danger:#f2877e; --ok:#8fcf98;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--t-body)/1.6 var(--font)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.banner{font-size:var(--t-cap);color:var(--faint);padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);display:flex;gap:var(--s4);flex-wrap:wrap;justify-content:space-between;align-items:center}
+.banner b{color:var(--text)}
+.seg{display:inline-flex;gap:2px}
+.seg button{font:inherit;background:none;color:var(--muted);border:1px solid transparent;border-radius:999px;padding:var(--s1) var(--s3);cursor:pointer;min-height:2rem}
+.seg button[aria-pressed="true"]{border-color:var(--border-strong);color:var(--text)}
+h2.section{font-size:var(--t-small);font-weight:600;color:var(--muted);margin:var(--s12) var(--s4) var(--s4)}
+
+/* --- key screen --- */
+.app{margin:0 var(--s4);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);height:46rem;display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+.bar{display:flex;align-items:center;gap:var(--s6);padding:var(--s3) var(--s6);border-bottom:1px solid var(--border)}
+.word{font-weight:700;letter-spacing:-.01em;font-size:var(--t-head)}
+.word span{color:var(--accent)}
+.bar nav{display:flex;gap:var(--s4);font-size:var(--t-small);flex:1}
+.bar nav a{color:var(--muted);text-decoration:none;padding:var(--s2) 0;border-bottom:2px solid transparent}
+.bar nav a[aria-current]{color:var(--text);border-color:var(--accent)}
+.bar .pl{font-size:var(--t-cap);color:var(--faint)}
+.btn{font:600 var(--t-small) var(--font);border-radius:999px;padding:var(--s2) var(--s4);min-height:2.5rem;cursor:pointer;border:1px solid var(--border-strong);background:var(--raised);color:var(--text)}
+.btn.primary{background:var(--text);color:var(--bg);border-color:var(--text)}
+.body{display:grid;grid-template-columns:1fr 18rem;min-height:0}
+.doc{overflow:auto;padding:var(--s12) var(--s8)}
+.col{max-width:40rem;margin:0 auto}
+.col h1{font-size:var(--t-title);line-height:1.2;letter-spacing:-.015em;margin:0 0 var(--s1);font-weight:650}
+.dateline{font-size:var(--t-cap);color:var(--faint);margin-bottom:var(--s8);font-variant-numeric:tabular-nums}
+.ask{border-left:2px solid var(--accent);padding:var(--s1) 0 var(--s1) var(--s4);color:var(--muted);margin:var(--s8) 0 var(--s4)}
+.ask .who{display:block;font-size:var(--t-cap);font-weight:600;color:var(--faint);margin-bottom:var(--s1);letter-spacing:.04em}
+.reply p{margin:0 0 var(--s4)}
+.reply blockquote{margin:0 0 var(--s4);padding:var(--s4) var(--s6);background:var(--raised);border:1px solid var(--border);border-radius:var(--r-md);white-space:pre-line;font-size:var(--t-small);line-height:1.7}
+.tools{display:flex;gap:var(--s4);font-size:var(--t-cap);color:var(--faint);font-variant-numeric:tabular-nums}
+.caret{display:inline-block;width:.5ch;height:1.1em;background:var(--accent);vertical-align:-.15em;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.composer{position:sticky;bottom:0;margin-top:var(--s12);background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--r-md);box-shadow:0 6px 20px rgb(28 25 21 / .06);padding:var(--s3) var(--s3) var(--s3) var(--s4);display:flex;align-items:flex-end;gap:var(--s3)}
+.composer textarea{flex:1;border:0;background:none;resize:none;color:var(--text);font:inherit;min-height:2.5rem;outline:none}
+.index{border-left:1px solid var(--border);overflow:auto;padding:var(--s6) var(--s4)}
+.index h3{font-size:var(--t-cap);font-weight:600;color:var(--faint);letter-spacing:.06em;text-transform:uppercase;margin:0 0 var(--s3)}
+.index ol{list-style:none;margin:0 0 var(--s8);padding:0}
+.index li a{display:grid;grid-template-columns:3.25rem 1fr;gap:var(--s2);padding:var(--s2);border-radius:var(--r-sm);text-decoration:none;color:var(--muted);font-size:var(--t-small);line-height:1.4;transition:background var(--dur-fast) var(--ease-out)}
+.index li a:hover{background:var(--hover)}
+.index li a[aria-current]{background:var(--accent-soft);color:var(--text)}
+.index time{font-size:var(--t-cap);color:var(--faint);font-variant-numeric:tabular-nums;padding-top:.1rem}
+
+/* --- secondary --- */
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:var(--s4);margin:0 var(--s4)}
+.panel{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:var(--s8)}
+.hero h3{font-size:var(--t-display);line-height:1.05;letter-spacing:-.03em;margin:var(--s6) 0 var(--s6);font-weight:700;max-width:14ch}
+.hero h3 em{font-style:normal;color:var(--accent)}
+.hero p{color:var(--muted);max-width:50ch;margin:0 0 var(--s8)}
+.tl{list-style:none;margin:0;padding:0;border-left:1px solid var(--border-strong)}
+.tl li{position:relative;padding:0 0 var(--s4) var(--s6);font-size:var(--t-small)}
+.tl li::before{content:"";position:absolute;left:-5px;top:.45rem;width:9px;height:9px;border-radius:50%;background:var(--bg);border:1px solid var(--border-strong)}
+.tl li.done::before{background:var(--ok);border-color:var(--ok)}
+.tl small{display:block;color:var(--faint);font-size:var(--t-cap)}
+.field{display:flex;flex-direction:column;gap:var(--s1);margin-bottom:var(--s4);font-size:var(--t-small);font-weight:600}
+.field input{font:inherit;font-weight:400;padding:var(--s3) 0;border:0;border-bottom:1px solid var(--border-strong);background:none;color:var(--text);min-height:2.75rem}
+.field input:focus{outline:none;border-bottom:2px solid var(--accent)}
+.err{color:var(--danger);font-size:var(--t-small);margin:0 0 var(--s4)}
+.sw{display:flex;flex-wrap:wrap;gap:var(--s3);margin:0 var(--s4) var(--s16)}
+.sw div{width:7rem;font-size:var(--t-cap);color:var(--muted)}
+.sw div::before{content:"";display:block;height:2.5rem;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:var(--s1);background:var(--c)}
+@media (max-width:760px){.body{grid-template-columns:1fr}.index{display:none}.grid2{grid-template-columns:1fr}.hero h3{font-size:2.25rem}.bar nav{display:none}.doc{padding:var(--s6) var(--s4)}}
+</style>
+</head>
+<body>
+<div class="banner">
+  <span><b>Direction B — Paper and Ink.</b> Static design mock. All conversation text is sample content.</span>
+  <span class="seg" role="group" aria-label="Theme">
+    <button aria-pressed="true" data-t="">System</button><button aria-pressed="false" data-t="light">Light</button><button aria-pressed="false" data-t="dark">Dark</button>
+  </span>
+</div>
+
+<h2 class="section">Key screen · Chat with history</h2>
+<div class="app">
+  <div class="bar">
+    <span class="word">maya<span>.</span></span>
+    <nav aria-label="Main"><a href="#" aria-current="page">Conversations</a><a href="#" aria-disabled="true">Tasks <span class="pl">· planned</span></a></nav>
+    <button class="btn">New conversation</button>
+    <button class="btn" aria-label="Account menu">AS</button>
+  </div>
+  <div class="body">
+    <article class="doc"><div class="col">
+      <h1>Reply to the vendor about delivery dates</h1>
+      <div class="dateline">Started 6 Nov 2026, 10:42 · 4 messages</div>
+      <div class="ask"><span class="who">YOU</span>The vendor says the shipment slips to the 14th. Draft a short, firm reply asking for a revised plan by Friday.</div>
+      <div class="reply">
+        <p>Here is a draft you can send as is or adjust:</p>
+        <blockquote>Hi Priya,
+Thanks for the update on the shipment. A move to the 14th affects our launch, so please send a revised delivery plan by Friday, including the cause of the delay and any partial-shipment options.
+Regards,
+Anand</blockquote>
+        <div class="tools"><span>Copy</span><span>412 tokens · 3.1 s</span></div>
+      </div>
+      <div class="ask"><span class="who">YOU</span>Make it a bit warmer.</div>
+      <div class="reply"><p>Hi Priya, thanks for letting us know early — that really helps. Since the 14th affects<span class="caret" aria-hidden="true"></span><span class="sr" role="status">MAYA is writing</span></p></div>
+      <div class="composer"><textarea aria-label="Message" placeholder="Write to MAYA"></textarea><button class="btn primary">Stop</button></div>
+    </div></article>
+    <aside class="index" aria-label="Conversation history">
+      <h3>Today</h3>
+      <ol><li><a href="#" aria-current="page"><time>10:42</time>Reply to the vendor about delivery dates</a></li><li><a href="#"><time>09:15</time>Summarise the Q3 planning notes</a></li></ol>
+      <h3>This week</h3>
+      <ol><li><a href="#"><time>Tue</time>Explain Postgres row-level security</a></li><li><a href="#"><time>Mon</time>Python retry decorator with backoff</a></li><li><a href="#"><time>Mon</time>Meeting agenda for Monday</a></li></ol>
+    </aside>
+  </div>
+</div>
+
+<h2 class="section">Landing and account screens</h2>
+<div class="grid2">
+  <div class="panel hero">
+    <span class="word">maya<span>.</span></span>
+    <h3>Work handed off. <em>Never</em> without asking.</h3>
+    <p>MAYA is a digital employee being built in the open. Right now it holds private text conversations on your own account. The rest arrives step by step:</p>
+    <ol class="tl">
+      <li class="done">Accounts and sign-in<small>Available</small></li>
+      <li class="done">Text conversations with history<small>Available</small></li>
+      <li>Tasks that ask for approval before acting<small>Planned</small></li>
+      <li>Voice workspace<small>Planned</small></li>
+    </ol>
+  </div>
+  <div class="panel">
+    <h3 style="font-size:var(--t-title);margin:0 0 var(--s2);letter-spacing:-.015em">Create your account</h3>
+    <p style="color:var(--muted);margin:0 0 var(--s6);font-size:var(--t-small)">We will email a code to confirm the address.</p>
+    <div class="field">Email<input value="anand@example.com"></div>
+    <div class="field">Username<input value="anand"></div>
+    <div class="field">Password<input type="password" value="short"></div>
+    <p class="err" role="alert">Use at least 12 characters.</p>
+    <button class="btn primary" style="width:100%">Send code</button>
+    <p style="font-size:var(--t-small);color:var(--muted);margin-top:var(--s4)">Already have an account? <a href="#" style="color:var(--accent)">Sign in</a></p>
+  </div>
+</div>
+
+<h2 class="section">Tokens</h2>
+<div class="sw">
+  <div style="--c:var(--bg)">bg</div><div style="--c:var(--surface)">surface</div><div style="--c:var(--raised)">raised</div><div style="--c:var(--border-strong)">border-strong</div>
+  <div style="--c:var(--text)">text</div><div style="--c:var(--muted)">muted</div><div style="--c:var(--accent)">accent</div><div style="--c:var(--danger)">danger</div><div style="--c:var(--ok)">ok</div>
+</div>
+<script>
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.t; if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll('.seg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+}));
+</script>
+</body>
+</html>

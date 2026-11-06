@@ -1,6 +1,6 @@
 # ADR-0008: Chat API contract, idempotency and persistence
 
-- **Status:** Accepted (the owner chose the contract on 2026-11-05; limits and rates stay provisional, see the API document)
+- **Status:** Accepted (the owner chose the contract on 2026-11-05; chat limits were approved separately on 2026-11-06, see the API document)
 - **Date:** 2026-11-05
 - **Deciders:** Repository owner
 - **Related:** [Phase 04](../implementation/IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md), [Chat API](../api/CHAT.md), [ADR-0007](0007-gemini-model-gateway-architecture.md), [ADR-0006](0006-tenant-isolation-with-row-level-security.md)
@@ -51,6 +51,6 @@ how the first session is created, and whether session CRUD is in scope.
   expires and could then run a second time.
 - A failed request is replayed too, so `retryable` on an `error` event means "ask again with a new key", never "resend
   the same key".
-- No per-user concurrent-stream cap and no reply deadline yet (see the API document's known limitations).
-- Input limit, rate limit and context budget are provisional until the owner approves values.
-- Until a login UI exists the chat page cannot be exercised in a browser end to end.
+- The owner-approved cap of two concurrent streams and 120-second reply deadline bound resource use, but real Gemini stream behavior has not been observed.
+- The input, fixed-window rate, context and output-token limits are owner-approved; the local token estimate has not been compared with Gemini's tokenizer.
+- A minimal login UI and same-origin proxy exist, but authenticated browser acceptance remains pending along with the owner-run live Gemini smoke check.

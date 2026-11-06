@@ -90,6 +90,12 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
+class CookieTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+
+
 class MeResponse(BaseModel):
     user_id: UUID
     workspace_id: UUID

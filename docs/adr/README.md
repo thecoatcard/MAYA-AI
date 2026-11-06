@@ -31,5 +31,6 @@ The `architecture` rule in `governance/governance.config.json` asks for an ADR (
 | [0006](0006-tenant-isolation-with-row-level-security.md) | Tenant isolation with forced row-level security | Accepted |
 | [0007](0007-gemini-model-gateway-architecture.md) | Gemini model gateway architecture, resilience and token accounting | Proposed |
 | [0008](0008-chat-api-contract.md) | Chat API contract, idempotency and persistence | Accepted |
+| [0009](0009-refresh-cookie-transport.md) | HttpOnly refresh-cookie transport for the browser client | Accepted |
 
 Product-level decisions from the project plan (modular monolith, voice/task separation, permission tiers, and others) will be recorded here as ADRs when implementation starts.

@@ -58,7 +58,7 @@ function ErrorNotice({
 
   const waiting = remaining > 0;
   const waitText =
-    error.code === "rate_limited"
+    error.code === "rate_limited" || error.code === "concurrent_stream_limit"
       ? initialWait > 0
         ? ` Try again in about ${initialWait} ${initialWait === 1 ? "second" : "seconds"}.`
         : " Wait a moment, then try again."

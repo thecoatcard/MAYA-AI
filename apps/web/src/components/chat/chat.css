@@ -1,9 +1,8 @@
 /*
- * MAYA chat canvas: design tokens and component rules.
+ * MAYA shared UI: design tokens and component rules.
  *
- * Imported by ChatWorkspace, so it loads only on /chat. Tokens are scoped to
- * .maya-chat for now; the design brief decides when they move to :root. Nothing
- * here changes the existing foundation page.
+ * Imported by chat and sign-in components, so it loads only on those routes.
+ * Tokens live on the shared .maya-app wrapper for landing, account and chat.
  *
  * Rules of this file (docs/architecture/UI_UX_STANDARDS.md):
  *  - every colour, size, space, radius, shadow and duration is a token below;
@@ -15,14 +14,15 @@
 
 /* ------------------------------------------------------------------ tokens */
 
-.maya-chat {
+.maya-app {
   color-scheme: light;
+  min-height: 100vh;
+  background: var(--maya-bg);
+  color: var(--maya-text);
+  font-family: var(--maya-font-sans);
 
-  /* Typeface: no font has been approved yet, so this is a deliberate system
-     stack behind one token. Replace the value here when the owner picks one. */
-  --maya-font-sans:
-    ui-sans-serif, "Segoe UI Variable Text", "Segoe UI", system-ui,
-    -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* Owner-approved local-only typeface; no external font request is made. */
+  --maya-font-sans: system-ui;
   --maya-font-mono:
     ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono",
     monospace;
@@ -64,6 +64,14 @@
   /* Layout */
   --maya-column: 44rem;
   --maya-column-wide: 64rem;
+  --maya-sidebar-width: 18rem;
+  --maya-sidebar-mobile-width: 86vw;
+  --maya-account-width: 30rem;
+  --maya-auth-check-width: 28rem;
+  --maya-text-display: clamp(var(--maya-text-title), 6vw, 4rem);
+  --maya-leading-display: 1.08;
+  --maya-home-measure: 12ch;
+  --maya-state-scrim-opacity: 0.45;
   --maya-measure: 70ch;
   --maya-touch: 2.75rem;
   --maya-control: 2rem;
@@ -80,10 +88,21 @@
   --maya-dur-base: 220ms;
   --maya-dur-slow: 360ms;
   --maya-dur-loop: 1200ms;
+  --maya-dur-ripple: 360ms;
+  --maya-dur-shimmer: 1200ms;
+  --maya-dur-ambient: 24s;
   --maya-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --maya-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --maya-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --maya-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --maya-ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
   --maya-rise: 0.5rem;
+  --maya-glass-blur: 16px;
+  --maya-state-hover-opacity: 0.06;
+  --maya-state-focus-opacity: 0.08;
+  --maya-state-pressed-opacity: 0.12;
+  --maya-state-ripple-opacity: 0.18;
+  --maya-ripple-size: 14rem;
 
   /* Colour roles: light */
   --maya-bg: #f4f6f9;
@@ -106,6 +125,11 @@
   --maya-warning: #8a5a00;
   --maya-disabled-bg: #e6ebf2;
   --maya-disabled-text: #6b7a90;
+  --maya-glass-surface: rgb(251 252 253 / 0.94);
+  --maya-glass-raised: rgb(254 254 254 / 0.96);
+  --maya-glass-border: rgb(182 194 210 / 0.72);
+  --maya-state-layer: #0f1b2c;
+  --maya-ambient: rgb(11 122 112 / 0.09);
 
   /* Syntax colours */
   --maya-tok-keyword: #0b6a62;
@@ -115,13 +139,14 @@
   --maya-tok-name: #7a3fa8;
   --maya-tok-type: #0a6a8f;
 
-  /* Elevation: flat by default, two small steps */
+  /* Three restrained elevation levels; message surfaces remain flat. */
   --maya-shadow-1: 0 1px 2px rgb(15 27 44 / 0.08);
   --maya-shadow-2: 0 8px 24px rgb(15 27 44 / 0.16);
+  --maya-shadow-3: 0 18px 48px rgb(15 27 44 / 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
-  .maya-chat:not([data-maya-theme="light"]) {
+  .maya-app:not([data-maya-theme="light"]) {
     color-scheme: dark;
     --maya-bg: #0c1522;
     --maya-surface: #111d2d;
@@ -143,6 +168,11 @@
     --maya-warning: #fbbf24;
     --maya-disabled-bg: #182539;
     --maya-disabled-text: #7d90aa;
+    --maya-glass-surface: rgb(17 29 45 / 0.94);
+    --maya-glass-raised: rgb(23 37 57 / 0.96);
+    --maya-glass-border: rgb(52 73 106 / 0.72);
+    --maya-state-layer: #e7edf5;
+    --maya-ambient: rgb(45 212 191 / 0.1);
     --maya-tok-keyword: #5eead4;
     --maya-tok-string: #f0c27a;
     --maya-tok-number: #8fb4ff;
@@ -151,10 +181,11 @@
     --maya-tok-type: #7dd3fc;
     --maya-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
     --maya-shadow-2: 0 8px 24px rgb(0 0 0 / 0.5);
+    --maya-shadow-3: 0 18px 48px rgb(0 0 0 / 0.55);
   }
 }
 
-.maya-chat[data-maya-theme="dark"] {
+.maya-app[data-maya-theme="dark"] {
   color-scheme: dark;
   --maya-bg: #0c1522;
   --maya-surface: #111d2d;
@@ -176,6 +207,11 @@
   --maya-warning: #fbbf24;
   --maya-disabled-bg: #182539;
   --maya-disabled-text: #7d90aa;
+  --maya-glass-surface: rgb(17 29 45 / 0.94);
+  --maya-glass-raised: rgb(23 37 57 / 0.96);
+  --maya-glass-border: rgb(52 73 106 / 0.72);
+  --maya-state-layer: #e7edf5;
+  --maya-ambient: rgb(45 212 191 / 0.1);
   --maya-tok-keyword: #5eead4;
   --maya-tok-string: #f0c27a;
   --maya-tok-number: #8fb4ff;
@@ -184,6 +220,7 @@
   --maya-tok-type: #7dd3fc;
   --maya-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
   --maya-shadow-2: 0 8px 24px rgb(0 0 0 / 0.5);
+  --maya-shadow-3: 0 18px 48px rgb(0 0 0 / 0.55);
 }
 
 /* The chat is a fixed-height app shell; keep the page from rubber-banding. */
@@ -224,8 +261,26 @@
 }
 
 .maya-chat__header {
+  position: sticky;
+  top: 0;
+  z-index: var(--maya-z-float);
   flex: none;
   border-bottom: 1px solid var(--maya-border);
+  background: var(--maya-glass-surface);
+  backdrop-filter: blur(var(--maya-glass-blur));
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .maya-chat__header {
+    background: var(--maya-raised);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .maya-chat__header {
+    background: var(--maya-raised);
+    backdrop-filter: none;
+  }
 }
 
 .maya-chat__header-inner {
@@ -295,6 +350,9 @@
 /* ----------------------------------------------------------------- buttons */
 
 .maya-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: var(--maya-space-2);
@@ -310,9 +368,65 @@
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
-    background-color var(--maya-dur-fast) var(--maya-ease-out),
-    border-color var(--maya-dur-fast) var(--maya-ease-out),
-    color var(--maya-dur-fast) var(--maya-ease-out);
+    background-color var(--maya-dur-fast) var(--maya-ease-standard),
+    border-color var(--maya-dur-fast) var(--maya-ease-standard),
+    color var(--maya-dur-fast) var(--maya-ease-standard);
+}
+
+.maya-btn::before,
+.maya-theme__option::before,
+.maya-session::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--maya-state-layer);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--maya-dur-fast) var(--maya-ease-standard);
+}
+
+.maya-btn:hover:not(:disabled)::before,
+.maya-theme__option:hover::before,
+.maya-session:hover::before {
+  opacity: var(--maya-state-hover-opacity);
+}
+
+.maya-btn:focus-visible::before,
+.maya-theme__option:focus-visible::before,
+.maya-session:focus-visible::before {
+  opacity: var(--maya-state-focus-opacity);
+}
+
+.maya-btn:active:not(:disabled)::before,
+.maya-theme__option:active::before,
+.maya-session:active::before {
+  opacity: var(--maya-state-pressed-opacity);
+}
+
+.maya-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.maya-ripple::after {
+  position: absolute;
+  top: var(--y, 50%);
+  left: var(--x, 50%);
+  width: var(--maya-ripple-size);
+  height: var(--maya-ripple-size);
+  border-radius: 50%;
+  background: var(--maya-state-layer);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0);
+}
+
+.maya-ripple:active::after {
+  animation: maya-ripple var(--maya-dur-ripple) var(--maya-ease-emphasized)
+    forwards;
 }
 
 .maya-btn--quiet {
@@ -372,6 +486,9 @@
 }
 
 .maya-theme__option {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: grid;
   place-items: center;
   width: var(--maya-control);
@@ -852,6 +969,8 @@
 /* ---------------------------------------------------------------- composer */
 
 .maya-chat__dock {
+  position: relative;
+  z-index: var(--maya-z-base);
   display: flex;
   flex: none;
   flex-direction: column;
@@ -861,6 +980,24 @@
   margin: 0 auto;
   padding: 0 var(--maya-space-4)
     max(var(--maya-space-4), env(safe-area-inset-bottom));
+  border-top: 1px solid var(--maya-glass-border);
+  border-radius: var(--maya-radius-lg) var(--maya-radius-lg) 0 0;
+  background: var(--maya-glass-raised);
+  box-shadow: var(--maya-shadow-1);
+  backdrop-filter: blur(var(--maya-glass-blur));
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .maya-chat__dock {
+    background: var(--maya-raised);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .maya-chat__dock {
+    background: var(--maya-raised);
+    backdrop-filter: none;
+  }
 }
 
 .maya-composer__box {
@@ -1096,6 +1233,536 @@
   text-underline-offset: 0.2em;
 }
 
+.maya-signin {
+  width: 100%;
+  max-width: 28rem;
+  margin: clamp(var(--maya-space-8), 12vh, 6rem) auto var(--maya-space-8);
+  padding: 0 var(--maya-space-4);
+}
+
+.maya-account {
+  width: 100%;
+  max-width: var(--maya-account-width);
+  margin: clamp(var(--maya-space-8), 10vh, var(--maya-space-12)) auto;
+  padding: var(--maya-space-6);
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-lg);
+  background: var(--maya-surface);
+}
+
+.maya-account__intro,
+.maya-account__notice {
+  color: var(--maya-text-muted);
+}
+
+.maya-account__notice {
+  margin: 0;
+  font-size: var(--maya-text-small);
+}
+
+.maya-account__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-3) var(--maya-space-5);
+  margin-top: var(--maya-space-4);
+}
+
+.maya-account__links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--maya-touch);
+  color: var(--maya-link);
+  font-size: var(--maya-text-small);
+  text-underline-offset: 0.2em;
+}
+
+.maya-account__resend {
+  margin-top: var(--maya-space-3);
+}
+
+.maya-workspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: var(--maya-sidebar-width) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.maya-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: var(--maya-space-4);
+  border-right: 1px solid var(--maya-border);
+  background: var(--maya-surface);
+}
+
+.maya-sidebar__head,
+.maya-sidebar__account,
+.maya-conversation__topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--maya-space-3);
+}
+
+.maya-sidebar__head {
+  justify-content: space-between;
+  margin-bottom: var(--maya-space-4);
+}
+
+.maya-sidebar__wordmark {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  font-weight: 700;
+  letter-spacing: var(--maya-tracking-wide);
+  text-transform: uppercase;
+}
+
+.maya-sidebar__close,
+.maya-sidebar__trigger {
+  display: none;
+}
+
+.maya-sidebar__new {
+  width: 100%;
+  min-height: var(--maya-touch);
+  justify-content: flex-start;
+}
+
+.maya-sidebar__new kbd {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  border-radius: var(--maya-radius-sm);
+  padding: 0 var(--maya-space-1);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+}
+
+.maya-sidebar__sessions {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--maya-space-5);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.maya-sidebar__sessions ul {
+  display: grid;
+  gap: var(--maya-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.maya-sidebar__group {
+  margin: var(--maya-space-4) 0 var(--maya-space-2);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  font-weight: 700;
+  letter-spacing: var(--maya-tracking-caps);
+  text-transform: uppercase;
+}
+
+.maya-session {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  width: 100%;
+  min-height: var(--maya-touch);
+  padding: var(--maya-space-2) var(--maya-space-3);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-md);
+  background: transparent;
+  color: var(--maya-text);
+  font: inherit;
+  font-size: var(--maya-text-small);
+  text-align: left;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.maya-session[aria-current="page"] {
+  border-color: var(--maya-border);
+  background: var(--maya-hover);
+  font-weight: 600;
+}
+
+.maya-session:disabled {
+  cursor: progress;
+}
+
+.maya-sidebar__empty,
+.maya-sidebar__error {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+}
+
+.maya-sidebar__error {
+  color: var(--maya-danger);
+}
+
+.maya-sidebar__more {
+  width: 100%;
+  justify-content: center;
+  margin-top: var(--maya-space-3);
+}
+
+.maya-sidebar__account {
+  justify-content: space-between;
+  min-height: var(--maya-touch);
+  margin-top: var(--maya-space-4);
+  padding-top: var(--maya-space-3);
+  border-top: 1px solid var(--maya-border);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+}
+
+.maya-conversation {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.maya-conversation__topbar {
+  flex: none;
+  min-height: var(--maya-touch);
+  padding: var(--maya-space-2) var(--maya-space-4);
+  border-bottom: 1px solid var(--maya-border);
+  background: var(--maya-surface);
+}
+
+.maya-conversation__title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--maya-text);
+  font-size: var(--maya-text-small);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maya-conversation__status {
+  margin-left: auto;
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+}
+
+.maya-sidebar__scrim {
+  display: none;
+}
+
+.maya-sidebar__skeleton {
+  display: grid;
+  gap: var(--maya-space-3);
+}
+
+.maya-skeleton {
+  display: block;
+  width: 100%;
+  height: var(--maya-touch);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-hover);
+  animation: maya-shimmer var(--maya-dur-shimmer) var(--maya-ease-in-out)
+    infinite;
+}
+
+.maya-auth-check {
+  display: grid;
+  gap: var(--maya-space-4);
+  width: min(calc(100% - var(--maya-space-8)), var(--maya-auth-check-width));
+  margin: auto;
+}
+
+.maya-auth-check__title {
+  margin: 0;
+  font-size: var(--maya-text-title);
+  line-height: var(--maya-leading-title);
+}
+
+.maya-auth-warning {
+  margin: 0;
+  padding: var(--maya-space-2) var(--maya-space-4);
+  border-bottom: 1px solid var(--maya-border);
+  color: var(--maya-warning);
+  font-size: var(--maya-text-small);
+}
+
+.maya-history-skeleton {
+  display: grid;
+  gap: var(--maya-space-6);
+  width: min(100% - var(--maya-space-8), var(--maya-column));
+  margin: auto;
+}
+
+.maya-history-skeleton .maya-skeleton {
+  height: var(--maya-space-12);
+}
+
+.maya-home {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.maya-home::before {
+  position: absolute;
+  z-index: -1;
+  top: -25%;
+  right: -15%;
+  width: 70%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--maya-ambient), transparent 68%);
+  content: "";
+  animation: maya-ambient var(--maya-dur-ambient) var(--maya-ease-in-out)
+    infinite alternate;
+  pointer-events: none;
+}
+
+.maya-app[data-page-hidden="true"] .maya-home::before {
+  animation-play-state: paused;
+}
+
+.maya-home__header,
+.maya-home__main,
+.maya-home__footer {
+  position: relative;
+  z-index: 1;
+  width: min(100%, var(--maya-column-wide));
+  margin: 0 auto;
+  padding-right: var(--maya-space-6);
+  padding-left: var(--maya-space-6);
+}
+
+.maya-home__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--maya-space-4);
+  min-height: var(--maya-touch);
+  border-bottom: 1px solid var(--maya-border);
+}
+
+.maya-home__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--maya-space-3);
+}
+
+.maya-home__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(16rem, 0.8fr);
+  align-items: center;
+  gap: var(--maya-space-12);
+  min-height: 70vh;
+  padding-top: var(--maya-space-12);
+  padding-bottom: var(--maya-space-12);
+  animation: maya-rise var(--maya-dur-slow) var(--maya-ease-emphasized)
+    backwards;
+}
+
+.maya-home__eyebrow {
+  color: var(--maya-accent);
+  font-size: var(--maya-text-caption);
+  font-weight: 700;
+  letter-spacing: var(--maya-tracking-wide);
+  text-transform: uppercase;
+}
+
+.maya-home__title {
+  max-width: var(--maya-home-measure);
+  margin: var(--maya-space-4) 0;
+  font-size: var(--maya-text-display);
+  font-weight: 600;
+  line-height: var(--maya-leading-display);
+  letter-spacing: var(--maya-tracking-tight);
+}
+
+.maya-home__intro {
+  max-width: var(--maya-measure);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-heading);
+}
+
+.maya-home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-3);
+  margin-top: var(--maya-space-6);
+}
+
+.maya-home__list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--maya-border-strong);
+  list-style: none;
+}
+
+.maya-home__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--maya-space-3);
+  min-height: var(--maya-touch);
+  padding: var(--maya-space-3) 0;
+  border-bottom: 1px solid var(--maya-border);
+}
+
+.maya-home__number {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.maya-home__status {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  font-weight: 600;
+  letter-spacing: var(--maya-tracking-caps);
+  text-transform: uppercase;
+}
+
+.maya-home__status[data-state="available"] {
+  color: var(--maya-accent);
+}
+
+.maya-home__footer {
+  padding-top: var(--maya-space-4);
+  padding-bottom: var(--maya-space-4);
+  border-top: 1px solid var(--maya-border);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+}
+
+@media (max-width: 760px) {
+  .maya-workspace {
+    display: block;
+    position: relative;
+  }
+
+  .maya-sidebar {
+    position: fixed;
+    z-index: var(--maya-z-float);
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(var(--maya-sidebar-mobile-width), var(--maya-sidebar-width));
+    border-right: 1px solid var(--maya-glass-border);
+    background: var(--maya-glass-surface);
+    box-shadow: var(--maya-shadow-3);
+    backdrop-filter: blur(var(--maya-glass-blur));
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-100%);
+    transition:
+      transform var(--maya-dur-slow) var(--maya-ease-emphasized),
+      opacity var(--maya-dur-fast) var(--maya-ease-standard);
+  }
+
+  .maya-sidebar.is-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+
+  .maya-sidebar__close,
+  .maya-sidebar__trigger {
+    display: inline-flex;
+    min-width: var(--maya-touch);
+    min-height: var(--maya-touch);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .maya-sidebar__scrim {
+    position: fixed;
+    z-index: calc(var(--maya-z-float) - 1);
+    inset: 0;
+    display: block;
+    border: 0;
+    background: var(--maya-state-layer);
+    opacity: var(--maya-state-scrim-opacity);
+  }
+
+  .maya-conversation__topbar {
+    position: sticky;
+    top: 0;
+    z-index: var(--maya-z-base);
+  }
+
+  .maya-home__main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--maya-space-8);
+    min-height: auto;
+    padding-top: var(--maya-space-8);
+  }
+}
+
+@media (max-width: 40rem) {
+  .maya-home__header,
+  .maya-home__main,
+  .maya-home__footer {
+    padding-right: var(--maya-space-4);
+    padding-left: var(--maya-space-4);
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .maya-sidebar.is-open {
+    background: var(--maya-raised);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .maya-sidebar.is-open {
+    background: var(--maya-raised);
+    backdrop-filter: none;
+  }
+}
+.maya-signin__form {
+  display: grid;
+  gap: var(--maya-space-4);
+  margin-top: var(--maya-space-6);
+}
+
+.maya-signin__field {
+  display: grid;
+  gap: var(--maya-space-2);
+  color: var(--maya-text);
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+}
+
+.maya-signin__field input {
+  width: 100%;
+  min-height: var(--maya-touch);
+  padding: 0 var(--maya-space-3);
+  border: 1px solid var(--maya-control-border);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-raised);
+  color: var(--maya-text);
+  font: inherit;
+}
+
+.maya-signin__field input:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+.maya-signin__error {
+  margin: 0;
+  color: var(--maya-danger);
+  font-size: var(--maya-text-small);
+}
+
+.maya-signin__submit {
+  justify-content: center;
+  min-height: var(--maya-touch);
+}
+
 @media (hover: hover) {
   .maya-signedout__link:hover {
     text-decoration-thickness: 2px;
@@ -1188,13 +1855,39 @@
   /* Stand-alone links and inline note actions: tall enough, width as written. */
   .maya-brand,
   .maya-signedout__link,
+  .maya-account__links a,
   .maya-msg__action {
+    min-height: var(--maya-touch);
+  }
+
+  .maya-session,
+  .maya-sidebar__trigger,
+  .maya-sidebar__close {
     min-height: var(--maya-touch);
   }
 }
 
 /* Windows high contrast: shadows are dropped, so state needs real outlines. */
 @media (forced-colors: active) {
+  .maya-chat__header,
+  .maya-chat__dock,
+  .maya-sidebar.is-open {
+    border-color: CanvasText;
+    background: Canvas;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .maya-sidebar__scrim {
+    background: Canvas;
+    opacity: 0.75;
+  }
+
+  .maya-session[aria-current="page"] {
+    outline: 1px solid Highlight;
+    background: Canvas;
+  }
+
   .maya-composer__box:focus-within {
     outline: 2px solid Highlight;
   }
@@ -1235,17 +1928,52 @@
   }
 }
 
+@keyframes maya-ripple {
+  from {
+    opacity: var(--maya-state-ripple-opacity);
+    transform: translate(-50%, -50%) scale(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.6);
+  }
+}
+
 @keyframes maya-pulse {
   0%,
+  40%,
   80%,
   100% {
     opacity: 0.3;
     transform: scale(0.85);
   }
+}
 
-  40% {
+/* Shimmer keeps history loading legible without a spinner. */
+@keyframes maya-shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateX(0);
+  }
+
+  50% {
     opacity: 1;
-    transform: none;
+    transform: translateX(0.25rem);
+  }
+}
+
+/* Ambient motion is only a subtle landing-page orientation cue. */
+@keyframes maya-ambient {
+  from {
+    opacity: 0.55;
+    transform: translate3d(-1%, 0, 0) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(1%, 1%, 0) scale(1.02);
   }
 }
 
@@ -1255,9 +1983,13 @@
  * already a still bar, and messages appear in place.
  */
 @media (prefers-reduced-motion: reduce) {
+  .maya-app *,
+  .maya-app *::before,
+  .maya-app *::after,
   .maya-chat *,
   .maya-chat *::before,
-  .maya-chat *::after {
+  .maya-chat *::after,
+  .maya-home::before {
     animation: none !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;

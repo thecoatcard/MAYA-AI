@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction A — Quiet Instrument</title>
+<style>
+/* Direction A: Quiet Instrument. Dark-first, deep ink navy, one teal accent,
+   hairline structure, monospace metadata. Evolves the existing /chat tokens. */
+:root{
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --t-cap:.75rem; --t-small:.875rem; --t-body:1rem; --t-head:1.125rem; --t-title:1.5rem; --t-display:2.75rem;
+  --s1:.25rem; --s2:.5rem; --s3:.75rem; --s4:1rem; --s6:1.5rem; --s8:2rem; --s12:3rem; --s16:4rem;
+  --r-sm:6px; --r-md:10px;
+  --dur-fast:150ms; --dur-base:220ms; --ease-out:cubic-bezier(.16,1,.3,1);
+  /* light */
+  --bg:#f3f5f8; --surface:#fafbfc; --raised:#ffffff; --hover:#e8edf3;
+  --border:#d8dfe8; --border-strong:#b3bfcf;
+  --text:#0e1a2a; --muted:#4a596d; --faint:#6b7a8f;
+  --accent:#0b7a70; --accent-text:#f2fffd; --accent-soft:rgb(11 122 112 / .08);
+  --focus:#0a6a62; --danger:#b4232b; --warn:#8a5a00;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0b1420; --surface:#101b2a; --raised:#162336; --hover:#1b2a40;
+  --border:#1f2e44; --border-strong:#33476a;
+  --text:#e6ecf4; --muted:#9aadc4; --faint:#7d90a8;
+  --accent:#2dd4bf; --accent-text:#052b27; --accent-soft:rgb(45 212 191 / .09);
+  --focus:#5eead4; --danger:#f87171; --warn:#fbbf24;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b1420; --surface:#101b2a; --raised:#162336; --hover:#1b2a40;
+  --border:#1f2e44; --border-strong:#33476a;
+  --text:#e6ecf4; --muted:#9aadc4; --faint:#7d90a8;
+  --accent:#2dd4bf; --accent-text:#052b27; --accent-soft:rgb(45 212 191 / .09);
+  --focus:#5eead4; --danger:#f87171; --warn:#fbbf24;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--t-body)/1.6 var(--font)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.banner{font:var(--t-cap)/1.4 var(--mono);color:var(--faint);padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);display:flex;gap:var(--s4);flex-wrap:wrap;justify-content:space-between;align-items:center}
+.banner b{color:var(--text);font-weight:600}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+.seg button{font:inherit;background:none;color:var(--muted);border:0;padding:var(--s1) var(--s3);cursor:pointer;min-height:2rem}
+.seg button[aria-pressed="true"]{background:var(--hover);color:var(--text)}
+h2.section{font:600 var(--t-cap)/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:var(--s12) var(--s4) var(--s4)}
+
+/* --- key screen: chat workspace --- */
+.app{display:grid;grid-template-columns:16.5rem 1fr;height:44rem;margin:0 var(--s4);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--surface)}
+.side{border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+.brand{display:flex;align-items:center;gap:var(--s2);padding:var(--s4);font-weight:600;letter-spacing:.14em;font-size:var(--t-small)}
+.brand i{width:.6rem;height:.6rem;border-radius:2px;background:var(--accent);display:block;transform:rotate(45deg)}
+.new{margin:0 var(--s3) var(--s3);display:flex;align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text);font:inherit;font-size:var(--t-small);cursor:pointer;min-height:2.75rem}
+.new kbd{font:var(--t-cap) var(--mono);color:var(--faint)}
+.group{font:var(--t-cap)/1 var(--mono);color:var(--faint);padding:var(--s4) var(--s4) var(--s2);letter-spacing:.08em}
+.sess{list-style:none;margin:0;padding:0 var(--s2);overflow:auto}
+.sess a{display:block;padding:var(--s2) var(--s3);border-radius:var(--r-sm);color:var(--muted);text-decoration:none;font-size:var(--t-small);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;transition:background var(--dur-fast) var(--ease-out)}
+.sess a:hover{background:var(--hover);color:var(--text)}
+.sess a[aria-current="page"]{color:var(--text);background:var(--accent-soft)}
+.sess a[aria-current="page"]::before{content:"";position:absolute;left:0;top:25%;bottom:25%;width:2px;background:var(--accent);border-radius:2px}
+.me{margin-top:auto;border-top:1px solid var(--border);padding:var(--s3) var(--s4);display:flex;align-items:center;gap:var(--s3);font-size:var(--t-small)}
+.me .av{width:1.75rem;height:1.75rem;border-radius:50%;border:1px solid var(--border-strong);display:grid;place-items:center;font:var(--t-cap) var(--mono);color:var(--muted)}
+.me span{color:var(--muted);flex:1}
+.me button{background:none;border:0;color:var(--muted);font:inherit;cursor:pointer;min-height:2.75rem}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.top{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s6);border-bottom:1px solid var(--border);min-height:3.25rem}
+.top h1{font-size:var(--t-small);font-weight:600;margin:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{font:var(--t-cap) var(--mono);color:var(--faint)}
+.thread{flex:1;overflow:auto;padding:var(--s8) var(--s6)}
+.col{max-width:44rem;margin:0 auto;display:flex;flex-direction:column;gap:var(--s8)}
+.u{align-self:flex-end;max-width:80%;background:var(--raised);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--s3) var(--s4)}
+.a{display:grid;grid-template-columns:1.5rem 1fr;gap:var(--s3)}
+.a .mk{width:.55rem;height:.55rem;margin-top:.55rem;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
+.a p{margin:0 0 var(--s3)}
+.a code{font:.9em var(--mono);background:var(--hover);padding:.1em .35em;border-radius:4px}
+.a pre{font:var(--t-small)/1.6 var(--mono);background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:var(--s3) var(--s4);margin:0 0 var(--s3);overflow:auto}
+.foot{font:var(--t-cap) var(--mono);color:var(--faint);display:flex;gap:var(--s4)}
+.streaming{display:inline-flex;align-items:center;gap:var(--s2);color:var(--muted);font:var(--t-cap) var(--mono)}
+.streaming i{width:.4rem;height:.4rem;border-radius:50%;background:var(--accent);animation:pulse 1.2s var(--ease-out) infinite}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.streaming i{animation:none;opacity:1}}
+.dock{padding:var(--s3) var(--s6) var(--s6)}
+.composer{max-width:44rem;margin:0 auto;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--raised);padding:var(--s3);display:flex;flex-direction:column;gap:var(--s2)}
+.composer textarea{border:0;background:none;resize:none;color:var(--text);font:inherit;min-height:3rem;outline:none}
+.crow{display:flex;justify-content:space-between;align-items:center}
+.hint{font:var(--t-cap) var(--mono);color:var(--faint)}
+.tag{font:600 .6875rem/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--border-strong);color:var(--muted);border-radius:4px;padding:.2rem .4rem}
+.send{background:var(--accent);color:var(--accent-text);border:0;border-radius:var(--r-sm);padding:var(--s2) var(--s4);font:600 var(--t-small) var(--font);min-height:2.25rem;cursor:pointer}
+
+/* --- tokens and secondary screens --- */
+.grid2{display:grid;grid-template-columns:1.3fr 1fr;gap:var(--s4);margin:0 var(--s4)}
+.panel{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:var(--s6)}
+.hero h3{font-size:var(--t-display);line-height:1.1;letter-spacing:-.02em;margin:0 0 var(--s4);font-weight:600;max-width:16ch}
+.hero p{color:var(--muted);max-width:52ch;margin:0 0 var(--s6)}
+.status{display:grid;grid-template-columns:auto 1fr auto;gap:var(--s2) var(--s4);font-size:var(--t-small);border-top:1px solid var(--border);padding-top:var(--s4)}
+.status .k{font:var(--t-cap) var(--mono);color:var(--faint);padding-top:.15rem}
+.status .v{color:var(--muted)}
+.ok{color:var(--accent);font:var(--t-cap) var(--mono)}
+.pl{color:var(--faint);font:var(--t-cap) var(--mono)}
+.field{display:flex;flex-direction:column;gap:var(--s1);margin-bottom:var(--s4);font-size:var(--t-small);font-weight:600}
+.field input{font:inherit;font-weight:400;padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text);min-height:2.75rem}
+.otp{display:flex;gap:var(--s2)}
+.otp input{width:2.75rem;text-align:center;font:600 var(--t-head) var(--mono)}
+.sw{display:flex;flex-wrap:wrap;gap:var(--s2);margin:0 var(--s4) var(--s16)}
+.sw div{width:7.5rem;font:var(--t-cap) var(--mono);color:var(--muted)}
+.sw div::before{content:"";display:block;height:2.5rem;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:var(--s1);background:var(--c)}
+@media (max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.grid2{grid-template-columns:1fr}.hero h3{font-size:2rem}}
+</style>
+</head>
+<body>
+<div class="banner">
+  <span><b>Direction A — Quiet Instrument.</b> Static design mock. All conversation text is sample content.</span>
+  <span class="seg" role="group" aria-label="Theme">
+    <button aria-pressed="true" data-t="">System</button><button aria-pressed="false" data-t="light">Light</button><button aria-pressed="false" data-t="dark">Dark</button>
+  </span>
+</div>
+
+<h2 class="section">Key screen · Chat with history</h2>
+<div class="app">
+  <aside class="side" aria-label="Conversations">
+    <div class="brand"><i></i>MAYA</div>
+    <button class="new">New conversation <kbd>Ctrl K</kbd></button>
+    <div class="group">TODAY</div>
+    <ul class="sess">
+      <li><a href="#" aria-current="page">Draft a reply to the vendor about delivery dates</a></li>
+      <li><a href="#">Summarise the Q3 planning notes</a></li>
+    </ul>
+    <div class="group">EARLIER</div>
+    <ul class="sess">
+      <li><a href="#">Explain Postgres row-level security</a></li>
+      <li><a href="#">Python retry decorator with backoff</a></li>
+      <li><a href="#">Meeting agenda for Monday</a></li>
+    </ul>
+    <div class="me"><div class="av">AS</div><span>anand</span><button>Sign out</button></div>
+  </aside>
+  <section class="main">
+    <div class="top"><h1>Draft a reply to the vendor about delivery dates</h1><span class="meta">gemini · 2 of 32k ctx</span></div>
+    <div class="thread"><div class="col">
+      <div class="u">The vendor says the shipment slips to the 14th. Draft a short, firm reply asking for a revised plan by Friday.</div>
+      <div class="a"><span class="mk" aria-hidden="true"></span><div>
+        <p>Here is a draft you can send as is or adjust:</p>
+        <pre>Hi Priya,
+
+Thanks for the update on the shipment. A move to the 14th affects our
+launch, so please send a revised delivery plan by Friday, including the
+cause of the delay and any partial-shipment options.
+
+Regards,
+Anand</pre>
+        <p>It keeps the tone firm without blame and asks for one concrete thing: a plan by a date.</p>
+        <div class="foot"><span>412 tokens</span><span>3.1 s</span><span>Copy</span></div>
+      </div></div>
+      <div class="u">Make it a bit warmer.</div>
+      <div class="a"><span class="mk" aria-hidden="true"></span><div>
+        <p>Hi Priya, thanks for letting us know early — that really helps. Since the 14th affects</p>
+        <span class="streaming" role="status"><i aria-hidden="true"></i>Writing…</span>
+      </div></div>
+    </div></div>
+    <div class="dock"><div class="composer">
+      <textarea aria-label="Message" placeholder="Message MAYA"></textarea>
+      <div class="crow"><span class="hint"><span class="tag">Planned</span>&nbsp; voice and tasks</span><button class="send">Stop</button></div>
+    </div></div>
+  </section>
+</div>
+
+<h2 class="section">Landing and account screens</h2>
+<div class="grid2">
+  <div class="panel hero">
+    <div class="brand" style="padding:0 0 var(--s8)"><i></i>MAYA</div>
+    <h3>A digital employee that asks before it acts.</h3>
+    <p>Today MAYA holds text conversations on your own account. Tasks, approvals and voice are being built in that order, and each appears here only when it works.</p>
+    <div class="status">
+      <span class="k">01</span><span>Accounts and secure sign-in</span><span class="ok">Available</span>
+      <span class="k">02</span><span>Text chat with history</span><span class="ok">Available</span>
+      <span class="k">03</span><span class="v">Agent tasks with approvals</span><span class="pl">Planned</span>
+      <span class="k">04</span><span class="v">Voice workspace</span><span class="pl">Planned</span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="meta" style="margin-bottom:var(--s2)">STEP 2 OF 2</div>
+    <h3 style="font-size:var(--t-title);margin:0 0 var(--s2)">Check your email</h3>
+    <p style="color:var(--muted);margin:0 0 var(--s6);font-size:var(--t-small)">We sent a 6-digit code to a••••@example.com. It expires in 10 minutes.</p>
+    <div class="field">Code<div class="otp"><input aria-label="Digit 1" value="4"><input aria-label="Digit 2" value="8"><input aria-label="Digit 3" value="1"><input aria-label="Digit 4"><input aria-label="Digit 5"><input aria-label="Digit 6"></div></div>
+    <div class="field">Password<input type="password" value="password"></div>
+    <button class="send" style="width:100%;min-height:2.75rem">Verify and continue</button>
+    <p class="hint" style="margin-top:var(--s4)">Resend code in 0:42</p>
+  </div>
+</div>
+
+<h2 class="section">Tokens</h2>
+<div class="sw">
+  <div style="--c:var(--bg)">bg</div><div style="--c:var(--surface)">surface</div><div style="--c:var(--raised)">raised</div><div style="--c:var(--border-strong)">border-strong</div>
+  <div style="--c:var(--text)">text</div><div style="--c:var(--muted)">muted</div><div style="--c:var(--accent)">accent</div><div style="--c:var(--danger)">danger</div><div style="--c:var(--warn)">warning</div>
+</div>
+<script>
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.t; if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll('.seg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+}));
+</script>
+</body>
+</html>

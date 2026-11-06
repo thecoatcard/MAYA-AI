@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import {
-  ApiConfigurationError,
   ApiError,
   CHAT_MAX_MESSAGE_CHARS,
   NetworkError,
@@ -10,6 +9,7 @@ import {
   validateChatContent,
   type ChatContentProblem,
   type ChatEvent,
+  type StoredMessage,
   type ChatUsage,
   type StreamChatMessageParams,
 } from "../lib/api-client";
@@ -104,6 +104,8 @@ export interface UseChatStreamResult {
   readonly messages: readonly ChatMessage[];
   readonly status: ChatStatus;
   readonly sessionId: string | null;
+  /** Replace the current thread with an already loaded server conversation. */
+  openSession: (sessionId: string, messages: readonly StoredMessage[]) => void;
   readonly error: ChatError | null;
   /** Set while waiting to retry automatically. */
   readonly retrying: ChatRetryInfo | null;
@@ -176,8 +178,10 @@ const ERROR_TEXT: Record<string, string> = {
   request_in_progress:
     "This message is still being processed on the server. Wait a moment, then retry.",
   rate_limited: "You have reached the message rate limit.",
-  not_authenticated: "You are not signed in. Sign-in is not built yet.",
-  invalid_token: "Your sign-in is no longer valid. Sign-in is not built yet.",
+  concurrent_stream_limit:
+    "Too many replies are already running for this account. Wait a moment, then retry.",
+  not_authenticated: "You are not signed in. Sign in to continue.",
+  invalid_token: "Your sign-in is no longer valid. Sign in again to continue.",
   session_not_found:
     "This conversation could not be found. Start a new conversation.",
   validation_error:
@@ -190,11 +194,11 @@ const ERROR_TEXT: Record<string, string> = {
   chat_unavailable: "Chat is temporarily unavailable. Retry in a moment.",
   content_blocked: "The model declined to answer this message.",
   stream_interrupted: "The reply was interrupted. What arrived is kept above.",
+  reply_deadline_exceeded:
+    "The model took too long to start answering. Ask again to send the message as a new request.",
   internal_error: "Something went wrong while writing the reply.",
   unexpected_response: "The server sent a response this page cannot read.",
   stream_protocol_error: "The server sent a reply this page cannot read.",
-  configuration_error:
-    "The chat server address is not set up safely. It must use https, or be a local address.",
   empty: "Type a message first.",
   too_long: "This message is longer than the limit.",
   invalid_characters: "This message contains characters that cannot be sent.",
@@ -246,13 +250,6 @@ function classify(error: unknown): Failure {
       unconfirmed: true,
     };
   }
-  if (error instanceof ApiConfigurationError) {
-    return {
-      ...NOT_RETRYABLE,
-      code: "configuration_error",
-      retryAfterSeconds: null,
-    };
-  }
   if (error instanceof ApiError) {
     if (error.status === 409 && error.code === "request_in_progress") {
       return {
@@ -266,7 +263,10 @@ function classify(error: unknown): Failure {
     if (error.status === 429) {
       return {
         ...NOT_RETRYABLE,
-        code: "rate_limited",
+        code:
+          error.code === "concurrent_stream_limit"
+            ? "concurrent_stream_limit"
+            : "rate_limited",
         retryable: true,
         retryAfterSeconds: error.retryAfterSeconds,
       };
@@ -362,6 +362,7 @@ type Action =
   | { type: "stopped"; userKey: string; assistantKey: string }
   | { type: "rejected"; error: ChatError }
   | { type: "dismissed"; removeUserKey: string | null }
+  | { type: "history_loaded"; sessionId: string; messages: ChatMessage[] }
   | { type: "reset" };
 
 function patch(
@@ -536,6 +537,14 @@ function reducer(state: State, action: Action): State {
           action.removeUserKey === null
             ? state.messages
             : state.messages.filter((m) => m.key !== action.removeUserKey),
+      };
+    case "history_loaded":
+      return {
+        messages: action.messages,
+        status: "idle",
+        sessionId: action.sessionId,
+        error: null,
+        retrying: null,
       };
     case "reset":
       return initialState;
@@ -965,10 +974,35 @@ export function useChatStream(
     dispatch({ type: "reset" });
   }, []);
 
+  const openSession = useCallback(
+    (sessionId: string, messages: readonly StoredMessage[]): void => {
+      activeRef.current?.cancel();
+      activeRef.current?.controller.abort();
+      activeRef.current = null;
+      turnRef.current = null;
+      sessionIdRef.current = sessionId;
+      dispatch({
+        type: "history_loaded",
+        sessionId,
+        messages: messages.map((message) => ({
+          key: `history-${message.id}`,
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          state: message.role === "assistant" ? "complete" : "sent",
+          finishReason: message.finish_reason ?? null,
+          usage: null,
+        })),
+      });
+    },
+    [],
+  );
+
   return {
     messages: state.messages,
     status: state.status,
     sessionId: state.sessionId,
+    openSession,
     error: state.error,
     retrying: state.retrying,
     isBusy: state.status === "sending" || state.status === "streaming",

@@ -322,7 +322,14 @@ def test_other_finish_reasons_are_rejected(reason: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "code", ["content_blocked", "stream_interrupted", "model_unavailable", "internal_error"]
+    "code",
+    [
+        "content_blocked",
+        "reply_deadline_exceeded",
+        "stream_interrupted",
+        "model_unavailable",
+        "internal_error",
+    ],
 )
 def test_the_documented_error_codes_are_accepted(code: str) -> None:
     assert ErrorEvent.model_validate({"code": code, "retryable": True}).code == code

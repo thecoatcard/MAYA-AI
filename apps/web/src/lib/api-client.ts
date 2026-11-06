@@ -1,88 +1,49 @@
 /**
  * Typed client for the chat API (see docs/api/CHAT.md and ADR-0008).
  *
- * The base URL comes from NEXT_PUBLIC_API_BASE_URL and defaults to the local
- * API. Browser-to-API connectivity (CORS or a same-origin proxy) is a separate,
- * undecided deployment question; this client only needs a reachable base URL.
- * A plain `http://` base URL is refused unless it is a loopback address, so the
- * access token is never sent in clear text over a network.
+ * Requests use the same-origin Next.js proxy, whose upstream is configured on
+ * the server with MAYA_API_PROXY_TARGET. The access token is never sent to an
+ * API origin chosen by browser-visible configuration.
  *
  * Nothing here logs request or response content, and the access token is only
  * ever placed in the Authorization header.
  */
 
-import { getAccessToken } from "./auth-session";
+import { getAccessToken, refreshSession, setAccessToken } from "./auth-session";
 import { readSseFrames, SseBufferOverflowError, type SseFrame } from "./sse";
 
-export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+export const DEFAULT_API_BASE_URL = "";
 
 /**
- * Provisional input limit shown in the UI (MAYA_CHAT_MAX_MESSAGE_CHARS on the
- * server). The server is the authority; the owner has not approved the value.
+ * Owner-approved input limit shown in the UI (MAYA_CHAT_MAX_MESSAGE_CHARS on
+ * the server). The server remains the authority.
  */
 export const CHAT_MAX_MESSAGE_CHARS = 8000;
 
 const CHAT_PATH = "/api/v1/chat";
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
-/** The configured API address cannot be used safely (nothing was sent). */
-export class ApiConfigurationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ApiConfigurationError";
-  }
-}
-
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
-
-/**
- * The API origin. A base URL that starts with `http://` is only accepted for a
- * loopback host (127.0.0.1, localhost, ::1): the access token travels in a header
- * on every request, so it must never cross a network in clear text. A same-origin
- * path such as `/api-proxy` and any `https://` URL are accepted. Throws
- * `ApiConfigurationError` before anything is sent.
- */
 export function getApiBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
-  const base =
-    configured !== undefined && configured.trim() !== ""
-      ? configured.trim()
-      : DEFAULT_API_BASE_URL;
-  let end = base.length;
-  while (end > 0 && base.charCodeAt(end - 1) === 47 /* "/" */) {
-    end -= 1;
-  }
-  const trimmed = base.slice(0, end);
-  if (/^http:/i.test(trimmed)) {
-    let hostname = "";
-    try {
-      hostname = new URL(trimmed).hostname.replace(/^\[|\]$/g, "");
-    } catch {
-      hostname = "";
-    }
-    if (!LOOPBACK_HOSTS.has(hostname.toLowerCase())) {
-      throw new ApiConfigurationError(
-        "The API address must use https, or be a local address (127.0.0.1, localhost or ::1).",
-      );
-    }
-  }
-  return trimmed;
+  return DEFAULT_API_BASE_URL;
 }
 
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
-/** Error codes documented in docs/api/CHAT.md, plus two client-side ones. */
+/** API error codes exposed by the chat and authentication endpoints. */
 export type KnownApiErrorCode =
   | "idempotency_key_required"
   | "not_authenticated"
   | "invalid_token"
+  | "invalid_credentials"
+  | "email_not_verified"
   | "session_not_found"
   | "request_in_progress"
   | "validation_error"
   | "idempotency_key_reused"
   | "rate_limited"
+  | "concurrent_stream_limit"
   | "model_unavailable"
   | "chat_unavailable"
   | "unexpected_response"
@@ -115,7 +76,7 @@ export class ApiError extends Error {
   }
 }
 
-/** The request never produced a usable response (offline, DNS, reset, CORS). */
+/** The request never produced a usable response (offline, DNS, reset or proxy failure). */
 export class NetworkError extends Error {
   constructor(cause?: unknown) {
     super("The network request failed.");
@@ -175,7 +136,9 @@ function isCodeLike(value: unknown): value is string {
   return true;
 }
 
-async function errorFromResponse(response: Response): Promise<ApiError> {
+export async function apiErrorFromResponse(
+  response: Response,
+): Promise<ApiError> {
   let code = "unknown_error";
   let fields: string[] = [];
   try {
@@ -421,7 +384,23 @@ async function send(
 ): Promise<Response> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   try {
-    return await fetchImpl(url, init);
+    let response = await fetchImpl(url, init);
+    if (
+      response.status === 401 &&
+      url.startsWith(`${getApiBaseUrl()}${CHAT_PATH}`) &&
+      options.accessToken === undefined
+    ) {
+      const refreshed = await refreshSession();
+      if (refreshed !== null) {
+        setAccessToken(refreshed.accessToken);
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${refreshed.accessToken}`);
+        response = await fetchImpl(url, { ...init, headers });
+      } else {
+        setAccessToken(null);
+      }
+    }
+    return response;
   } catch (error) {
     if (isAbortError(error)) {
       throw error;
@@ -485,7 +464,7 @@ export async function streamChatMessage(
     params,
   );
   if (!response.ok) {
-    throw await errorFromResponse(response);
+    throw await apiErrorFromResponse(response);
   }
   const contentType = (
     response.headers.get("Content-Type") ?? ""
@@ -551,7 +530,7 @@ async function getJson(path: string, options: ListOptions): Promise<unknown> {
     options,
   );
   if (!response.ok) {
-    throw await errorFromResponse(response);
+    throw await apiErrorFromResponse(response);
   }
   try {
     return await response.json();

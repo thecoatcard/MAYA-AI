@@ -42,7 +42,13 @@ _RECORD_VERSION: Final = 1
 _CLAIM_ATTEMPTS: Final = 3
 _HASH_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 _FAILURE_CODES: Final = frozenset(
-    {"content_blocked", "stream_interrupted", "model_unavailable", "internal_error"}
+    {
+        "content_blocked",
+        "reply_deadline_exceeded",
+        "stream_interrupted",
+        "model_unavailable",
+        "internal_error",
+    }
 )
 
 State = Literal["in_progress", "completed", "interrupted", "failed"]
