@@ -72,12 +72,17 @@ class TaskEventPublisher:
 
     def __init__(
         self,
-        redis_client: Redis,
+        redis_client: Redis | None = None,
         *,
         channel_prefix: str = DEFAULT_EVENT_CHANNEL_PREFIX,
     ) -> None:
         self._redis = redis_client
         self._channel_prefix = channel_prefix
+
+    @property
+    def redis_client(self) -> Redis | None:
+        """Underlying Redis client instance."""
+        return self._redis
 
     def get_channel(self, workspace_id: str | UUID) -> str:
         """Resolve the publishing channel for a given workspace."""
@@ -90,6 +95,9 @@ class TaskEventPublisher:
             The number of clients that received the message.
         """
         channel = self.get_channel(event.workspace_id)
+        if self._redis is None:
+            logger.debug("no_redis_client_for_publishing channel=%s", channel)
+            return 0
         message = event.model_dump_json()
         logger.debug("publishing_task_event channel=%s event_type=%s", channel, event.event_type)
         return await self._redis.publish(channel, message)

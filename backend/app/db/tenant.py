@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 logger = logging.getLogger("maya")
 
@@ -51,6 +51,20 @@ async def tenant_transaction(
         if user_id is not None:
             await connection.execute(_SET_USER, {"user_id": str(user_id)})
         yield connection
+
+
+@asynccontextmanager
+async def tenant_session(
+    engine: AsyncEngine,
+    workspace_id: UUID | None,
+    user_id: UUID | None = None,
+) -> AsyncIterator[AsyncSession]:
+    """An AsyncSession executing within tenant transaction context for row-level security."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    async with tenant_transaction(engine, workspace_id, user_id) as connection:
+        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+            yield session
 
 
 async def verify_runtime_role(engine: AsyncEngine) -> None:

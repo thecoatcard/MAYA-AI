@@ -133,6 +133,11 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         ("/api/v1/chat/sessions", "GET"),
         ("/api/v1/chat/sessions/{session_id}", "DELETE"),
         ("/api/v1/chat/sessions/{session_id}/messages", "GET"),
+        ("/api/v1/tasks", "POST"),
+        ("/api/v1/tasks", "GET"),
+        ("/api/v1/tasks/{task_id}", "GET"),
+        ("/api/v1/tasks/{task_id}/abort", "POST"),
+        ("/api/v1/tasks/{task_id}/events", "GET"),
     }
 
 
