@@ -681,6 +681,7 @@ def names(frames: list[Frame]) -> list[str]:
 
 
 def reply_text(frames: list[Frame]) -> str:
+    # pyrefly: ignore[no-any-return-implicit]
     return "".join(f.data["text"] for f in frames if f.event == "delta")
 
 
@@ -2584,14 +2585,23 @@ def test_an_idempotency_record_survives_a_round_trip(record: IdempotencyRecord) 
 @pytest.mark.parametrize(
     "mutate",
     [
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(v=2),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(state="done"),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(hash="not-a-sha256"),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(hash=SOME_HASH.upper()),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(session_id="not-a-uuid"),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(user_message_id=None),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(error_code="a provider message"),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.update(finish_reason=7),
+        # pyrefly: ignore[implicit-any-lambda]
         lambda d: d.pop("state"),
     ],
 )

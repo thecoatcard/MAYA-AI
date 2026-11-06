@@ -15,19 +15,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_EVENT_CHANNEL_PREFIX = "maya:events"
+
 
 class TaskEventType(StrEnum):
     """Supported task lifecycle transition event types."""
 
-    PLANNING_STARTED = "planning_started"
+    TASK_PLAN_CREATED = "task_plan_created"
     SUBTASK_DISPATCHED = "subtask_dispatched"
-    AWAITING_APPROVAL = "awaiting_approval"
+    SUBTASK_STATUS_CHANGED = "subtask_status_changed"
+    TASK_PAUSED_APPROVAL = "task_paused_approval"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
 
-    # Aliases
-    TASK_PLAN_CREATED = "planning_started"
-    SUBTASK_STATUS_CHANGED = "subtask_dispatched"
+    # Backward-compatible aliases
+    PLANNING_STARTED = "planning_started"
+    AWAITING_APPROVAL = "awaiting_approval"
 
 
 class TaskEvent(BaseModel):
@@ -36,6 +39,7 @@ class TaskEvent(BaseModel):
     event_type: TaskEventType
     session_id: str
     workspace_id: str
+    user_id: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -47,16 +51,37 @@ class TaskEvent(BaseModel):
         return value.astimezone(UTC)
 
 
-def get_task_channel(workspace_id: str | UUID) -> str:
+def get_event_channel(
+    workspace_id: str | UUID,
+    prefix: str = DEFAULT_EVENT_CHANNEL_PREFIX,
+) -> str:
+    """Derive Redis Pub/Sub channel for workspace events."""
+    return f"{prefix}:{workspace_id}"
+
+
+def get_task_channel(
+    workspace_id: str | UUID,
+    prefix: str = DEFAULT_EVENT_CHANNEL_PREFIX,
+) -> str:
     """Derive Redis Pub/Sub channel for workspace task events."""
-    return f"maya:tasks:{workspace_id}"
+    return get_event_channel(workspace_id, prefix=prefix)
 
 
 class TaskEventPublisher:
     """Publishes validated task lifecycle events to tenant-isolated Redis Pub/Sub channels."""
 
-    def __init__(self, redis_client: Redis) -> None:
+    def __init__(
+        self,
+        redis_client: Redis,
+        *,
+        channel_prefix: str = DEFAULT_EVENT_CHANNEL_PREFIX,
+    ) -> None:
         self._redis = redis_client
+        self._channel_prefix = channel_prefix
+
+    def get_channel(self, workspace_id: str | UUID) -> str:
+        """Resolve the publishing channel for a given workspace."""
+        return f"{self._channel_prefix}:{workspace_id}"
 
     async def publish(self, event: TaskEvent) -> int:
         """Publish a TaskEvent as JSON to the workspace channel.
@@ -64,21 +89,41 @@ class TaskEventPublisher:
         Returns:
             The number of clients that received the message.
         """
-        channel = get_task_channel(event.workspace_id)
+        channel = self.get_channel(event.workspace_id)
         message = event.model_dump_json()
         logger.debug("publishing_task_event channel=%s event_type=%s", channel, event.event_type)
         return await self._redis.publish(channel, message)
+
+    async def publish_task_plan_created(
+        self,
+        session_id: str,
+        workspace_id: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
+    ) -> int:
+        event = TaskEvent(
+            event_type=TaskEventType.TASK_PLAN_CREATED,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            payload=payload or {},
+        )
+        return await self.publish(event)
 
     async def publish_planning_started(
         self,
         session_id: str,
         workspace_id: str,
         payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> int:
         event = TaskEvent(
             event_type=TaskEventType.PLANNING_STARTED,
             session_id=session_id,
             workspace_id=workspace_id,
+            user_id=user_id,
             payload=payload or {},
         )
         return await self.publish(event)
@@ -90,12 +135,35 @@ class TaskEventPublisher:
         subtask_id: str,
         assigned_agent: str,
         payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> int:
         data = {**(payload or {}), "subtask_id": subtask_id, "assigned_agent": assigned_agent}
         event = TaskEvent(
             event_type=TaskEventType.SUBTASK_DISPATCHED,
             session_id=session_id,
             workspace_id=workspace_id,
+            user_id=user_id,
+            payload=data,
+        )
+        return await self.publish(event)
+
+    async def publish_subtask_status_changed(
+        self,
+        session_id: str,
+        workspace_id: str,
+        subtask_id: str,
+        status: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
+    ) -> int:
+        data = {**(payload or {}), "subtask_id": subtask_id, "status": status}
+        event = TaskEvent(
+            event_type=TaskEventType.SUBTASK_STATUS_CHANGED,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
             payload=data,
         )
         return await self.publish(event)
@@ -106,12 +174,34 @@ class TaskEventPublisher:
         workspace_id: str,
         subtask_id: str,
         payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> int:
         data = {**(payload or {}), "subtask_id": subtask_id}
         event = TaskEvent(
             event_type=TaskEventType.AWAITING_APPROVAL,
             session_id=session_id,
             workspace_id=workspace_id,
+            user_id=user_id,
+            payload=data,
+        )
+        return await self.publish(event)
+
+    async def publish_task_paused_approval(
+        self,
+        session_id: str,
+        workspace_id: str,
+        subtask_id: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
+    ) -> int:
+        data = {**(payload or {}), "subtask_id": subtask_id}
+        event = TaskEvent(
+            event_type=TaskEventType.TASK_PAUSED_APPROVAL,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
             payload=data,
         )
         return await self.publish(event)
@@ -121,11 +211,14 @@ class TaskEventPublisher:
         session_id: str,
         workspace_id: str,
         payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> int:
         event = TaskEvent(
             event_type=TaskEventType.TASK_COMPLETED,
             session_id=session_id,
             workspace_id=workspace_id,
+            user_id=user_id,
             payload=payload or {},
         )
         return await self.publish(event)
@@ -136,12 +229,15 @@ class TaskEventPublisher:
         workspace_id: str,
         error_message: str,
         payload: dict[str, Any] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> int:
         data = {**(payload or {}), "error": error_message}
         event = TaskEvent(
             event_type=TaskEventType.TASK_FAILED,
             session_id=session_id,
             workspace_id=workspace_id,
+            user_id=user_id,
             payload=data,
         )
         return await self.publish(event)

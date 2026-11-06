@@ -13,6 +13,7 @@ logger = logging.getLogger("maya")
 # SET LOCAL cannot take bind parameters; set_config(..., true) is the parameterized equivalent
 # and, like SET LOCAL, lasts only until the end of the current transaction.
 _SET_WORKSPACE = text("SELECT set_config('app.workspace_id', :workspace_id, true)")
+_SET_USER = text("SELECT set_config('app.user_id', :user_id, true)")
 
 _RUNTIME_ROLE_CHECK = text(
     """
@@ -33,9 +34,11 @@ class UnsafeDatabaseRole(RuntimeError):
 
 @asynccontextmanager
 async def tenant_transaction(
-    engine: AsyncEngine, workspace_id: UUID | None
+    engine: AsyncEngine,
+    workspace_id: UUID | None,
+    user_id: UUID | None = None,
 ) -> AsyncIterator[AsyncConnection]:
-    """One transaction whose queries see only ``workspace_id``'s rows.
+    """One transaction whose queries see only ``workspace_id``'s (and ``user_id``'s) rows.
 
     The context is transaction-local, so a pooled connection never carries it to the next
     request. ``None`` opens a transaction with no context: tenant tables return no rows, and
@@ -45,6 +48,8 @@ async def tenant_transaction(
     async with engine.connect() as connection, connection.begin():
         if workspace_id is not None:
             await connection.execute(_SET_WORKSPACE, {"workspace_id": str(workspace_id)})
+        if user_id is not None:
+            await connection.execute(_SET_USER, {"user_id": str(user_id)})
         yield connection
 
 

@@ -114,7 +114,9 @@ RECENT_MESSAGES = text(
     "AND s.user_id = :user_id AND m.sender IN ('user', 'orchestrator') "
     "ORDER BY m.created_at DESC, m.id DESC LIMIT :fetch"
 )
-SET_CHAT_USER_CONTEXT = text("SELECT set_config('app.user_id', :user_id, true)")
+SET_CHAT_USER_CONTEXT = text(
+    "SELECT set_config('app.user_id', :user_id, true) WHERE :workspace_id IS NOT NULL"
+)
 GET_IDEMPOTENCY = text(
     "SELECT state, request_hash, session_id, user_message_id, assistant_message_id, "
     "finish_reason, error_code FROM chat_idempotency "
@@ -351,7 +353,10 @@ class ChatRepository:
 
     async def get_idempotency(self, key_digest: str) -> ChatIdempotencyRecord | None:
         """Return this user's durable record for a keyed digest, if any."""
-        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        await self._connection.execute(
+            SET_CHAT_USER_CONTEXT,
+            {"user_id": str(self._user_id), "workspace_id": str(self._workspace_id)},
+        )
         row = (
             await self._connection.execute(
                 GET_IDEMPOTENCY,
@@ -368,7 +373,10 @@ class ChatRepository:
         self, key_digest: str, record: ChatIdempotencyRecord
     ) -> ChatIdempotencyRecord | None:
         """Insert one permanent claim, returning the competing record if it already exists."""
-        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        await self._connection.execute(
+            SET_CHAT_USER_CONTEXT,
+            {"user_id": str(self._user_id), "workspace_id": str(self._workspace_id)},
+        )
         parameters = {
             "workspace_id": self._workspace_id,
             "user_id": self._user_id,
@@ -388,7 +396,10 @@ class ChatRepository:
 
     async def save_idempotency(self, key_digest: str, record: ChatIdempotencyRecord) -> bool:
         """CAS the owned in-progress claim; terminal states cannot be overwritten."""
-        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        await self._connection.execute(
+            SET_CHAT_USER_CONTEXT,
+            {"user_id": str(self._user_id), "workspace_id": str(self._workspace_id)},
+        )
         row = (
             await self._connection.execute(
                 SAVE_IDEMPOTENCY,

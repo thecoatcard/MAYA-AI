@@ -25,8 +25,8 @@ exploitation. Prototype-only risks are explicitly identified.
 | 5 | 🟠 HIGH | `backend/app/gateway/cost_tracker.py` | 76–124, 197–221 | Separate budget checks and accounting allow concurrent billable calls beyond the configured cap. | 10/10 |
 | 6 | 🟠 HIGH | `backend/app/gateway/cost_tracker.py` | 104–117, 197–221 | Unknown-price calls increase an unpriced counter but can continue without increasing the enforced monetary total. | 10/10 |
 | 7 | 🟠 HIGH | `backend/app/agents/checkpointer.py` | 67–76 | The unwired prototype retrieves checkpoints using a caller-supplied thread ID without an owner check. | 9/10 |
-| 8 | 🟠 HIGH | `backend/app/agents/orchestrator.py` | 173–175 | The unwired prototype can route an already-in-progress approval-required subtask without enforcing a human decision. | 9/10 |
-| 9 | 🟡 MEDIUM | `backend/app/services/projection_service.py` | 18–27 | The unwired projection upsert scopes by workspace but does not establish user ownership. | 8/10 |
+| 8 | 🟠 HIGH | `backend/app/agents/orchestrator.py` | 173–175 | RESOLVED: The unwired prototype could route an already-in-progress approval-required subtask without enforcing a human decision. Resolved by trapping in-progress, pending and runnable approval-required tasks to `wait_for_approval`, demoting to `awaiting_approval`, requesting human approval, and pausing the graph. | 10/10 |
+| 9 | 🟡 MEDIUM | `backend/app/services/projection_service.py` | 18–27 | RESOLVED: Every task and subtask upsert establishes both `workspace_id` and `user_id` ownership in SQL parameters, ON CONFLICT user matching clauses, and subtask parent-task existence filters, enforcing tenant isolation matching migrations 0005 and 0006. | 10/10 |
 
 ## Architectural gaps
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import deque
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
@@ -10,10 +11,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.agents.state import AgentRole, SubTask
+from app.agents.state import (
+    APPROVAL_REQUIRED_ROLES,
+    AgentRole,
+    SubTask,
+)
 
 if TYPE_CHECKING:
     from app.gateway.model_gateway import ModelGateway
+
+logger = logging.getLogger(__name__)
 
 MAX_SUBTASKS_PER_PLAN = 20
 MAX_DEPENDENCIES_PER_SUBTASK = MAX_SUBTASKS_PER_PLAN - 1
@@ -56,6 +63,7 @@ class SubTaskPlanItem(BaseModel):
         json_schema_extra={"uniqueItems": True},
     )
     input_data: dict[str, Any] = Field(default_factory=dict)
+    requires_approval: bool = False
 
     @field_validator("dependencies")
     @classmethod
@@ -239,14 +247,18 @@ class DAGPlanner:
         prompt = f"Decompose this instruction into a validated subtask DAG:\n\n{instruction}"
         contents: list[Any] = [prompt]
 
-        response = await gw.generate_structured(
-            alias="orchestrator",
-            contents=contents,
-            response_schema=PlanDecompositionResponse,
-            system_instruction=SYSTEM_PLANNING_PROMPT,
-            workspace_id=workspace_id,
-            task_id=task_id,
-        )
+        try:
+            response = await gw.generate_structured(
+                alias="orchestrator",
+                contents=contents,
+                response_schema=PlanDecompositionResponse,
+                system_instruction=SYSTEM_PLANNING_PROMPT,
+                workspace_id=workspace_id,
+                task_id=task_id,
+            )
+        except Exception as err:
+            logger.exception("dag_planner_model_call_failed")
+            raise PlannerError(f"Model planning call failed: {err}") from err
 
         subtasks = [
             SubTask(
@@ -255,6 +267,9 @@ class DAGPlanner:
                 description=item.description,
                 dependencies=item.dependencies,
                 input_data=item.input_data,
+                requires_approval=item.requires_approval
+                or item.assigned_agent in APPROVAL_REQUIRED_ROLES
+                or bool(item.input_data.get("requires_approval")),
             )
             for item in response.subtasks
         ]
@@ -275,14 +290,19 @@ class DAGPlanner:
                 f"{json.dumps(PlanDecompositionResponse.model_json_schema())}"
             )
             repair_contents = [*contents, repair_prompt]
-            repair_response = await gw.generate_structured(
-                alias="orchestrator",
-                contents=repair_contents,
-                response_schema=PlanDecompositionResponse,
-                system_instruction=SYSTEM_PLANNING_PROMPT,
-                workspace_id=workspace_id,
-                task_id=task_id,
-            )
+            try:
+                repair_response = await gw.generate_structured(
+                    alias="orchestrator",
+                    contents=repair_contents,
+                    response_schema=PlanDecompositionResponse,
+                    system_instruction=SYSTEM_PLANNING_PROMPT,
+                    workspace_id=workspace_id,
+                    task_id=task_id,
+                )
+            except Exception as err:
+                logger.exception("dag_planner_repair_model_call_failed")
+                raise PlannerError(f"Model repair call failed: {err}") from err
+
             repaired_subtasks = [
                 SubTask(
                     id=item.id,
@@ -290,8 +310,33 @@ class DAGPlanner:
                     description=item.description,
                     dependencies=item.dependencies,
                     input_data=item.input_data,
+                    requires_approval=item.requires_approval
+                    or item.assigned_agent in APPROVAL_REQUIRED_ROLES
+                    or bool(item.input_data.get("requires_approval")),
                 )
                 for item in repair_response.subtasks
             ]
             sorted_subtasks = validate_dag(repaired_subtasks)
             return repair_response.intent, sorted_subtasks
+
+
+async def generate_plan_dag(
+    instruction: str,
+    gateway: ModelGateway | None = None,
+    *,
+    planner: DAGPlanner | None = None,
+    workspace_id: UUID | None = None,
+    task_id: UUID | None = None,
+) -> tuple[str, list[SubTask]]:
+    """Generate a validated subtask DAG using ModelGateway 'orchestrator' alias.
+
+    Decomposes instructions into a topological DAG using Kahn's algorithm, performs exactly one
+    self-repair turn if a circular dependency is detected, and cleanly handles model failures.
+    """
+    p = planner or DAGPlanner(gateway=gateway)
+    return await p.plan(
+        instruction,
+        gateway=gateway,
+        workspace_id=workspace_id,
+        task_id=task_id,
+    )

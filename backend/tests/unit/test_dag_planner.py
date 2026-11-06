@@ -12,9 +12,11 @@ from app.agents.planner import (
     MaxSubtasksExceededError,
     PlanCycleError,
     PlanDecompositionResponse,
+    PlannerError,
     PlanValidationError,
     SubTaskPlanItem,
     build_dependency_graph,
+    generate_plan_dag,
     topological_sort,
     validate_dag,
 )
@@ -394,3 +396,77 @@ async def test_dag_planner_self_repair_on_cycle() -> None:
     assert plan[0].id == "a"
     assert plan[1].id == "b"
     assert mock_gateway.generate_structured.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_dag_success_and_alias() -> None:
+    mock_gateway = AsyncMock()
+    mock_gateway.generate_structured.return_value = PlanDecompositionResponse(
+        intent="Orchestrate workflow",
+        subtasks=[
+            SubTaskPlanItem(id="t1", assigned_agent="research", description="Find"),
+            SubTaskPlanItem(
+                id="t2", assigned_agent="email", description="Send", dependencies=["t1"]
+            ),
+        ],
+    )
+
+    intent, subtasks = await generate_plan_dag("Run instruction", gateway=mock_gateway)
+
+    assert intent == "Orchestrate workflow"
+    assert len(subtasks) == 2
+    assert subtasks[0].id == "t1"
+    assert subtasks[1].id == "t2"
+    assert subtasks[1].requires_approval is True  # email role propagates requires_approval
+
+    # Verify alias used is 'orchestrator'
+    mock_gateway.generate_structured.assert_called_once()
+    assert mock_gateway.generate_structured.call_args.kwargs["alias"] == "orchestrator"
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_dag_model_failure_raises_planner_error() -> None:
+    mock_gateway = AsyncMock()
+    mock_gateway.generate_structured.side_effect = RuntimeError("Gemini API connection error")
+
+    with pytest.raises(PlannerError, match="Model planning call failed"):
+        await generate_plan_dag("Run instruction", gateway=mock_gateway)
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_dag_repair_failure_raises_planner_error() -> None:
+    cyclic = PlanDecompositionResponse(
+        intent="Synthetic",
+        subtasks=[
+            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
+        ],
+    )
+    mock_gateway = AsyncMock()
+    mock_gateway.generate_structured.side_effect = [cyclic, RuntimeError("Repair turn timeout")]
+
+    with pytest.raises(PlannerError, match="Model repair call failed"):
+        await generate_plan_dag("Run instruction", gateway=mock_gateway)
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_dag_persistent_cycle_fails_with_cycle_error() -> None:
+    cyclic = PlanDecompositionResponse(
+        intent="Synthetic",
+        subtasks=[
+            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
+        ],
+    )
+    mock_gateway = AsyncMock()
+    # Repair turn also returns a cycle
+    mock_gateway.generate_structured.side_effect = [cyclic, cyclic]
+
+    with pytest.raises(PlanCycleError, match="Circular dependency"):
+        await generate_plan_dag("Run instruction", gateway=mock_gateway)
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_dag_requires_gateway() -> None:
+    with pytest.raises(PlannerError, match="ModelGateway is required"):
+        await generate_plan_dag("Run instruction")

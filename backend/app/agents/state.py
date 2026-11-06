@@ -12,6 +12,8 @@ SubTaskStatus = Literal["pending", "in_progress", "awaiting_approval", "complete
 PlanStatus = Literal["planning", "executing", "paused", "completed", "failed"]
 InteractionModality = Literal["voice", "text"]
 
+APPROVAL_REQUIRED_ROLES: frozenset[str] = frozenset({"email"})
+
 
 class SubTask(BaseModel):
     """Discrete executable unit in a DAG execution plan."""
@@ -26,6 +28,16 @@ class SubTask(BaseModel):
     verification_proof: dict[str, Any] | None = None
     error_message: str | None = None
     retry_count: int = 0
+    requires_approval: bool = False
+
+
+def subtask_requires_approval(subtask: SubTask) -> bool:
+    """Check if a subtask requires human approval before or during execution."""
+    return (
+        subtask.requires_approval is True
+        or subtask.assigned_agent in APPROVAL_REQUIRED_ROLES
+        or bool(subtask.input_data.get("requires_approval"))
+    )
 
 
 class AgentExecutionState(BaseModel):

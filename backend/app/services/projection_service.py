@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from datetime import UTC, datetime
@@ -90,16 +91,28 @@ _UPSERT_TASK = text(
     """
     INSERT INTO tasks (
         id, workspace_id, session_id, user_id, idempotency_key, title,
-        instruction, dag_plan, status, tool_turns, completed_at
+        instruction, dag_plan, status, tool_turns, completed_at,
+        user_instruction, plan_status, active_plan, shared_context, execution_trace,
+        updated_at
     ) VALUES (
         :id, :workspace_id, :session_id, :user_id, :idempotency_key, :title,
-        :instruction, CAST(:dag_plan AS jsonb), :status, :tool_turns, :completed_at
+        :instruction, CAST(:dag_plan AS jsonb), :status, :tool_turns, :completed_at,
+        :user_instruction, :plan_status, CAST(:active_plan AS jsonb),
+        CAST(:shared_context AS jsonb), CAST(:execution_trace AS jsonb),
+        :updated_at
     )
     ON CONFLICT (workspace_id, id) DO UPDATE SET
         dag_plan = EXCLUDED.dag_plan,
         status = EXCLUDED.status,
         tool_turns = EXCLUDED.tool_turns,
-        completed_at = EXCLUDED.completed_at
+        completed_at = EXCLUDED.completed_at,
+        user_instruction = EXCLUDED.user_instruction,
+        plan_status = EXCLUDED.plan_status,
+        active_plan = EXCLUDED.active_plan,
+        shared_context = EXCLUDED.shared_context,
+        execution_trace = EXCLUDED.execution_trace,
+        updated_at = EXCLUDED.updated_at
+    WHERE tasks.user_id = EXCLUDED.user_id
     RETURNING id
     """
 )
@@ -109,12 +122,18 @@ _UPSERT_SUBTASK = text(
     INSERT INTO subtasks (
         id, workspace_id, task_id, assigned_agent, description,
         dependencies, status, input_data, output_result, verification_proof,
-        error_message, retry_count, completed_at
-    ) VALUES (
+        error_message, retry_count, completed_at, updated_at
+    )
+    SELECT
         :id, :workspace_id, :task_id, :assigned_agent, :description,
         CAST(:dependencies AS jsonb), :status, CAST(:input_data AS jsonb),
         CAST(:output_result AS jsonb), CAST(:verification_proof AS jsonb),
-        :error_message, :retry_count, :completed_at
+        :error_message, :retry_count, :completed_at, :updated_at
+    WHERE EXISTS (
+        SELECT 1 FROM tasks
+        WHERE tasks.id = :task_id
+          AND tasks.workspace_id = :workspace_id
+          AND tasks.user_id = :user_id
     )
     ON CONFLICT (workspace_id, id) DO UPDATE SET
         assigned_agent = EXCLUDED.assigned_agent,
@@ -126,7 +145,14 @@ _UPSERT_SUBTASK = text(
         verification_proof = EXCLUDED.verification_proof,
         error_message = EXCLUDED.error_message,
         retry_count = EXCLUDED.retry_count,
-        completed_at = EXCLUDED.completed_at
+        completed_at = EXCLUDED.completed_at,
+        updated_at = EXCLUDED.updated_at
+    WHERE EXISTS (
+        SELECT 1 FROM tasks
+        WHERE tasks.id = EXCLUDED.task_id
+          AND tasks.workspace_id = EXCLUDED.workspace_id
+          AND tasks.user_id = :user_id
+    )
     RETURNING id
     """
 )
@@ -158,7 +184,8 @@ def resolve_subtask_uuid(task_id: UUID, subtask_id: str) -> UUID:
 class StateProjectionService:
     """Projects LangGraph AgentExecutionState into relational tasks and subtasks tables.
 
-    All mutations are idempotent upserts scoped by workspace_id to preserve tenant isolation.
+    All mutations are idempotent upserts establishing both workspace_id and user_id ownership
+    to preserve tenant and user isolation.
     """
 
     def __init__(self, engine: AsyncEngine) -> None:
@@ -175,7 +202,8 @@ class StateProjectionService:
     ) -> UUID:
         """Project current execution state into the relational database.
 
-        If connection is None, creates a tenant_transaction scoped to state.workspace_id.
+        If connection is None, creates a tenant_transaction scoped to state.workspace_id
+        and state.user_id.
         """
         workspace_id = UUID(state.workspace_id)
         session_id = UUID(state.session_id)
@@ -242,13 +270,27 @@ class StateProjectionService:
             "status": task_status,
             "tool_turns": len(state.execution_trace),
             "completed_at": completed_at,
+            "user_instruction": state.user_instruction,
+            "plan_status": state.plan_status,
+            "active_plan": _dump_projection_json([st.model_dump() for st in state.active_plan]),
+            "shared_context": _dump_projection_json(state.shared_context),
+            "execution_trace": _dump_projection_json(state.execution_trace),
+            "updated_at": now,
         }
 
         async def _execute_projection(conn: AsyncConnection) -> None:
-            # 1. Upsert tasks table row
-            await conn.execute(_UPSERT_TASK, task_params)
+            # 1. Upsert tasks table row with strict workspace and user ownership enforcement
+            task_result = await conn.execute(_UPSERT_TASK, task_params)
+            task_row = getattr(task_result, "fetchone", lambda: True)()
+            if inspect.isawaitable(task_row):
+                task_row = await task_row
+            if task_row is None:
+                raise PermissionError(
+                    f"Task {resolved_task_id} projection failed: "
+                    "ownership or tenant isolation violation"
+                )
 
-            # 2. Upsert each subtask row
+            # 2. Upsert each subtask row ensuring parent task belongs to user and workspace
             for st in state.active_plan:
                 st_uuid = resolve_subtask_uuid(resolved_task_id, st.id)
                 st_completed_at = now if st.status in ("completed", "failed") else None
@@ -268,6 +310,7 @@ class StateProjectionService:
                     "id": st_uuid,
                     "workspace_id": workspace_id,
                     "task_id": resolved_task_id,
+                    "user_id": user_id,
                     "assigned_agent": st.assigned_agent,
                     "description": st.description,
                     "dependencies": json.dumps(st.dependencies),
@@ -278,13 +321,22 @@ class StateProjectionService:
                     "error_message": st.error_message,
                     "retry_count": st.retry_count,
                     "completed_at": st_completed_at,
+                    "updated_at": now,
                 }
-                await conn.execute(_UPSERT_SUBTASK, subtask_params)
+                subtask_result = await conn.execute(_UPSERT_SUBTASK, subtask_params)
+                subtask_row = getattr(subtask_result, "fetchone", lambda: True)()
+                if inspect.isawaitable(subtask_row):
+                    subtask_row = await subtask_row
+                if subtask_row is None:
+                    raise PermissionError(
+                        f"Subtask {st_uuid} projection failed: parent task {resolved_task_id} "
+                        f"ownership or tenant isolation violation"
+                    )
 
         if connection is not None:
             await _execute_projection(connection)
         else:
-            async with tenant_transaction(self._engine, workspace_id) as conn:
+            async with tenant_transaction(self._engine, workspace_id, user_id) as conn:
                 await _execute_projection(conn)
 
         return resolved_task_id

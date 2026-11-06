@@ -43,6 +43,28 @@ async def test_context_is_set_with_a_bound_parameter_inside_the_transaction() ->
     begin.__aenter__.assert_awaited_once()
 
 
+async def test_context_is_set_with_workspace_and_user_parameters() -> None:
+    connection = AsyncMock()
+    begin = MagicMock()
+    begin.__aenter__ = AsyncMock()
+    begin.__aexit__ = AsyncMock(return_value=False)
+    connection.begin = MagicMock(return_value=begin)
+    engine = MagicMock()
+    engine.connect.return_value.__aenter__.return_value = connection
+    workspace = uuid4()
+    user = uuid4()
+    async with tenant_transaction(engine, workspace, user):
+        pass
+    assert connection.execute.call_count == 2
+    ws_stmt, ws_params = connection.execute.call_args_list[0].args
+    usr_stmt, usr_params = connection.execute.call_args_list[1].args
+    assert "set_config('app.workspace_id', :workspace_id, true)" in str(ws_stmt)
+    assert ws_params == {"workspace_id": str(workspace)}
+    assert "set_config('app.user_id', :user_id, true)" in str(usr_stmt)
+    assert usr_params == {"user_id": str(user)}
+    begin.__aenter__.assert_awaited_once()
+
+
 async def test_no_context_statement_is_issued_without_a_workspace() -> None:
     connection = AsyncMock()
     begin = MagicMock()

@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -103,6 +103,8 @@ async def test_state_projection_executes_upserts_with_parameters() -> None:
     # Check subtask 1 parameters
     sub1_params = mock_conn.execute.call_args_list[1][0][1]
     assert sub1_params["task_id"] == task_id
+    assert sub1_params["workspace_id"] == UUID(ws_id)
+    assert sub1_params["user_id"] == UUID(usr_id)
     assert sub1_params["assigned_agent"] == "research"
     assert sub1_params["status"] == "completed"
     assert json.loads(sub1_params["output_result"]) == {"found": 1}
@@ -110,6 +112,8 @@ async def test_state_projection_executes_upserts_with_parameters() -> None:
     # Check subtask 2 parameters
     sub2_params = mock_conn.execute.call_args_list[2][0][1]
     assert sub2_params["task_id"] == task_id
+    assert sub2_params["workspace_id"] == UUID(ws_id)
+    assert sub2_params["user_id"] == UUID(usr_id)
     assert sub2_params["assigned_agent"] == "document"
     assert sub2_params["status"] == "in_progress"
 
@@ -360,3 +364,80 @@ async def test_state_projection_rejects_circular_json_values_before_writes() -> 
         await StateProjectionService(AsyncMock()).project_state(state, connection=connection)
 
     connection.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_state_projection_raises_permission_error_on_task_ownership_mismatch() -> None:
+    mock_engine = AsyncMock()
+    mock_conn = AsyncMock()
+    # Simulate ON CONFLICT WHERE tasks.user_id = EXCLUDED.user_id not matching (returns no rows)
+    mock_result = MagicMock()
+    mock_result.fetchone.return_value = None
+    mock_conn.execute.return_value = mock_result
+
+    service = StateProjectionService(mock_engine)
+    state = AgentExecutionState(
+        session_id=str(uuid4()),
+        user_id=str(uuid4()),
+        workspace_id=str(uuid4()),
+        user_instruction="Analyze and report",
+        interaction_modality="text",
+    )
+
+    with pytest.raises(PermissionError, match="ownership or tenant isolation violation"):
+        await service.project_state(state, connection=mock_conn)
+
+
+@pytest.mark.asyncio
+async def test_state_projection_raises_permission_error_on_subtask_ownership_mismatch() -> None:
+    mock_engine = AsyncMock()
+    mock_conn = AsyncMock()
+
+    # Task upsert succeeds, subtask upsert returns no row (parent task ownership mismatch)
+    task_result = MagicMock()
+    task_result.fetchone.return_value = (uuid4(),)
+    subtask_result = MagicMock()
+    subtask_result.fetchone.return_value = None
+    mock_conn.execute.side_effect = [task_result, subtask_result]
+
+    service = StateProjectionService(mock_engine)
+    sub = SubTask(id="sub_1", assigned_agent="research", description="Search")
+    state = AgentExecutionState(
+        session_id=str(uuid4()),
+        user_id=str(uuid4()),
+        workspace_id=str(uuid4()),
+        user_instruction="Analyze and report",
+        interaction_modality="text",
+        active_plan=[sub],
+    )
+
+    with pytest.raises(
+        PermissionError, match="parent task .* ownership or tenant isolation violation"
+    ):
+        await service.project_state(state, connection=mock_conn)
+
+
+@pytest.mark.asyncio
+async def test_state_projection_opens_tenant_transaction_with_workspace_and_user_id() -> None:
+    mock_engine = MagicMock()
+    mock_conn = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchone.return_value = (uuid4(),)
+    mock_conn.execute.return_value = mock_result
+
+    ws_id = uuid4()
+    usr_id = uuid4()
+    state = AgentExecutionState(
+        session_id=str(uuid4()),
+        user_id=str(usr_id),
+        workspace_id=str(ws_id),
+        user_instruction="Test tenant tx",
+        interaction_modality="text",
+    )
+
+    with patch("app.services.projection_service.tenant_transaction") as mock_tenant_tx:
+        mock_tenant_tx.return_value.__aenter__.return_value = mock_conn
+        service = StateProjectionService(mock_engine)
+        await service.project_state(state)
+
+        mock_tenant_tx.assert_called_once_with(mock_engine, ws_id, usr_id)
