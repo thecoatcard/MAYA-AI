@@ -2,7 +2,7 @@
 
 A planned voice-first, multi-agent "digital employee": it takes spoken or typed instructions, plans the work, uses external tools through the Model Context Protocol, verifies results, asks a human before consequential actions, and reports back.
 
-> **Status: Phase 01 local foundation in progress.** FastAPI health probes, configuration/logging, PostgreSQL/Redis infrastructure and a Next.js web shell are implemented. Accounts, chat, models, agents and voice remain planned. See the [product plan](MAYA_AI_FINAL_PLAN.md) and [implementation status](docs/implementation/IMPLEMENTATION_STATUS.md).
+> **Status: Phases 01–04 have local implementations.** Authentication, the model gateway and text chat are present; the Phase 05 orchestration code is not yet wired into the application, and voice remains planned. Live-provider and authenticated-browser acceptance remain pending. See the [product plan](MAYA_AI_FINAL_PLAN.md) and [implementation status](docs/implementation/IMPLEMENTATION_STATUS.md).
 
 ## Quick start
 

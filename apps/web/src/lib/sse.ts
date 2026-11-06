@@ -85,7 +85,13 @@ export class SseParser {
       if (code !== CODE_LF && code !== CODE_CR) {
         continue;
       }
+      if (this.partialChars + i - lineStart > this.maxChars) {
+        throw new SseBufferOverflowError();
+      }
       this.handleLine(this.takeLine(text.slice(lineStart, i)), frames);
+      if (this.pendingChars > this.maxChars) {
+        throw new SseBufferOverflowError();
+      }
       if (code === CODE_CR) {
         if (i + 1 < length) {
           if (text.charCodeAt(i + 1) === CODE_LF) {

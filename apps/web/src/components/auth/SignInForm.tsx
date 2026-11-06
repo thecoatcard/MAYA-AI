@@ -22,9 +22,6 @@ function signInMessage(error: unknown): string {
     if (error.code === "invalid_credentials") {
       return "The username or password is incorrect.";
     }
-    if (error.code === "email_not_verified") {
-      return "Verify your email address before signing in.";
-    }
     if (error.code === "rate_limited") {
       return "Too many sign-in attempts. Wait a moment, then try again.";
     }

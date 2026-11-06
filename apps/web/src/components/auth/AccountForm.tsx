@@ -169,8 +169,6 @@ function errorText(error: unknown): string {
         return "This form is too large to submit. Shorten the details and try again.";
       case "invalid_credentials":
         return "The username or password is incorrect.";
-      case "email_not_verified":
-        return "Verify your email address before signing in.";
       case "invalid_token":
       case "not_authenticated":
         return "Your sign-in is no longer valid. Sign in again to continue.";

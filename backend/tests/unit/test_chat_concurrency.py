@@ -84,6 +84,44 @@ async def test_release_removes_only_the_owned_lease() -> None:
 
 
 @pytest.mark.asyncio
+async def test_renew_extends_only_a_live_owned_lease() -> None:
+    redis = redis_mock()
+    redis.eval.side_effect = [1, 1]
+    limiter = RedisChatStreamLimiter(redis)
+    lease = await limiter.acquire(WORKSPACE_ID, USER_ID, limit=2, lease_seconds=150)
+    assert lease is not None
+
+    assert await limiter.renew(lease, lease_seconds=300)
+
+    script, keys, key, member, ttl_ms = redis.eval.await_args.args
+    assert "ZREMRANGEBYSCORE" in script and "ZSCORE" in script and "'XX'" in script
+    assert (keys, key, member, ttl_ms) == (1, lease.key, lease.member, 300_000)
+
+
+@pytest.mark.asyncio
+async def test_renew_reports_a_lease_that_has_already_expired() -> None:
+    redis = redis_mock()
+    redis.eval.side_effect = [1, 0]
+    limiter = RedisChatStreamLimiter(redis)
+    lease = await limiter.acquire(WORKSPACE_ID, USER_ID, limit=2, lease_seconds=150)
+    assert lease is not None
+
+    assert not await limiter.renew(lease, lease_seconds=300)
+
+
+@pytest.mark.asyncio
+async def test_renew_redis_errors_fail_closed() -> None:
+    redis = redis_mock()
+    redis.eval.side_effect = [1, RedisError("unavailable")]
+    limiter = RedisChatStreamLimiter(redis)
+    lease = await limiter.acquire(WORKSPACE_ID, USER_ID, limit=2, lease_seconds=150)
+    assert lease is not None
+
+    with pytest.raises(ChatStreamLimiterUnavailable):
+        await limiter.renew(lease, lease_seconds=300)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["acquire", "release"])
 async def test_redis_errors_fail_closed(operation: str) -> None:
     redis = redis_mock()

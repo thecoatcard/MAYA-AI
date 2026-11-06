@@ -104,6 +104,24 @@ async def test_lifespan_hands_the_gateway_client_to_startup_verification(
     assert verify.call_args.kwargs["client"] is fake
 
 
+@pytest.mark.asyncio
+async def test_lifespan_closes_the_factory_owned_auth_service() -> None:
+    resources = AsyncMock()
+    resources.registry = None
+    service = AsyncMock()
+
+    with (
+        patch("app.main.Resources", return_value=resources),
+        patch("app.main.build_auth_service", return_value=service),
+    ):
+        app = create_app(make_settings())
+        async with app.router.lifespan_context(app):
+            pass
+
+    service.aclose.assert_awaited_once()
+    resources.close.assert_awaited_once()
+
+
 def test_validation_summary_names_the_field_but_never_echoes_the_value() -> None:
     model, error = parse_and_validate_json('{"title": "ok", "stars": "PRIVATE-VALUE"}', Rated)
 

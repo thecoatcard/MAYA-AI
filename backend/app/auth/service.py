@@ -22,7 +22,6 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from app.auth.errors import (
-    EmailNotVerified,
     InvalidCode,
     InvalidCredentials,
     InvalidToken,
@@ -36,7 +35,7 @@ from app.auth.models import AccountIdentity, AccountRecord, Principal, TokenPair
 from app.auth.policy import AuthPolicy
 from app.auth.store import AccountConflict, AuthStore, AuthTransaction, ChallengeConflict
 from app.core.clock import Clock
-from app.core.email import EmailDeliveryError, EmailSender, OutboundEmail
+from app.core.email import EmailDeliveryError, EmailSender, OutboundEmail, SmtpEmailSender
 from app.core.ratelimit import Limit, RateLimiter, RateLimiterUnavailable
 from app.core.security import PasswordService, validate_password_policy
 from app.core.security_otp import (
@@ -65,6 +64,26 @@ class RegisterCommand:
     workspace_name: str | None = None
 
 
+@dataclass
+class PendingSignup:
+    challenge_id: UUID
+    email: str
+    code_hmac: bytes
+    created_at: datetime
+    expires_at: datetime
+    attempts: int = 0
+
+
+@dataclass(frozen=True)
+class CompleteSignupCommand:
+    email: str
+    code: str
+    username: str
+    password: str
+    full_name: str
+    workspace_name: str | None = None
+
+
 class AuthService:
     def __init__(
         self,
@@ -88,6 +107,15 @@ class AuthService:
         self._events = events
         self._email_sender = email_sender
         self._policy = policy
+        self._pending_signups: dict[str, PendingSignup] = {}
+
+    async def aclose(self) -> None:
+        """Close owned authentication resources during application shutdown."""
+        try:
+            await self._passwords.aclose()
+        finally:
+            if isinstance(self._email_sender, SmtpEmailSender):
+                await self._email_sender.aclose()
 
     # ------------------------------------------------------------------ registration
 
@@ -178,16 +206,31 @@ class AuthService:
     # ------------------------------------------------------------------------ login
 
     async def login(self, username: str, password: str, address: str) -> TokenPair:
-        username = normalize_username(username)
+        raw = username.strip().lower()
         limits = self._policy.limits
-        attempts = (
-            (
-                self._key("login-pair", f"{username}\x00{address}"),
-                limits.login_attempts_per_account_and_address,
-            ),
-            (self._key("login-address", address), limits.login_attempts_per_address),
+        address_attempt = (
+            self._key("login-address", address),
+            limits.login_attempts_per_address,
         )
-        await self._enforce(attempts)  # counted first; a correct password gives the count back
+        # Charge the address before any account-existence lookup or unknown-account exit.
+        await self._enforce((address_attempt,))
+        if "@" in raw:
+            email = normalize_email(raw)
+            identity = await self._find_by_email(email)
+            if identity is None:
+                await self._passwords.verify_unknown_account(password)
+                self._events.emit("login", outcome="failed")
+                raise InvalidCredentials
+            username = identity.username
+        else:
+            username = normalize_username(username)
+
+        pair_attempt = (
+            self._key("login-pair", f"{username}\x00{address}"),
+            limits.login_attempts_per_account_and_address,
+        )
+        attempts = (pair_attempt, address_attempt)
+        await self._enforce((pair_attempt,))  # correct passwords give both counts back
 
         account = await self._find_by_username(username)
         if account is None:
@@ -199,8 +242,8 @@ class AuthService:
             raise InvalidCredentials
         await self._release(attempts)  # a correct password is not a failed guess
         if account.email_verified_at is None:
-            self._events.emit("login", outcome="failed", reason="email_not_verified")
-            raise EmailNotVerified
+            self._events.emit("login", outcome="failed")
+            raise InvalidCredentials
 
         now = self._clock.now()
         session_id, refresh_jti = uuid4(), uuid4()
@@ -351,6 +394,118 @@ class AuthService:
             workspace_id=session.workspace_id,
             role=session.role,
             session_id=session.id,
+        )
+
+    # ----------------------------------------------------------------------- identify & signup
+
+    async def send_signup_otp(self, email: str, address: str) -> OutboundEmail | None:
+        """Generate and send an OTP code to verify email during signup."""
+        self._require_email()
+        email = normalize_email(email)
+        await self._enforce_send_limits(email, address)
+
+        account = await self._find_by_email(email)
+        if account is not None and account.email_verified_at is not None:
+            # Already verified existing account; do not issue signup challenge
+            self._events.emit("signup_otp", outcome="ignored", reason="already_verified")
+            return None
+
+        now = self._clock.now()
+        pending = self._pending_signups.get(email)
+        if pending is not None and now < pending.created_at + self._policy.resend_cooldown:
+            self._events.emit("signup_otp", outcome="cooldown")
+            return None
+
+        challenge_id = uuid4()
+        code = generate_code()
+        mac = code_mac(self._otp_key, "email_verification", challenge_id, code)
+        self._pending_signups[email] = PendingSignup(
+            challenge_id=challenge_id,
+            email=email,
+            code_hmac=mac,
+            created_at=now,
+            expires_at=now + OTP_LIFETIME,
+            attempts=0,
+        )
+        self._events.emit("signup_otp", outcome="issued")
+        return code_email(email, "email_verification", code, username=email.split("@")[0])
+
+    async def complete_signup(self, command: CompleteSignupCommand, address: str) -> TokenPair:
+        """Verify the OTP code, create the user account as verified, and open a session."""
+        email = normalize_email(command.email)
+        username = normalize_username(command.username)
+        validate_password_policy(command.password, forbidden=(username, email))
+        full_name = command.full_name.strip()
+        await self._enforce_attempt_limits(email, address)
+
+        now = self._clock.now()
+        pending = self._pending_signups.get(email)
+        if pending is None or now > pending.expires_at or pending.attempts >= OTP_MAX_ATTEMPTS:
+            self._spend_equal_effort(command.code)
+            self._events.emit("signup", outcome="failed", reason="no_pending_challenge")
+            raise InvalidCode
+
+        pending.attempts += 1
+        if not code_matches(
+            self._otp_key,
+            "email_verification",
+            pending.challenge_id,
+            command.code,
+            pending.code_hmac,
+        ):
+            self._events.emit("signup", outcome="failed", reason="code")
+            raise InvalidCode
+
+        # Consume challenge
+        del self._pending_signups[email]
+
+        hashed_password = await self._passwords.hash(command.password)
+        workspace_id, user_id = uuid4(), uuid4()
+        session_id, refresh_jti = uuid4(), uuid4()
+        absolute = now + self._policy.refresh_absolute_ttl
+        refresh_expires = min(now + self._policy.refresh_ttl, absolute)
+
+        try:
+            async with self._store.transaction(workspace_id) as tx:
+                await tx.create_account(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    workspace_name=(command.workspace_name or f"{full_name}'s workspace")[:255],
+                    slug=f"ws-{secrets.token_hex(6)}",
+                    username=username,
+                    email=email,
+                    full_name=full_name,
+                    hashed_password=hashed_password,
+                    role=WORKSPACE_ADMIN_ROLE,
+                    now=now,
+                )
+                await tx.mark_email_verified(user_id, now)
+                opened = await tx.create_session(
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    refresh_jti=refresh_jti,
+                    refresh_expires_at=refresh_expires,
+                    absolute_expires_at=absolute,
+                    expected_password_changed_at=now,
+                    now=now,
+                )
+                if not opened:
+                    raise InvalidCode
+        except AccountConflict:
+            self._events.emit("signup", outcome="failed", reason="conflict")
+            raise InvalidCode from None
+
+        self._events.emit("signup", outcome="created")
+
+        return self._issue_tokens(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            role=WORKSPACE_ADMIN_ROLE,
+            session_id=session_id,
+            refresh_jti=refresh_jti,
+            generation=0,
+            refresh_expires_at=refresh_expires,
         )
 
     # ------------------------------------------------------------------------ delivery

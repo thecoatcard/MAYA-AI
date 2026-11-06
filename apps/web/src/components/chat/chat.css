@@ -1381,6 +1381,65 @@
   cursor: pointer;
 }
 
+.maya-session__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.maya-session__item .maya-session {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--maya-space-8);
+}
+
+.maya-session__delete {
+  position: absolute;
+  right: var(--maya-space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--maya-dur-fast) var(--maya-ease-standard),
+    color var(--maya-dur-fast) var(--maya-ease-standard),
+    background var(--maya-dur-fast) var(--maya-ease-standard);
+  z-index: 1;
+}
+
+.maya-session__item:hover .maya-session__delete,
+.maya-session__item:focus-within .maya-session__delete,
+.maya-session__delete:focus-visible {
+  opacity: 1;
+}
+
+.maya-session__delete:hover {
+  background: var(--maya-hover);
+  color: var(--maya-danger);
+}
+
+.maya-session__delete:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+
+@media (pointer: coarse) {
+  .maya-session__delete {
+    opacity: 0.7;
+  }
+}
+
 .maya-session[aria-current="page"] {
   border-color: var(--maya-border);
   background: var(--maya-hover);
@@ -1441,6 +1500,15 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.maya-conversation__delete {
+  flex: none;
+  color: var(--maya-text-muted);
+}
+
+.maya-conversation__delete:hover {
+  color: var(--maya-danger);
 }
 
 .maya-conversation__status {

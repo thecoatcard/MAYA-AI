@@ -13,8 +13,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import MigrationSettings
+from app.db.base import Base
 
 config = context.config
+target_metadata = Base.metadata
 
 
 def migration_url() -> str:
@@ -26,7 +28,11 @@ def migration_url() -> str:
 
 
 def run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=None, transaction_per_migration=True)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        transaction_per_migration=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -53,13 +53,54 @@ class VerifyEmailRequest(EmailRequest):
 
 
 class LoginRequest(_Request):
-    username: str = Field(max_length=64)
+    username: str = Field(max_length=320)
     password: Password
 
     @field_validator("username")
     @classmethod
     def _username(cls, value: str) -> str:
+        trimmed = value.strip().lower()
+        if "@" in trimmed:
+            return normalize_email(trimmed)
+        return normalize_username(trimmed)
+
+
+class IdentifyRequest(_Request):
+    identifier: str = Field(min_length=1, max_length=320)
+
+    @field_validator("identifier")
+    @classmethod
+    def _identifier(cls, value: str) -> str:
+        trimmed = value.strip().lower()
+        if not trimmed:
+            raise ValueError("empty_identifier")
+        if "@" in trimmed:
+            return normalize_email(trimmed)
+        return normalize_username(trimmed)
+
+
+class CompleteSignupRequest(_Request):
+    email: str = Field(max_length=320)
+    code: Code
+    username: str = Field(max_length=64)
+    password: Password
+    full_name: str = Field(max_length=1024)
+    workspace_name: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("username")
+    @classmethod
+    def _username(cls, value: str) -> str:
         return normalize_username(value)
+
+    @field_validator("full_name", "workspace_name")
+    @classmethod
+    def _text(cls, value: str | None) -> str | None:
+        return None if value is None else normalize_display_text(value)
 
 
 class ResetPasswordRequest(EmailRequest):

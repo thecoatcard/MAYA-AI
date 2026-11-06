@@ -8,6 +8,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from google.genai import errors as genai_errors
+from redis.exceptions import RedisError
 
 from app.gateway.exceptions import (
     GatewayError,
@@ -62,7 +63,7 @@ def classify_gateway_error(exc: Exception) -> str:
     Classification uses exception types and HTTP status codes only. It never searches the error
     message: messages can contain identifiers or echoed content that merely looks like a status.
     """
-    if isinstance(exc, GatewayError):
+    if isinstance(exc, (GatewayError, RedisError)):
         return "non_retryable"
 
     if isinstance(exc, genai_errors.APIError):

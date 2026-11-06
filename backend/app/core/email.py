@@ -79,6 +79,15 @@ class SmtpEmailSender:
     async def send(self, message: OutboundEmail) -> None:
         await asyncio.get_running_loop().run_in_executor(self._executor, self._send, message)
 
+    async def aclose(self) -> None:
+        """Stop accepting mail and wait for in-flight SMTP operations to finish."""
+        shutdown = asyncio.get_running_loop().run_in_executor(None, self._executor.shutdown, True)
+        try:
+            await asyncio.shield(shutdown)
+        except asyncio.CancelledError:
+            await shutdown
+            raise
+
     def _send(self, message: OutboundEmail) -> None:
         try:
             email = EmailMessage()

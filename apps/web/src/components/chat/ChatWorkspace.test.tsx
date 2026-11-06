@@ -67,12 +67,24 @@ function stubWorkspaceFetch(
 ) {
   const fetchMock = vi.fn(handler);
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
-    if (url.startsWith("/api/v1/chat/sessions") && !url.includes("/messages")) {
+    if (
+      url.startsWith("/api/v1/chat/sessions") &&
+      !url.includes("/messages") &&
+      (!init?.method || init.method.toUpperCase() === "GET")
+    ) {
       return Promise.resolve(sessions(url));
     }
     return fetchMock(url, init);
   });
   return fetchMock;
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 describe("not signed in", () => {
@@ -571,6 +583,167 @@ describe("signed in", () => {
       screen.getByRole("heading", { name: "Start a conversation" }),
     ).toBeInTheDocument();
   });
+
+  it("deletes a session from the sidebar and removes it from the list", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    let deleted = false;
+    stubWorkspaceFetch(
+      async (url, init) => {
+        if (
+          init?.method === "DELETE" &&
+          url.endsWith(`/sessions/${sessionId}`)
+        ) {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        }
+        return new Response(null, { status: 404 });
+      },
+      () =>
+        jsonResponse({
+          items: deleted
+            ? []
+            : [
+                {
+                  id: sessionId,
+                  title: "Session to delete",
+                  channel: "text",
+                  status: "active",
+                  created_at: new Date().toISOString(),
+                },
+              ],
+          next_cursor: null,
+        }),
+    );
+    render(<ChatWorkspace />);
+    expect(
+      await screen.findByRole("button", { name: "Session to delete" }),
+    ).toBeInTheDocument();
+
+    const deleteBtn = screen.getByRole("button", {
+      name: "Delete conversation Session to delete",
+    });
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(deleted).toBe(true);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Session to delete" }),
+      ).toBeNull();
+    });
+  });
+
+  it("deletes the active session and resets the conversation to empty state", async () => {
+    const sessionId = "22222222-2222-4222-8222-222222222222";
+    let deleted = false;
+    stubWorkspaceFetch(
+      async (url, init) => {
+        if (url.includes("/messages")) {
+          return jsonResponse({
+            items: [
+              {
+                id: "msg-1",
+                role: "user",
+                content: "Active conversation content",
+                created_at: new Date().toISOString(),
+              },
+            ],
+            next_cursor: null,
+          });
+        }
+        if (
+          init?.method === "DELETE" &&
+          url.endsWith(`/sessions/${sessionId}`)
+        ) {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        }
+        return new Response(null, { status: 404 });
+      },
+      () =>
+        jsonResponse({
+          items: deleted
+            ? []
+            : [
+                {
+                  id: sessionId,
+                  title: "Active session",
+                  channel: "text",
+                  status: "active",
+                  created_at: new Date().toISOString(),
+                },
+              ],
+          next_cursor: null,
+        }),
+    );
+    render(<ChatWorkspace />);
+    const sessionBtn = await screen.findByRole("button", {
+      name: "Active session",
+    });
+    fireEvent.click(sessionBtn);
+    expect(
+      await screen.findByText("Active conversation content"),
+    ).toBeInTheDocument();
+
+    const deleteBtn = screen.getByRole("button", {
+      name: "Delete this conversation",
+    });
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(deleted).toBe(true);
+    await waitFor(() => {
+      expect(screen.queryByText("Active conversation content")).toBeNull();
+      expect(
+        screen.getByRole("heading", { name: "Start a conversation" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows an error when deleting a session fails", async () => {
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    stubWorkspaceFetch(
+      async (_url, init) => {
+        if (init?.method === "DELETE") {
+          return jsonResponse({ error: "chat_unavailable" }, 503);
+        }
+        return new Response(null, { status: 404 });
+      },
+      () =>
+        jsonResponse({
+          items: [
+            {
+              id: sessionId,
+              title: "Failed session",
+              channel: "text",
+              status: "active",
+              created_at: new Date().toISOString(),
+            },
+          ],
+          next_cursor: null,
+        }),
+    );
+    render(<ChatWorkspace />);
+    expect(
+      await screen.findByRole("button", { name: "Failed session" }),
+    ).toBeInTheDocument();
+
+    const deleteBtn = screen.getByRole("button", {
+      name: "Delete conversation Failed session",
+    });
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Conversation could not be deleted. Try again.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Failed session" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("focus after a notice action", () => {
@@ -968,5 +1141,550 @@ describe("theme", () => {
       "data-maya-theme",
       "dark",
     );
+  });
+});
+
+describe("conversation and history races", () => {
+  const sessionId = "22222222-2222-4222-8222-222222222222";
+  const session = {
+    id: sessionId,
+    title: "Saved conversation",
+    channel: "web",
+    status: "active",
+    created_at: "2026-01-01T00:00:00Z",
+  };
+  const history = {
+    items: [
+      {
+        id: "history-user",
+        role: "user",
+        content: "Saved private question",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ],
+    next_cursor: null,
+  };
+
+  beforeEach(() => {
+    setAccessToken("account-a");
+  });
+
+  it("keeps a failed message when dismissing while another draft is present", async () => {
+    const pending = deferredResponse();
+    stubWorkspaceFetch(async () => pending.promise);
+    render(<ChatWorkspace />);
+    await typeAndSend("First unsent draft");
+    fireEvent.change(box(), { target: { value: "Second draft" } });
+    await act(async () => {
+      pending.resolve(
+        jsonResponse({ error: "validation_error", fields: ["content"] }, 422),
+      );
+    });
+    expect(await screen.findByText("Not sent")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(box().value).toBe("Second draft");
+    expect(screen.getByText("First unsent draft")).toBeInTheDocument();
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a later failure and restores its draft without deleting the earlier failed message", async () => {
+    const pending = deferredResponse();
+    let calls = 0;
+    stubWorkspaceFetch(async () => {
+      calls += 1;
+      return calls === 1
+        ? pending.promise
+        : jsonResponse({ error: "validation_error" }, 422);
+    });
+    render(<ChatWorkspace />);
+    await typeAndSend("First unsent draft");
+    fireEvent.change(box(), { target: { value: "Second draft" } });
+    await act(async () => {
+      pending.resolve(jsonResponse({ error: "validation_error" }, 422));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await typeAndSend("Second draft");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The server rejected this message.",
+    );
+    expect(screen.getAllByText("Not sent")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(box().value).toBe("Second draft");
+    expect(screen.getByText("First unsent draft")).toBeInTheDocument();
+    expect(screen.getAllByText("Not sent")).toHaveLength(1);
+  });
+
+  it("does not display stale account A history after switching to account B", async () => {
+    const pending = deferredResponse();
+    let historySignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (url.includes("/messages")) {
+        historySignal = init?.signal ?? undefined;
+        return pending.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({
+            items: getAccessToken() === "account-a" ? [session] : [],
+            next_cursor: null,
+          }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    );
+    act(() => setAccessToken("account-b"));
+    expect(historySignal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve(jsonResponse(history));
+    });
+    expect(screen.queryByText("Saved private question")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Start a conversation" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not let a delayed history response abort a newer message", async () => {
+    const pending = deferredResponse();
+    const stream = controllableStream();
+    let historySignal: AbortSignal | undefined;
+    let messageSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (url.includes("/messages")) {
+        historySignal = init?.signal ?? undefined;
+        return pending.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      if (url.endsWith("/chat/message")) {
+        messageSignal = init?.signal ?? undefined;
+        return Promise.resolve(sseResponse(stream.stream));
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /New conversation/ }));
+    expect(historySignal?.aborted).toBe(true);
+    await typeAndSend("New in-flight question");
+    expect(messageSignal?.aborted).toBe(false);
+    await act(async () => {
+      pending.resolve(jsonResponse(history));
+    });
+    expect(messageSignal?.aborted).toBe(false);
+    expect(screen.getByText("New in-flight question")).toBeInTheDocument();
+    expect(screen.queryByText("Saved private question")).toBeNull();
+  });
+
+  it("cancels a pending history read when sending without starting a new conversation", async () => {
+    const pending = deferredResponse();
+    const stream = controllableStream();
+    const messagePages: string[] = [];
+    let historySignal: AbortSignal | undefined;
+    let messageSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (url.includes("/messages")) {
+        messagePages.push(url);
+        historySignal = init?.signal ?? undefined;
+        return pending.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      if (url.endsWith("/chat/message")) {
+        messageSignal = init?.signal ?? undefined;
+        return Promise.resolve(sseResponse(stream.stream));
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    );
+    await typeAndSend("New in-flight question");
+    expect(historySignal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve(
+        jsonResponse({ ...history, next_cursor: "another-page" }),
+      );
+    });
+    expect(messagePages).toHaveLength(1);
+    expect(messageSignal?.aborted).toBe(false);
+    expect(screen.getByText("New in-flight question")).toBeInTheDocument();
+    expect(screen.queryByText("Saved private question")).toBeNull();
+  });
+
+  it("cancels pending history when the new-conversation shortcut is used", async () => {
+    const pending = deferredResponse();
+    let historySignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (url.includes("/messages")) {
+        historySignal = init?.signal ?? undefined;
+        return pending.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    );
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(historySignal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve(jsonResponse(history));
+    });
+    expect(screen.queryByText("Saved private question")).toBeNull();
+  });
+
+  it("does not let a delayed delete reset a newer conversation", async () => {
+    const pending = deferredResponse();
+    const stream = controllableStream();
+    let messageSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return pending.promise;
+      }
+      if (url.includes("/messages")) {
+        return Promise.resolve(jsonResponse(history));
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      if (url.endsWith("/chat/message")) {
+        messageSignal = init?.signal ?? undefined;
+        return Promise.resolve(sseResponse(stream.stream));
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    );
+    await screen.findByText("Saved private question");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete this conversation" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /New conversation/ }));
+    await typeAndSend("New in-flight question");
+    await act(async () => {
+      pending.resolve(new Response(null, { status: 204 }));
+    });
+    expect(messageSignal?.aborted).toBe(false);
+    expect(screen.getByText("New in-flight question")).toBeInTheDocument();
+  });
+
+  it("does not let a delete started in account A remove account B's list item", async () => {
+    const pending = deferredResponse();
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return pending.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Delete conversation Saved conversation",
+      }),
+    );
+    act(() => setAccessToken("account-b"));
+    await screen.findByRole("button", { name: "Saved conversation" });
+    await act(async () => {
+      pending.resolve(new Response(null, { status: 204 }));
+    });
+    expect(
+      screen.getByRole("button", { name: "Saved conversation" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["initial-first", "refresh-first"])(
+    "keeps a newly created session when list responses arrive %s",
+    async (order) => {
+      const lists: ReturnType<typeof deferredResponse>[] = [];
+      vi.stubGlobal("fetch", (url: string) => {
+        if (url.startsWith("/api/v1/chat/sessions")) {
+          const pending = deferredResponse();
+          lists.push(pending);
+          return pending.promise;
+        }
+        if (url.endsWith("/chat/message")) {
+          return Promise.resolve(
+            sseResponse([
+              acceptedFrame({ sessionId }),
+              deltaFrame("Reply"),
+              doneFrame(),
+            ]),
+          );
+        }
+        throw new Error("Unexpected mocked request");
+      });
+      render(<ChatWorkspace />);
+      await waitFor(() => expect(lists).toHaveLength(1));
+      await typeAndSend("New question");
+      await waitFor(() => expect(lists).toHaveLength(2));
+      const initial = () =>
+        lists[0].resolve(jsonResponse({ items: [], next_cursor: null }));
+      const refreshed = () =>
+        lists[1].resolve(jsonResponse({ items: [session], next_cursor: null }));
+      await act(async () => {
+        if (order === "initial-first") {
+          initial();
+        } else {
+          refreshed();
+        }
+      });
+      await act(async () => {
+        if (order === "initial-first") {
+          refreshed();
+        } else {
+          initial();
+        }
+      });
+      expect(
+        screen.getByRole("button", { name: "Saved conversation" }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("does not resurrect a deleted session from a pending load-more response", async () => {
+    const more = deferredResponse();
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.includes("cursor=next")) {
+        return more.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: "next" }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    await screen.findByRole("button", { name: "Saved conversation" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Delete conversation Saved conversation",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Saved conversation" }),
+      ).toBeNull(),
+    );
+    await act(async () => {
+      more.resolve(jsonResponse({ items: [session], next_cursor: null }));
+    });
+    expect(
+      screen.queryByRole("button", { name: "Saved conversation" }),
+    ).toBeNull();
+  });
+
+  it("does not append account A's pending page to account B's session list", async () => {
+    const more = deferredResponse();
+    const other = { ...session, id: "other", title: "Account B conversation" };
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.includes("cursor=next")) {
+        return more.promise;
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({
+            items: getAccessToken() === "account-a" ? [session] : [other],
+            next_cursor: getAccessToken() === "account-a" ? "next" : null,
+          }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    await screen.findByRole("button", { name: "Saved conversation" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    act(() => setAccessToken("account-b"));
+    await screen.findByRole("button", { name: "Account B conversation" });
+    await act(async () => {
+      more.resolve(jsonResponse({ items: [session], next_cursor: null }));
+    });
+    expect(
+      screen.queryByRole("button", { name: "Saved conversation" }),
+    ).toBeNull();
+  });
+
+  it("deduplicates sessions repeated on a load-more page", async () => {
+    const older = { ...session, id: "older", title: "Older conversation" };
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.includes("cursor=next")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session, older], next_cursor: null }),
+        );
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: "next" }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    await screen.findByRole("button", { name: "Saved conversation" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByRole("button", { name: "Older conversation" });
+    expect(
+      screen.getAllByRole("button", { name: "Saved conversation" }),
+    ).toHaveLength(1);
+  });
+
+  it("keeps the advanced cursor when a new-session refresh arrives", async () => {
+    const newer = { ...session, id: "newer", title: "New conversation title" };
+    const older = { ...session, id: "older", title: "Older conversation" };
+    const listUrls: string[] = [];
+    let firstPageReads = 0;
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        listUrls.push(url);
+        if (url.includes("cursor=page2")) {
+          return Promise.resolve(
+            jsonResponse({ items: [older], next_cursor: "page3" }),
+          );
+        }
+        if (url.includes("cursor=page3")) {
+          return Promise.resolve(
+            jsonResponse({ items: [], next_cursor: null }),
+          );
+        }
+        firstPageReads += 1;
+        return Promise.resolve(
+          jsonResponse({
+            items: firstPageReads === 1 ? [session] : [newer, session],
+            next_cursor: "page2",
+          }),
+        );
+      }
+      if (url.endsWith("/chat/message")) {
+        return Promise.resolve(
+          sseResponse([
+            acceptedFrame({ sessionId: newer.id }),
+            deltaFrame("Reply"),
+            doneFrame(),
+          ]),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    await screen.findByRole("button", { name: "Saved conversation" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByRole("button", { name: "Older conversation" });
+    await typeAndSend("New question");
+    await screen.findByRole("button", { name: "New conversation title" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(listUrls.some((url) => url.includes("cursor=page3"))).toBe(true),
+    );
+  });
+
+  it("tries a failed new-session list refresh again on the next send", async () => {
+    let firstPageReads = 0;
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        firstPageReads += 1;
+        if (firstPageReads === 1) {
+          return Promise.resolve(
+            jsonResponse({ items: [], next_cursor: null }),
+          );
+        }
+        if (firstPageReads === 2) {
+          return Promise.resolve(jsonResponse({ error: "unavailable" }, 503));
+        }
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      if (url.endsWith("/chat/message")) {
+        return Promise.resolve(
+          sseResponse([
+            acceptedFrame({ sessionId }),
+            deltaFrame("Reply"),
+            doneFrame(),
+          ]),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    await typeAndSend("First question");
+    await screen.findByText(/Conversation history could not be loaded/);
+    await typeAndSend("Second question");
+    expect(
+      await screen.findByRole("button", { name: "Saved conversation" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a nullable session title and an interrupted historical reply", async () => {
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.includes("/messages")) {
+        return Promise.resolve(
+          jsonResponse({
+            items: [
+              ...history.items,
+              {
+                id: "history-assistant",
+                role: "assistant",
+                content: "Partial historical reply",
+                created_at: "2026-01-01T00:00:01Z",
+                finish_reason: "interrupted",
+              },
+            ],
+            next_cursor: null,
+          }),
+        );
+      }
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({
+            items: [{ ...session, title: null }],
+            next_cursor: null,
+          }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Untitled conversation" }),
+    );
+    expect(
+      await screen.findByText("Partial historical reply"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Reply interrupted. The text above is what arrived."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ask again" })).toBeNull();
   });
 });

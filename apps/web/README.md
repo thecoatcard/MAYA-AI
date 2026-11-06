@@ -35,10 +35,13 @@ The text-chat canvas for the Phase 04 API ([contract](../../docs/api/CHAT.md),
 call the API; after the page loads, it checks the refresh cookie and loads history
 only after authentication succeeds.
 
-**Pages and authentication.** `/login`, `/register`, `/verify`, `/forgot-password`,
-and `/reset-password` use the Phase 02 account API and generic responses that do not
-reveal whether an address exists. `/chat` checks the same-origin `/refresh` endpoint
-on load and shows a skeleton while checking. The browser sends
+**Pages and authentication.** `/login` and `/register` offer neutral, user-selected
+sign-in and account-creation paths; the unified form does not call `/identify` or
+branch based on account existence. Verification-code request notices are conditional
+so they do not claim a code was sent when the API intentionally returns a generic
+response. `/verify`, `/forgot-password`, and `/reset-password` use the Phase 02
+account API. `/chat` checks the same-origin `/refresh` endpoint on load and shows a
+skeleton while checking. The browser sends
 `X-Maya-Refresh-Transport: cookie` with same-origin credentials on `/token`,
 `/refresh`, and `/logout`. Refresh tokens are `HttpOnly` cookies and are never
 available to JavaScript; only the access token stays in memory. It refreshes before
@@ -76,7 +79,7 @@ ends a silent reply.
 | `src/lib/api-proxy-target.ts` | Validates the server-side upstream origin and refuses non-loopback HTTP or URL components other than an origin                                                                                                                                                                                     |
 | `src/lib/markdown.ts`         | Dependency-free safe Markdown subset (no HTML strings)                                                                                                                                                                                                                                             |
 | `src/hooks/useChatStream.ts`  | Conversation state machine: one Idempotency-Key per message reused on every same-key retry, replay replaces partial text, bounded automatic retry (3 attempts, backoff with jitter) for network errors and 409, `Retry-After` for 429, `stop()`, and text applied at most once per animation frame |
-| `src/components/auth/`        | Sign-in and reusable account forms with safe error messages, accessible inputs, and the shared theme                                                                                                                                                                                               |
+| `src/components/auth/`        | User-selected sign-in and account-creation forms with neutral account-status messaging, accessible inputs, and the shared theme                                                                                                                                                                    |
 | `src/components/chat/`        | `ChatWorkspace`, paginated session history, `MessageThread`, safe Markdown, composer, notice, theme toggle, and shared design tokens/rules                                                                                                                                                         |
 
 The chat uses the existing `/chat` design tokens and the owner-approved `system-ui`
@@ -118,16 +121,16 @@ and reference links are not in the supported subset and appear as plain text.
   `innerHTML`, `outerHTML`, `dangerouslySetInnerHTML`, `insertAdjacentHTML`, `document.write`,
   `eval` and `new Function`, and for invisible characters.
 
-**Retry and Ask again.** The server stores every finished outcome under the
-Idempotency-Key for 24 hours, failures included, and answers a repeat of the same key and
-body with the stored result without calling the model again (a replayed reply arrives as
-one complete `delta` that replaces any partial text). So the client offers two different
-actions:
+**Retry and Ask again.** When a finished outcome is stored under the Idempotency-Key, a
+repeat of the same key and body replays it without another model call (a replayed reply
+arrives as one complete `delta` that replaces any partial text). Claim expiry and
+ambiguous persistence failures can still undermine this guarantee. The client offers
+two different actions:
 
-| Action        | What it does                                                           | Offered when the server's outcome is unknown to the client                                                                                                                                                                                     |
-| :------------ | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Retry**     | Sends the same message again with the **same** key (never a duplicate) | Network error; a stream that ended without `done` or `error`; 409 `request_in_progress`; 429 (enabled after `Retry-After`); 503 `chat_unavailable`; any other 5xx without a documented code (for example a proxy 502 or 504 with an HTML body) |
-| **Ask again** | Sends the same text as a **new** message with a **new** key            | After an `error` event, and whenever the last message is an interrupted reply                                                                                                                                                                  |
+| Action        | What it does                                                | Offered when the server's outcome is unknown to the client                                                                                                                                                                                     |
+| :------------ | :---------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Retry**     | Sends the same message again with the **same** key          | Network error; a stream that ended without `done` or `error`; 409 `request_in_progress`; 429 (enabled after `Retry-After`); 503 `chat_unavailable`; any other 5xx without a documented code (for example a proxy 502 or 504 with an HTML body) |
+| **Ask again** | Sends the same text as a **new** message with a **new** key | After an `error` event, and whenever the last message is an interrupted reply                                                                                                                                                                  |
 
 After an `error` event (any code, whatever its `retryable` flag says; the flag is ignored)
 only Ask again is offered, because the same key would replay the same error. Ask again also

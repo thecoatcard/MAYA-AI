@@ -6,29 +6,39 @@
 - A bootstrap administrator (`maya_migrator` in the local example; it is a superuser and runs migrations only) and
   a separate `maya_app` runtime login that is not a superuser, cannot create databases or roles, cannot bypass
   row-level security and owns nothing.
-- The schema below, created by four reversible Alembic revisions in `backend/app/db/migrations/versions/`.
+- The schema below, created by Alembic revisions in `backend/app/db/migrations/versions/`.
 - SQLAlchemy/asyncpg and Redis async clients with explicit startup, probe and cleanup paths, plus a startup guard
   that refuses to run as any role with elevated attributes or object ownership.
 
 Authentication, tenant isolation and the account tables are documented in
 [authentication security](../security/AUTHENTICATION.md) and [ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md).
 
-### Tables (14, all with forced row-level security)
+### Tables (18, all with forced row-level security)
 
 | Table | Purpose | Notes |
 | :--- | :--- | :--- |
 | `workspaces` | One tenant | Policy on `id`; a tenant cannot list other workspaces' names or slugs |
 | `users` | Accounts | Plan table plus `username`, `email_verified_at`, `password_changed_at`; `hashed_password` is mandatory |
 | `sessions`, `messages` | Chat conversations | Plan tables, unchanged. The Phase 04 chat repository (`backend/app/db/repositories/chat.py`) uses them: every statement names the workspace and the user (user-level ownership on top of row-level security), and keyset pagination orders by `(created_at, id)`. No index serves those queries yet; adding one needs a migration (Level 3), recommended before large histories exist |
-| `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals | Plan tables, unchanged (Phases 05 to 07) |
+| `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals | Phase 05 added SQLAlchemy declarative models (`backend/app/db/models.py`) and migration `0005_phase_05_tasks_subtasks.py` adding `user_instruction`, `plan_status`, `active_plan`, `shared_context`, `execution_trace`, and `updated_at` to `tasks`, and `updated_at` plus role check constraints to `subtasks` |
 | `audit_log` | Audit trail | Plan table; the runtime role may insert and read only. Hash chaining is not computed yet (Phase 07) |
 | `mcp_servers`, `file_artifacts`, `memory_items` | Integrations, artifacts, memory | Plan tables and indexes, unchanged (Phases 08, 10, 11) |
 | `auth_otp_challenges` | One-time codes | New. Only an HMAC of the code is stored; one live row per user and purpose |
 | `auth_sessions` | Refresh-token sessions | New. Holds the current refresh token id and a generation counter (any older generation is a replay); revocation and expiry |
+| `checkpoints`, `checkpoint_blobs`, `checkpoint_writes` | LangGraph durable state | Phase 05 checkpointer storage; forced RLS binds rows to both workspace and user. Existing rows without an owner remain NULL and inaccessible; no owner is guessed |
+| `chat_idempotency` | Durable chat claims and results | Revision `0007`; scoped by workspace and user, stores keyed digests only (no raw key or request content), forced RLS binds both owner settings; claims are permanent and finalized with an owned compare-and-set |
 
 The plan lists 12 tables, 11 of them tenant-scoped. This implementation adds the two `auth_*` tables and also
-protects `workspaces`, so all 14 have row-level security. The plan's chat table is called `sessions`, hence the
-`auth_` prefix on the login-session table.
+protects `workspaces`, then adds the three LangGraph checkpointer tables and the durable chat-idempotency table, so all 18 have row-level security. The plan's
+chat table is called `sessions`, hence the `auth_` prefix on the login-session table.
+
+The durable chat record is inserted before the user-message transaction and is the authoritative uniqueness fence.
+The user message and session attachment commit together; the assistant message and terminal result commit together.
+If a process stops after claiming but before finalization, the durable row remains `in_progress` and later requests
+receive `request_in_progress`. This deliberately favors preventing a duplicate model call over automatically
+reclaiming a potentially active request. Redis idempotency entries are only a cache; their TTLs do not delete the
+PostgreSQL record. The key digest and request hash are HMACed with domain-separated keys derived from the configured
+signing secret.
 
 ### Deviations from the plan's DDL (owner-approved on 2026-11-05)
 
@@ -49,14 +59,21 @@ Every table has `ENABLE` and `FORCE ROW LEVEL SECURITY` and one policy, `ws_isol
 `workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid` for both reads and writes
 (`id` for `workspaces`). With the setting unset or empty no rows are visible or writable; a malformed value is an
 error, not a match. The application sets it per transaction with `set_config(..., true)` in
-`backend/app/db/tenant.py`, so it cannot outlive the transaction on a pooled connection.
+`backend/app/db/tenant.py`, so it cannot outlive the transaction on a pooled connection. Checkpoint tables also compare
+`user_id` to the connection-local `app.user_id` setting. The PostgreSQL saver uses one dedicated connection per
+owner context, set from server-verified workspace and user UUIDs; it does not accept identity from graph state or
+client-supplied checkpoint data. The owner pair references `(users.workspace_id, users.id)` for new writes. Callers
+should use server-generated thread IDs; RLS, not thread-ID secrecy, is the authorization boundary. Legacy checkpoint
+rows with no owner remain inaccessible to every runtime identity.
 
 `maya_app` privileges: `SELECT` and `INSERT` on `workspaces`; on `users` it can read every column **except**
 `hashed_password`, insert, and update only `hashed_password`, `email_verified_at` and `password_changed_at`;
 `SELECT` and `INSERT` on the two `auth_*` tables, with `UPDATE` limited to their state columns
 (`attempts`, `consumed_at`, `invalidated_at`; `refresh_jti`, `refresh_generation`, `refresh_expires_at`,
 `last_used_at`, `revoked_at`, `revoked_reason`) and no `DELETE`; `SELECT` and `INSERT` on `audit_log`; full
-`SELECT`/`INSERT`/`UPDATE`/`DELETE` on the other plan tables. No `TRUNCATE`, no DDL, no `CREATE` on the schema.
+`SELECT`/`INSERT`/`UPDATE`/`DELETE` on the other plan tables and checkpoint tables, still limited by their RLS
+policies. No `TRUNCATE`, no DDL, no `CREATE` on the schema. Checkpoint tables are created only by Alembic; runtime
+checkpointer setup is disabled.
 
 Before the workspace is known (login by username, verification and recovery by e-mail) the API calls
 `public.auth_find_account_by_username` and `public.auth_find_account_by_email`. They are `SECURITY DEFINER`,
@@ -66,8 +83,9 @@ executable by `maya_app` only. The by-username function returns the identity col
 `password_changed_at` (login verifies the hash, and opens its session only if that password version is still
 current); the by-e-mail function returns the identity columns only.
 
-Row-level security separates workspaces. Separating users inside a workspace is the repositories' job; it is
-tested for the authentication tables only.
+Row-level security separates workspaces across tenant tables. Separating users inside a workspace remains the
+repositories' responsibility except for the checkpoint tables, whose policies also require the user setting. The new
+cross-owner checkpoint PostgreSQL tests have not been run against a live database.
 
 ### Migrations
 
@@ -86,11 +104,21 @@ uv run --directory backend alembic -x env_file=..\.env.example downgrade base
 | `0002` | The remaining plan tables and indexes |
 | `0003` | `auth_otp_challenges`, `auth_sessions` |
 | `0004` | Roles, row-level security, grants, the definer functions |
+| `0005` | Phase 05 task and subtask projection columns and indexes |
+| `0006` | LangGraph checkpoint tables and workspace-plus-user RLS |
+| `0007` | Durable chat idempotency claims/results, workspace-plus-user RLS and least-privilege runtime grants |
+
+For a deployment with an older checkpoint writer, stop checkpoint writes before applying `0006`, then deploy the
+owner-bound checkpointer. Old rows remain inaccessible; the revision does not infer owners or migrate their content.
+The migration creates indexes transactionally when missing, so schedule it with the possible table-lock/build cost in
+mind.
 
 Rollback: `downgrade` drops the objects of each revision, which **destroys the data** in them; it is for disposable and
 development databases, and is tested by upgrading, downgrading to the base and upgrading again with identical
-schema snapshots. The cluster-level role `maya_auth_definer` is created idempotently and intentionally kept by a
-downgrade. Production changes should be forward-only.
+schema snapshots. Revision `0006` refuses to downgrade once any checkpoint data exists, because removing its owner RLS
+would expose surviving rows; do not treat an application rollback as permission to remove this policy. The
+cluster-level role `maya_auth_definer` is created idempotently and intentionally kept by a downgrade. Production
+changes should be forward-only.
 
 The migrations also run as a **non-superuser** owner (tested with a throwaway role that has only `CREATEROLE` and owns
 its database). Such a role must first be allowed to `SET ROLE` to `maya_auth_definer`
@@ -99,11 +127,12 @@ disposable `maya_test_*` databases that they create and drop.
 
 **Persistent local database:** on 2026-11-05, with the owner's approval, the persistent `maya` database was migrated to
 revision `0004` (it was empty; a schema-only backup was taken first outside the repository). It holds no accounts.
+Revisions `0005` through `0007` have not been applied or live-verified in this remediation.
 
 ### Not implemented
 
 Audit hash chaining and append-only enforcement beyond the grants, the secrets vault, vector search queries and
-every consumer of the plan tables other than `users`, `workspaces` and the `auth_*` tables.
+production-route integration of the task projection and LangGraph checkpointer.
 
 ## Synthetic filtered-vector spike
 

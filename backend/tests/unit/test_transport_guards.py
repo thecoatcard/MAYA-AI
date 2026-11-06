@@ -87,13 +87,22 @@ def test_token_responses_are_marked_uncacheable(api: Api) -> None:
 
 
 def test_the_server_is_started_without_trusting_forwarded_headers() -> None:
+    startup_order: list[str] = []
     with (
-        patch("app.__main__.uvicorn.run") as run,
+        patch(
+            "app.__main__.uvicorn.run",
+            side_effect=lambda *args, **kwargs: startup_order.append("uvicorn"),
+        ) as run,
+        patch(
+            "app.__main__.ensure_compatible_event_loop",
+            side_effect=lambda: startup_order.append("event-loop-policy"),
+        ),
         patch.object(__main__, "Settings", return_value=make_settings()),
         patch.object(__main__, "create_app", return_value=MagicMock()),
         patch("sys.argv", ["app"]),
     ):
         __main__.main()
+    assert startup_order == ["event-loop-policy", "uvicorn"]
     assert run.call_args.kwargs["proxy_headers"] is False
     assert run.call_args.kwargs["host"] == "127.0.0.1"
 

@@ -68,7 +68,7 @@ def test_account_lifecycle_through_the_production_factory(
         }
         assert client.post(f"{BASE}/register", json=body).status_code == 202
         login = {"username": body["username"], "password": GOOD_PASSWORD}
-        assert client.post(f"{BASE}/token", json=login).status_code == 403  # not verified yet
+        assert client.post(f"{BASE}/token", json=login).status_code == 401  # not verified yet
         code = mail.codes_for(email)[-1]
         assert (
             client.post(

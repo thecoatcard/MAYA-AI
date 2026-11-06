@@ -4,6 +4,7 @@ from pathlib import Path
 import uvicorn
 from pydantic import ValidationError
 
+from app.agents.checkpointer import ensure_compatible_event_loop
 from app.core.config import Settings
 from app.main import create_app
 
@@ -19,6 +20,7 @@ def main() -> None:
         settings = Settings(_env_file=arguments.env_file)
     except ValidationError:
         parser.exit(2, "Invalid MAYA configuration; check required variables and URL formats.\n")
+    ensure_compatible_event_loop()
     # Forwarded-for headers are not trusted: the per-address rate limits key on the direct
     # peer, and a client-chosen header would let anyone rotate their identity.
     uvicorn.run(

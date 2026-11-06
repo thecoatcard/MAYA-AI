@@ -48,6 +48,16 @@ GET_SESSION = text(
     "SELECT id, workspace_id, user_id, title, channel, status, created_at FROM sessions "
     "WHERE id = :session_id AND workspace_id = :workspace_id AND user_id = :user_id"
 )
+LOCK_SESSION = text(
+    "SELECT id FROM sessions "
+    "WHERE id = :session_id AND workspace_id = :workspace_id AND user_id = :user_id "
+    "FOR UPDATE"
+)
+DELETE_SESSION = text(
+    "DELETE FROM sessions "
+    "WHERE id = :session_id AND workspace_id = :workspace_id AND user_id = :user_id "
+    "RETURNING id"
+)
 LIST_SESSIONS_FIRST = text(
     "SELECT id, workspace_id, user_id, title, channel, status, created_at FROM sessions "
     "WHERE workspace_id = :workspace_id AND user_id = :user_id "
@@ -103,6 +113,30 @@ RECENT_MESSAGES = text(
     "WHERE m.workspace_id = :workspace_id AND m.session_id = :session_id "
     "AND s.user_id = :user_id AND m.sender IN ('user', 'orchestrator') "
     "ORDER BY m.created_at DESC, m.id DESC LIMIT :fetch"
+)
+SET_CHAT_USER_CONTEXT = text("SELECT set_config('app.user_id', :user_id, true)")
+GET_IDEMPOTENCY = text(
+    "SELECT state, request_hash, session_id, user_message_id, assistant_message_id, "
+    "finish_reason, error_code FROM chat_idempotency "
+    "WHERE workspace_id = :workspace_id AND user_id = :user_id AND key_digest = :key_digest"
+)
+INSERT_IDEMPOTENCY = text(
+    "INSERT INTO chat_idempotency "
+    "(workspace_id, user_id, key_digest, request_hash, state, session_id, user_message_id, "
+    "assistant_message_id, finish_reason, error_code, created_at, updated_at) "
+    "VALUES (:workspace_id, :user_id, :key_digest, :request_hash, :state, :session_id, "
+    ":user_message_id, :assistant_message_id, :finish_reason, :error_code, "
+    "clock_timestamp(), clock_timestamp()) "
+    "ON CONFLICT (workspace_id, user_id, key_digest) DO NOTHING RETURNING key_digest"
+)
+SAVE_IDEMPOTENCY = text(
+    "UPDATE chat_idempotency SET state = :state, session_id = :session_id, "
+    "finish_reason = :finish_reason, error_code = :error_code, updated_at = clock_timestamp() "
+    "WHERE workspace_id = :workspace_id AND user_id = :user_id AND key_digest = :key_digest "
+    "AND request_hash = :request_hash AND user_message_id = :user_message_id "
+    "AND assistant_message_id = :assistant_message_id AND state = 'in_progress' "
+    "AND (session_id IS NULL OR :session_id IS NULL OR session_id = :session_id) "
+    "RETURNING key_digest"
 )
 
 
@@ -170,6 +204,19 @@ class ChatMessageRecord:
     def model_id(self) -> str | None:
         value = self.metadata.get("model_id")
         return value if isinstance(value, str) else None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatIdempotencyRecord:
+    """Durable, content-free idempotency state for one scoped key digest."""
+
+    state: str
+    request_hash: str
+    session_id: UUID | None
+    user_message_id: UUID
+    assistant_message_id: UUID
+    finish_reason: str | None
+    error_code: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +316,18 @@ def _message(row: Any) -> ChatMessageRecord:
     )
 
 
+def _idempotency(row: Any) -> ChatIdempotencyRecord:
+    return ChatIdempotencyRecord(
+        state=row.state,
+        request_hash=row.request_hash,
+        session_id=row.session_id,
+        user_message_id=row.user_message_id,
+        assistant_message_id=row.assistant_message_id,
+        finish_reason=row.finish_reason,
+        error_code=row.error_code,
+    )
+
+
 def _page[T](rows: list[T], limit: int, cursor_of: Callable[[T], str]) -> RecordPage[T]:
     """``rows`` holds up to ``limit + 1`` records; the extra one only proves a next page exists."""
     if len(rows) <= limit:
@@ -289,6 +348,65 @@ class ChatRepository:
         self._connection = connection
         self._workspace_id = workspace_id
         self._user_id = user_id
+
+    async def get_idempotency(self, key_digest: str) -> ChatIdempotencyRecord | None:
+        """Return this user's durable record for a keyed digest, if any."""
+        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        row = (
+            await self._connection.execute(
+                GET_IDEMPOTENCY,
+                {
+                    "workspace_id": self._workspace_id,
+                    "user_id": self._user_id,
+                    "key_digest": key_digest,
+                },
+            )
+        ).first()
+        return None if row is None else _idempotency(row)
+
+    async def claim_idempotency(
+        self, key_digest: str, record: ChatIdempotencyRecord
+    ) -> ChatIdempotencyRecord | None:
+        """Insert one permanent claim, returning the competing record if it already exists."""
+        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        parameters = {
+            "workspace_id": self._workspace_id,
+            "user_id": self._user_id,
+            "key_digest": key_digest,
+            "request_hash": record.request_hash,
+            "state": record.state,
+            "session_id": record.session_id,
+            "user_message_id": record.user_message_id,
+            "assistant_message_id": record.assistant_message_id,
+            "finish_reason": record.finish_reason,
+            "error_code": record.error_code,
+        }
+        inserted = (await self._connection.execute(INSERT_IDEMPOTENCY, parameters)).first()
+        if inserted is not None:
+            return None
+        return await self.get_idempotency(key_digest)
+
+    async def save_idempotency(self, key_digest: str, record: ChatIdempotencyRecord) -> bool:
+        """CAS the owned in-progress claim; terminal states cannot be overwritten."""
+        await self._connection.execute(SET_CHAT_USER_CONTEXT, {"user_id": str(self._user_id)})
+        row = (
+            await self._connection.execute(
+                SAVE_IDEMPOTENCY,
+                {
+                    "workspace_id": self._workspace_id,
+                    "user_id": self._user_id,
+                    "key_digest": key_digest,
+                    "request_hash": record.request_hash,
+                    "state": record.state,
+                    "session_id": record.session_id,
+                    "user_message_id": record.user_message_id,
+                    "assistant_message_id": record.assistant_message_id,
+                    "finish_reason": record.finish_reason,
+                    "error_code": record.error_code,
+                },
+            )
+        ).first()
+        return row is not None
 
     async def create_session(
         self, title: str | None = None, channel: Channel = "web"
@@ -322,6 +440,42 @@ class ChatRepository:
             )
         ).first()
         return None if row is None else _session(row)
+
+    async def lock_session(self, session_id: UUID) -> None:
+        """Lock this caller's session row until the current transaction ends.
+
+        Chat uses this before reading history and inserting a user message, so concurrent starts
+        have a serializable per-session order without keeping a transaction open while the model
+        generates a reply.
+        """
+        row = (
+            await self._connection.execute(
+                LOCK_SESSION,
+                {
+                    "session_id": session_id,
+                    "workspace_id": self._workspace_id,
+                    "user_id": self._user_id,
+                },
+            )
+        ).first()
+        if row is None:
+            raise SessionNotFound
+
+    async def delete_session(self, session_id: UUID) -> bool:
+        """Delete a session of this user.
+
+        Returns True if the session was found and deleted; False otherwise.
+        Cascades to messages and tasks via the foreign key constraint.
+        """
+        result = await self._connection.execute(
+            DELETE_SESSION,
+            {
+                "session_id": session_id,
+                "workspace_id": self._workspace_id,
+                "user_id": self._user_id,
+            },
+        )
+        return result.first() is not None
 
     async def list_sessions(
         self, limit: int = 20, cursor: str | None = None

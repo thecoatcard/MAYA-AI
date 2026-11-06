@@ -135,6 +135,46 @@ describe("SseParser", () => {
     }).toThrow(SseBufferOverflowError);
   });
 
+  it.each([
+    ["data", "data: "],
+    ["id", "id: "],
+    ["comment", ": "],
+    ["unknown field", "other: "],
+  ])("rejects an oversized complete %s line in one chunk", (_name, prefix) => {
+    const parser = new SseParser(16);
+    expect(() => parser.push(prefix + "x".repeat(20) + "\n\n")).toThrow(
+      SseBufferOverflowError,
+    );
+  });
+
+  it("rejects a complete oversized frame made of individually bounded lines", () => {
+    const parser = new SseParser(16);
+    expect(() =>
+      parser.push("data: 12345\ndata: 67890\ndata: 12345\n\n"),
+    ).toThrow(SseBufferOverflowError);
+  });
+
+  it("rejects a line that crosses the limit in the chunk that terminates it", () => {
+    const parser = new SseParser(16);
+    parser.push("data: 12345");
+    expect(() => parser.push("67890x\n\n")).toThrow(SseBufferOverflowError);
+  });
+
+  it("accepts a line at the limit and multiple bounded frames in one chunk", () => {
+    const parser = new SseParser(16);
+    expect(parser.push("data: 1234567890\n\ndata: ok\n\n")).toEqual([
+      { event: "message", data: "1234567890", id: null, retry: null },
+      { event: "message", data: "ok", id: null, retry: null },
+    ]);
+  });
+
+  it("accepts an accumulated frame exactly at the limit", () => {
+    const parser = new SseParser(16);
+    expect(parser.push("data: 1234567\ndata: 7654321\n\n")).toEqual([
+      { event: "message", data: "1234567\n7654321", id: null, retry: null },
+    ]);
+  });
+
   it("stays fast for a long line delivered in very small chunks", () => {
     const parser = new SseParser();
     const started = performance.now();

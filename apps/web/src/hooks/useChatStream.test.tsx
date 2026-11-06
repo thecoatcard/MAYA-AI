@@ -1187,6 +1187,120 @@ describe("privacy", () => {
 });
 
 describe("which failures allow a same-key Retry", () => {
+  it("keeps an unusable successful response unconfirmed and retries the same key", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("<html>not an event stream</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          acceptedFrame({ replayed: true }),
+          deltaFrame("stored"),
+          doneFrame(),
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useChatStream());
+    await send(result, "Hi");
+    expect(result.current.messages[0]?.state).toBe("unconfirmed");
+    expect(result.current.canRetry).toBe(true);
+    await act(async () => {
+      await result.current.retry();
+    });
+    const [first, second] = fetchMock.mock.calls.map(
+      (call) => (call[1] as RequestInit).headers as Record<string, string>,
+    );
+    expect(second["Idempotency-Key"]).toBe(first["Idempotency-Key"]);
+    expect(result.current.messages[1]?.content).toBe("stored");
+  });
+
+  it("retries a malformed known event without marking the partial reply complete", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          acceptedFrame(),
+          deltaFrame("partial"),
+          'event: delta\ndata: {"text":\n\n',
+          doneFrame(),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          acceptedFrame({ replayed: true }),
+          deltaFrame("stored reply"),
+          doneFrame(),
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useChatStream({ maxAttempts: 1 }));
+    await send(result, "Hi");
+    expect(result.current.messages[1]).toMatchObject({
+      content: "partial",
+      state: "interrupted",
+    });
+    expect(result.current.error?.code).toBe("stream_protocol_error");
+    expect(result.current.canRetry).toBe(true);
+    await act(async () => {
+      await result.current.retry();
+    });
+    const [first, second] = fetchMock.mock.calls.map(
+      (call) => (call[1] as RequestInit).headers as Record<string, string>,
+    );
+    expect(second["Idempotency-Key"]).toBe(first["Idempotency-Key"]);
+    expect(result.current.messages[1]).toMatchObject({
+      content: "stored reply",
+      state: "complete",
+    });
+  });
+
+  it("does not treat a malformed replay flag as a fresh accepted message", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          frame("message.accepted", {
+            session_id: "session-1",
+            user_message_id: "user-1",
+            assistant_message_id: "assistant-1",
+            replayed: "true",
+          }),
+          deltaFrame("untrusted partial"),
+          doneFrame(),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          acceptedFrame({ replayed: true }),
+          deltaFrame("stored reply"),
+          doneFrame(),
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useChatStream({ maxAttempts: 1 }));
+    await send(result, "Hi");
+    expect(result.current.messages).toMatchObject([
+      { role: "user", state: "unconfirmed" },
+    ]);
+    expect(result.current.error?.code).toBe("stream_protocol_error");
+    expect(result.current.canRetry).toBe(true);
+    await act(async () => {
+      await result.current.retry();
+    });
+    const [first, second] = fetchMock.mock.calls.map(
+      (call) => (call[1] as RequestInit).headers as Record<string, string>,
+    );
+    expect(second["Idempotency-Key"]).toBe(first["Idempotency-Key"]);
+    expect(result.current.messages[1]).toMatchObject({
+      content: "stored reply",
+      state: "complete",
+    });
+  });
+
   it.each([
     [502, "unknown_error"],
     [504, "unknown_error"],
@@ -1401,6 +1515,32 @@ describe("a message whose delivery is unknown", () => {
 });
 
 describe("Ask again is derived from the last message", () => {
+  it("marks loaded interrupted replies without offering an unpaired Ask again", () => {
+    const { result } = setup();
+    act(() => {
+      result.current.openSession("session-1", [
+        {
+          id: "user-1",
+          role: "user",
+          content: "Question",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Partial answer",
+          created_at: "2026-01-01T00:00:01Z",
+          finish_reason: "interrupted",
+        },
+      ]);
+    });
+    expect(result.current.messages[1]).toMatchObject({
+      state: "interrupted",
+      finishReason: "interrupted",
+    });
+    expect(result.current.canAskAgain).toBe(false);
+  });
+
   it("is available after a replayed interrupted done, with no error shown", async () => {
     const { result, stream } = setup();
     stream.mockImplementationOnce(async () =>

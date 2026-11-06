@@ -1,22 +1,19 @@
 """Idempotency of ``POST /api/v1/chat/message`` (ADR-0008, ``docs/api/CHAT.md``).
 
-A request is identified by ``(workspace, user, Idempotency-Key)``. The first request claims the key
-atomically in Redis (``SET NX``) and records a hash of ``session_id`` and ``content``. Everything
+A request is identified by ``(workspace, user, Idempotency-Key)``. PostgreSQL holds the durable
+claim and result; Redis is only a best-effort cache. The durable table stores a keyed digest of the
+key, a keyed hash of ``session_id`` and ``content``, state, and message identifiers. Everything
 that follows is decided from that record:
 
 * a different hash is a different request: ``idempotency_key_reused``;
 * the same hash while the first request is still running: ``request_in_progress``;
 * the same hash after it ended: the stored result is replayed from the database, with no model call.
 
-The record never holds message content, only identifiers, a keyed hash, a state and a code. A
-claim that is still ``in_progress`` expires after fifteen minutes (a crashed request must not block
-its key for a day, and fifteen minutes outlasts the slowest gateway retry-and-fallback sequence
-before the first chunk); the service refreshes it while a long reply streams. Terminal states are
-kept 24 hours. A write only replaces a record that belongs to the same attempt, so a request whose
-claim expired cannot overwrite the claim or the result of the request that took the key over.
-
-Every Redis failure raises ``IdempotencyUnavailable``. Callers fail closed: without the record the
-service could not promise that a retry does not call (and bill) the model a second time.
+The durable record never holds the raw key or message content. Claims do not expire: if a process
+stops after the claim commits but before finalization, a repeat safely remains
+``request_in_progress`` rather than risking another model call. Terminal results are durable and
+replayed from PostgreSQL. Redis entries retain their existing expirations and are only a cache;
+losing, expiring, or failing to update Redis cannot make a durable claim available again.
 """
 
 import hashlib
@@ -162,8 +159,30 @@ def request_hash(
     return mac.hexdigest()
 
 
+def idempotency_key_digest(secret: bytes, scope: IdempotencyScope) -> str:
+    """Return a domain-separated, scoped HMAC for the durable key column.
+
+    The raw key is never written to PostgreSQL. Including both tenant identifiers prevents an
+    identical key from correlating across users or workspaces even if the table is inspected.
+    """
+    subkey = hmac.new(secret, b"maya:chat:key-digest:v1", hashlib.sha256).digest()
+    mac = hmac.new(subkey, digestmod=hashlib.sha256)
+    for part in (
+        str(scope.workspace_id).encode("ascii"),
+        str(scope.user_id).encode("ascii"),
+        scope.key.encode("ascii"),
+    ):
+        mac.update(len(part).to_bytes(8, "big"))
+        mac.update(part)
+    return mac.hexdigest()
+
+
 class IdempotencyStore(Protocol):
-    """Where idempotency records live. ``RedisIdempotencyStore`` is the production one."""
+    """Best-effort Redis cache for the authoritative PostgreSQL idempotency record."""
+
+    async def lookup(self, scope: IdempotencyScope) -> IdempotencyRecord | None:
+        """Read a record without claiming the key or extending its expiry."""
+        ...
 
     async def claim(
         self, scope: IdempotencyScope, record: IdempotencyRecord
@@ -172,9 +191,13 @@ class IdempotencyStore(Protocol):
         already stored under the key."""
         ...
 
-    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
-        """Write the attempt's record: fifteen more minutes if ``in_progress``, 24 hours once
-        terminal. A key that now holds a different attempt's record is left alone."""
+    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
+        """Update a live record owned by this attempt.
+
+        Returns False when the claim expired or another attempt owns/finalized the key; a stale
+        attempt must never recreate an expired key. Redis failures raise
+        ``IdempotencyUnavailable``.
+        """
         ...
 
     async def release(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
@@ -185,8 +208,29 @@ class IdempotencyStore(Protocol):
 class RedisIdempotencyStore:
     """One JSON string per key, so the claim, the value and the expiry are a single command."""
 
+    _COMPARE_SET = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+    return 1
+end
+return 0
+"""
+    _COMPARE_DELETE = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
     def __init__(self, redis: Redis) -> None:
         self._redis = redis
+
+    async def lookup(self, scope: IdempotencyScope) -> IdempotencyRecord | None:
+        try:
+            raw = await self._redis.get(scope.redis_key)
+            return None if raw is None else IdempotencyRecord.from_json(raw)
+        except (RedisError, OSError, ValueError):
+            raise IdempotencyUnavailable from None
 
     async def claim(
         self, scope: IdempotencyScope, record: IdempotencyRecord
@@ -210,38 +254,49 @@ class RedisIdempotencyStore:
                 raise IdempotencyUnavailable from None
         raise IdempotencyUnavailable
 
-    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
+    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
         ttl = IN_PROGRESS_TTL_SECONDS if record.state == "in_progress" else TERMINAL_TTL_SECONDS
         name = scope.redis_key
-        try:
-            raw = await self._redis.get(name)
-            if raw is not None:
+        for _ in range(_CLAIM_ATTEMPTS):
+            try:
+                raw = await self._redis.get(name)
+                if raw is None:
+                    # Once the lease expires, this attempt has lost its fence. In particular,
+                    # never recreate an expired claim/result with SET NX.
+                    return False
                 try:
                     current = IdempotencyRecord.from_json(raw)
                 except ValueError:
                     raise IdempotencyUnavailable from None
-                if current.assistant_message_id != record.assistant_message_id:
-                    # Our claim expired and another request took the key: its record stands. (Read
-                    # then write is not atomic, but the window is two commands wide and only opens
-                    # after a claim already outlived fifteen minutes.)
+                if current.assistant_message_id != record.assistant_message_id or (
+                    current.state != "in_progress" and record.state == "in_progress"
+                ):
+                    # A different attempt or an already-finalized result must not be overwritten.
                     logger.warning("chat_idempotency_save_skipped")
-                    return
-            await self._redis.set(name, record.to_json(), ex=ttl)
-        except (RedisError, OSError):
-            raise IdempotencyUnavailable from None
+                    return False
+                if await self._redis.eval(self._COMPARE_SET, 1, name, raw, record.to_json(), ttl):
+                    return True
+            except (RedisError, OSError):
+                raise IdempotencyUnavailable from None
+        raise IdempotencyUnavailable
 
     async def release(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
         name = scope.redis_key
-        try:
-            raw = await self._redis.get(name)
-            if raw is None:
+        for _ in range(_CLAIM_ATTEMPTS):
+            try:
+                raw = await self._redis.get(name)
+                if raw is None:
+                    return
+                current = IdempotencyRecord.from_json(raw)
+                if (
+                    current.state != "in_progress"
+                    or current.assistant_message_id != record.assistant_message_id
+                ):
+                    return
+                if await self._redis.eval(self._COMPARE_DELETE, 1, name, raw):
+                    return
+            except (RedisError, OSError, ValueError):
+                # The claim then simply expires. Nothing else can be done for a failed cleanup.
+                logger.warning("chat_idempotency_release_failed")
                 return
-            current = IdempotencyRecord.from_json(raw)
-            if (
-                current.state == "in_progress"
-                and current.assistant_message_id == record.assistant_message_id
-            ):
-                await self._redis.delete(name)
-        except (RedisError, OSError, ValueError):
-            # The claim then simply expires. Nothing else can be done for a failed cleanup.
-            logger.warning("chat_idempotency_release_failed")
+        logger.warning("chat_idempotency_release_failed")

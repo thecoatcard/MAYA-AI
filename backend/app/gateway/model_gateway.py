@@ -5,6 +5,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.gateway.client_adapter import create_client_from_settings
-from app.gateway.cost_tracker import BudgetTracker, calculate_cost
+from app.gateway.cost_tracker import BudgetTracker, calculate_cost, cost_to_micro_usd
 from app.gateway.exceptions import (
     BudgetExceededError,
     ContentBlockedError,
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSIONS = 768
 _CHARS_PER_TOKEN = 4
+ONE_MILLION = 1_000_000
 
 # Finish reasons that mean the provider refused to return the content (never retried).
 _BLOCKING_FINISH_REASONS = frozenset(
@@ -104,6 +106,7 @@ class _OpenedStream:
     stream: Any
     iterator: Any
     first_chunk: Any | None
+    admission_token: str | None
 
 
 async def _close_stream_quietly(stream: Any) -> None:
@@ -132,6 +135,7 @@ class ModelGateway:
         self._client = client or create_client_from_settings(settings)
         self._budget_tracker = budget_tracker
         self._resilience = resilience_policy or ResiliencePolicy()
+        self._pending_partial_usage: set[asyncio.Task[None]] = set()
 
     @property
     def client(self) -> Any:
@@ -205,17 +209,135 @@ class ModelGateway:
             spec,
         )
 
-    async def _ensure_budget(
+    async def _acquire_budget_call(
         self,
         workspace_id: UUID | None,
         task_id: UUID | None,
+        spec: ModelSpec,
         *,
         for_tool_call: bool = False,
-    ) -> None:
-        """Refuse to start a provider attempt once an enforced cap is reached."""
+        for_embedding: bool = False,
+        reservation_micro_usd: int = 0,
+    ) -> str | None:
+        """Atomically admit a provider attempt under the task budget."""
+        enforcing = self._settings.budget_enforcement_mode == "enforce"
+        if enforcing:
+            if task_id is None or workspace_id is None:
+                raise BudgetExceededError(
+                    "Enforced billable calls require both task_id and workspace_id"
+                )
+            if self._budget_tracker is None:
+                raise BudgetExceededError(
+                    "Enforced billable calls require an available budget tracker"
+                )
         if self._budget_tracker is not None:
-            await self._budget_tracker.ensure_within_budget(
-                workspace_id, task_id, for_tool_call=for_tool_call
+            return await self._budget_tracker.acquire_call(
+                workspace_id,
+                task_id,
+                for_tool_call=for_tool_call,
+                price_known=self._has_known_price(spec, for_embedding=for_embedding),
+                **({"reservation_micro_usd": reservation_micro_usd} if enforcing else {}),
+            )
+        return None
+
+    @staticmethod
+    def _has_known_price(spec: ModelSpec, *, for_embedding: bool = False) -> bool:
+        """Whether every price category this operation may use is configured."""
+        if spec.price_unknown or spec.cost_per_1m_input is None:
+            return False
+        if for_embedding:
+            return True
+        return spec.cost_per_1m_output is not None
+
+    def _effective_output_limit(self, spec: ModelSpec, requested: int | None) -> int | None:
+        """Bound each provider response to a registered per-model output limit."""
+        if self._settings.budget_enforcement_mode != "enforce":
+            return requested
+        model_limit = spec.context_output_limit
+        if model_limit is None or model_limit <= 0:
+            raise BudgetExceededError(
+                f"Model '{spec.alias}' has no finite output-token limit for enforced budgeting"
+            )
+        if requested is not None and requested <= 0:
+            raise ValueError("max_output_tokens must be positive")
+        return min(requested, model_limit) if requested is not None else model_limit
+
+    def _reservation_micro_usd(
+        self,
+        spec: ModelSpec,
+        *,
+        output_tokens: int = 0,
+        embedding_items: int = 0,
+    ) -> int:
+        """Calculate a conservative registry-price upper bound for one provider attempt."""
+        if self._settings.budget_enforcement_mode != "enforce":
+            return 0
+        if spec.price_unknown or spec.cost_per_1m_input is None:
+            return 0  # Admission below rejects unknown pricing before provider execution.
+        if output_tokens and spec.cost_per_1m_output is None:
+            return 0
+        input_limit = spec.context_input_limit * max(1, embedding_items)
+        amount = Decimal(input_limit) * spec.cost_per_1m_input
+        if output_tokens and spec.cost_per_1m_output is not None:
+            amount += Decimal(output_tokens) * spec.cost_per_1m_output
+        return cost_to_micro_usd(amount / Decimal(ONE_MILLION))
+
+    def _reserved_usage(
+        self,
+        spec: ModelSpec,
+        *,
+        output_tokens: int = 0,
+        embedding_items: int = 0,
+    ) -> TokenUsage:
+        """Usage fallback that conservatively accounts the full reservation on failed attempts."""
+        input_tokens = spec.context_input_limit * max(1, embedding_items)
+        estimated_cost = (
+            Decimal(
+                self._reservation_micro_usd(
+                    spec, output_tokens=output_tokens, embedding_items=embedding_items
+                )
+            )
+            / Decimal(ONE_MILLION)
+            if self._has_known_price(spec, for_embedding=bool(embedding_items))
+            else None
+        )
+        return TokenUsage(
+            prompt_tokens=input_tokens,
+            candidates_tokens=output_tokens,
+            estimated_cost_usd=estimated_cost,
+            price_unknown=spec.price_unknown,
+            is_estimated_cost_complete=estimated_cost is not None,
+            is_usage_estimate=True,
+        )
+
+    async def _release_budget_call(
+        self, workspace_id: UUID | None, task_id: UUID | None, token: str | None
+    ) -> None:
+        """Best-effort lease cleanup that preserves cancellation and observes deferred errors."""
+        if self._budget_tracker is None or token is None:
+            return
+        release_task = asyncio.create_task(
+            self._budget_tracker.release_call(workspace_id, task_id, token)
+        )
+        try:
+            await asyncio.shield(release_task)
+        except asyncio.CancelledError:
+            self._pending_partial_usage.add(release_task)
+            release_task.add_done_callback(self._observe_budget_release)
+            raise
+        except Exception as exc:
+            logger.warning("gateway_budget_admission_release_failed error=%s", type(exc).__name__)
+
+    def _observe_budget_release(self, task: asyncio.Task[None]) -> None:
+        self._pending_partial_usage.discard(task)
+        if task.cancelled():
+            logger.warning("gateway_budget_admission_release_cancelled")
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning(
+                "gateway_budget_admission_release_failed error=%s",
+                type(error).__name__,
             )
 
     async def _record_budget(
@@ -224,14 +346,18 @@ class ModelGateway:
         task_id: UUID | None,
         usage: TokenUsage,
         is_tool_turn: bool = False,
+        reservation_token: str | None = None,
     ) -> None:
         if self._budget_tracker is not None:
-            await self._budget_tracker.record_usage(
-                workspace_id=workspace_id,
-                task_id=task_id,
-                usage=usage,
-                is_tool_turn=is_tool_turn,
-            )
+            kwargs: dict[str, Any] = {
+                "workspace_id": workspace_id,
+                "task_id": task_id,
+                "usage": usage,
+                "is_tool_turn": is_tool_turn,
+            }
+            if reservation_token is not None:
+                kwargs["reservation_token"] = reservation_token
+            await self._budget_tracker.record_usage(**kwargs)
 
     async def generate_text(
         self,
@@ -253,38 +379,64 @@ class ModelGateway:
         client = self._get_client()
         prompt_estimate = estimate_tokens(sanitized_contents)
 
-        config = types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            system_instruction=sanitize_text(system_instruction) if system_instruction else None,
-        )
-
         async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> GatewayResponse:
-            await self._ensure_budget(workspace_id, task_id)
-            response = await client.aio.models.generate_content(
-                model=attempt_spec.model_id,
-                contents=sanitized_contents,
-                config=config,
-            )
-            text = response.text or ""
-            usage = self._extract_usage(
-                response.usage_metadata,
+            output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
+            reservation = self._reservation_micro_usd(attempt_spec, output_tokens=output_limit or 0)
+            reserved_usage = self._reserved_usage(attempt_spec, output_tokens=output_limit or 0)
+            token = await self._acquire_budget_call(
+                workspace_id,
+                task_id,
                 attempt_spec,
-                prompt_estimate=prompt_estimate,
-                output_text=text,
+                reservation_micro_usd=reservation,
             )
+            accounting_attempted = False
+            try:
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=output_limit,
+                    system_instruction=(
+                        sanitize_text(system_instruction) if system_instruction else None
+                    ),
+                )
+                response = await client.aio.models.generate_content(
+                    model=attempt_spec.model_id,
+                    contents=sanitized_contents,
+                    config=config,
+                )
+                text = response.text or ""
+                usage = self._extract_usage(
+                    response.usage_metadata,
+                    attempt_spec,
+                    prompt_estimate=prompt_estimate,
+                    output_text=text,
+                )
 
-            # Usage is recorded before a block is raised: blocked prompts can still be billed.
-            await self._record_budget(workspace_id, task_id, usage, is_tool_turn=False)
-            raise_if_blocked(response)
+                # Usage is recorded before a block is raised: blocked prompts can still be billed.
+                accounting_attempted = True
+                await self._record_budget(
+                    workspace_id,
+                    task_id,
+                    usage,
+                    is_tool_turn=False,
+                    reservation_token=token,
+                )
+                raise_if_blocked(response)
 
-            return GatewayResponse(
-                text=text,
-                model_id=attempt_spec.model_id,
-                alias_used=attempt_spec.alias,
-                was_fallback=was_fallback,
-                usage=usage,
-            )
+                return GatewayResponse(
+                    text=text,
+                    model_id=attempt_spec.model_id,
+                    alias_used=attempt_spec.alias,
+                    was_fallback=was_fallback,
+                    usage=usage,
+                )
+            except BaseException:
+                if token is not None and not accounting_attempted:
+                    await self._record_partial_usage(
+                        workspace_id, task_id, reserved_usage, reservation_token=token
+                    )
+                raise
+            finally:
+                await self._release_budget_call(workspace_id, task_id, token)
 
         result, _, _ = await self._resilience.execute(
             self._registry,
@@ -323,16 +475,26 @@ class ModelGateway:
         client = self._get_client()
         prompt_estimate = estimate_tokens(sanitized_contents)
 
-        config = types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            system_instruction=sanitize_text(system_instruction) if system_instruction else None,
-        )
-
         async def _open(attempt_spec: ModelSpec, was_fallback: bool) -> _OpenedStream:
-            await self._ensure_budget(workspace_id, task_id)
+            output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
+            reservation = self._reservation_micro_usd(attempt_spec, output_tokens=output_limit or 0)
+            reserved_usage = self._reserved_usage(attempt_spec, output_tokens=output_limit or 0)
+            token = await self._acquire_budget_call(
+                workspace_id,
+                task_id,
+                attempt_spec,
+                reservation_micro_usd=reservation,
+            )
             stream: Any = None
+            accounting_attempted = False
             try:
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=output_limit,
+                    system_instruction=(
+                        sanitize_text(system_instruction) if system_instruction else None
+                    ),
+                )
                 # The SDK method is a coroutine that resolves to an async iterator; HTTP status
                 # errors (429, 5xx) are raised here, before any chunk exists.
                 stream = await client.aio.models.generate_content_stream(
@@ -346,10 +508,29 @@ class ModelGateway:
                 except StopAsyncIteration:
                     first_chunk = None
                 if first_chunk is not None:
-                    raise_if_blocked(first_chunk)
-                return _OpenedStream(attempt_spec, was_fallback, stream, iterator, first_chunk)
+                    try:
+                        raise_if_blocked(first_chunk)
+                    except ContentBlockedError:
+                        usage = self._extract_usage(
+                            first_chunk.usage_metadata,
+                            attempt_spec,
+                            prompt_estimate=prompt_estimate,
+                        )
+                        accounting_attempted = True
+                        await self._record_partial_usage(
+                            workspace_id, task_id, usage, reservation_token=token
+                        )
+                        raise
+                return _OpenedStream(
+                    attempt_spec, was_fallback, stream, iterator, first_chunk, token
+                )
             except BaseException:
                 await _close_stream_quietly(stream)
+                if token is not None and not accounting_attempted:
+                    await self._record_partial_usage(
+                        workspace_id, task_id, reserved_usage, reservation_token=token
+                    )
+                await self._release_budget_call(workspace_id, task_id, token)
                 raise
 
         opened, _, _ = await self._resilience.execute(
@@ -361,70 +542,93 @@ class ModelGateway:
         latest_usage: TokenUsage | None = None
 
         try:
-            chunk = opened.first_chunk
-            while chunk is not None:
-                chunk_text = chunk.text or ""
-                accumulated_text.append(chunk_text)
-                chunks_yielded += 1
+            try:
+                chunk = opened.first_chunk
+                while chunk is not None:
+                    chunk_text = chunk.text or ""
+                    accumulated_text.append(chunk_text)
+                    chunks_yielded += 1
 
-                chunk_usage = None
-                if chunk.usage_metadata is not None:
-                    latest_usage = self._extract_usage(chunk.usage_metadata, opened.spec)
-                    chunk_usage = latest_usage
+                    chunk_usage = None
+                    if chunk.usage_metadata is not None:
+                        latest_usage = self._extract_usage(chunk.usage_metadata, opened.spec)
+                        chunk_usage = latest_usage
 
-                finish_reason = None
-                if chunk.candidates:
-                    raw_reason = chunk.candidates[0].finish_reason
-                    finish_reason = _enum_name(raw_reason) if raw_reason is not None else None
+                    finish_reason = None
+                    if chunk.candidates:
+                        raw_reason = chunk.candidates[0].finish_reason
+                        finish_reason = _enum_name(raw_reason) if raw_reason is not None else None
 
-                yield GatewayStreamChunk(
-                    text=chunk_text,
-                    model_id=opened.spec.model_id,
-                    alias_used=opened.spec.alias,
-                    was_fallback=opened.was_fallback,
-                    usage=chunk_usage,
-                    is_final=finish_reason is not None,
-                    finish_reason=finish_reason,
+                    yield GatewayStreamChunk(
+                        text=chunk_text,
+                        model_id=opened.spec.model_id,
+                        alias_used=opened.spec.alias,
+                        was_fallback=opened.was_fallback,
+                        usage=chunk_usage,
+                        is_final=finish_reason is not None,
+                        finish_reason=finish_reason,
+                    )
+
+                    try:
+                        chunk = await opened.iterator.__anext__()
+                    except StopAsyncIteration:
+                        chunk = None
+                    if chunk is not None:
+                        try:
+                            raise_if_blocked(chunk)
+                        except ContentBlockedError:
+                            if chunk.usage_metadata is not None:
+                                latest_usage = self._extract_usage(
+                                    chunk.usage_metadata, opened.spec
+                                )
+                            raise
+            except Exception as exc:
+                partial_usage = self._partial_stream_usage(
+                    opened.spec, latest_usage, prompt_estimate, accumulated_text
                 )
+                await self._record_partial_usage(
+                    workspace_id,
+                    task_id,
+                    partial_usage,
+                    reservation_token=opened.admission_token,
+                )
+                raise StreamInterruptedError(
+                    f"Stream interrupted after {chunks_yielded} chunk(s) ({describe_error(exc)})",
+                    partial_text="".join(accumulated_text),
+                    chunks_yielded=chunks_yielded,
+                    partial_usage=partial_usage,
+                ) from exc
+            except (asyncio.CancelledError, GeneratorExit):
+                # The caller cancelled or stopped iterating: what was already generated is billed.
+                partial_usage = self._partial_stream_usage(
+                    opened.spec, latest_usage, prompt_estimate, accumulated_text
+                )
+                await self._record_partial_usage(
+                    workspace_id,
+                    task_id,
+                    partial_usage,
+                    reservation_token=opened.admission_token,
+                )
+                raise
+            finally:
+                await _close_stream_quietly(opened.stream)
 
-                try:
-                    chunk = await opened.iterator.__anext__()
-                except StopAsyncIteration:
-                    chunk = None
-                if chunk is not None:
-                    raise_if_blocked(chunk)
-
-        except Exception as exc:
-            partial_usage = self._partial_stream_usage(
-                opened.spec, latest_usage, prompt_estimate, accumulated_text
+            if latest_usage is None:
+                latest_usage = self._extract_usage(
+                    None,
+                    opened.spec,
+                    prompt_estimate=prompt_estimate,
+                    output_text="".join(accumulated_text),
+                )
+            await self._record_budget(
+                workspace_id,
+                task_id,
+                latest_usage,
+                is_tool_turn=False,
+                reservation_token=opened.admission_token,
             )
-            await self._record_partial_usage(workspace_id, task_id, partial_usage)
-            raise StreamInterruptedError(
-                f"Stream interrupted after {chunks_yielded} chunk(s) ({describe_error(exc)})",
-                partial_text="".join(accumulated_text),
-                chunks_yielded=chunks_yielded,
-                partial_usage=partial_usage,
-            ) from exc
-        except (asyncio.CancelledError, GeneratorExit):
-            # The caller cancelled or stopped iterating: what was already generated is billed.
-            partial_usage = self._partial_stream_usage(
-                opened.spec, latest_usage, prompt_estimate, accumulated_text
-            )
-            await self._record_partial_usage(workspace_id, task_id, partial_usage)
-            raise
         finally:
-            await _close_stream_quietly(opened.stream)
-
-        # Normal completion only (every failure path above re-raises). Recorded outside the try
-        # block so that a BudgetExceededError here is not mistaken for a stream failure.
-        if latest_usage is None:
-            latest_usage = self._extract_usage(
-                None,
-                opened.spec,
-                prompt_estimate=prompt_estimate,
-                output_text="".join(accumulated_text),
-            )
-        await self._record_budget(workspace_id, task_id, latest_usage, is_tool_turn=False)
+            await self._release_budget_call(workspace_id, task_id, opened.admission_token)
 
     def _partial_stream_usage(
         self,
@@ -442,13 +646,44 @@ class ModelGateway:
         )
 
     async def _record_partial_usage(
-        self, workspace_id: UUID | None, task_id: UUID | None, usage: TokenUsage
+        self,
+        workspace_id: UUID | None,
+        task_id: UUID | None,
+        usage: TokenUsage,
+        *,
+        reservation_token: str | None = None,
     ) -> None:
-        """Record an interrupted stream's estimate; never lets a budget error mask the cause."""
+        """Best-effort accounting without masking the original stream failure."""
+        task = asyncio.create_task(
+            self._record_budget(workspace_id, task_id, usage, reservation_token=reservation_token)
+        )
         try:
-            await asyncio.shield(self._record_budget(workspace_id, task_id, usage))
-        except BudgetExceededError:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A second cancellation must not discard the shielded write or its eventual error.
+            self._pending_partial_usage.add(task)
+            task.add_done_callback(self._observe_partial_usage)
+            raise
+        except Exception as exc:
+            self._log_partial_usage_failure(exc)
+
+    @staticmethod
+    def _log_partial_usage_failure(exc: BaseException) -> None:
+        if isinstance(exc, BudgetExceededError):
             logger.warning("gateway_partial_stream_usage_exceeded_budget")
+        else:
+            logger.warning(
+                "gateway_partial_stream_usage_record_failed error=%s", type(exc).__name__
+            )
+
+    def _observe_partial_usage(self, task: asyncio.Task[None]) -> None:
+        self._pending_partial_usage.discard(task)
+        if task.cancelled():
+            logger.warning("gateway_partial_stream_usage_record_cancelled")
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._log_partial_usage_failure(exc)
 
     async def generate_structured[T: BaseModel](
         self,
@@ -519,6 +754,7 @@ class ModelGateway:
         task_id: UUID | None = None,
         workspace_id: UUID | None = None,
         allow_fallback: bool = True,
+        max_output_tokens: int | None = None,
     ) -> ToolGatewayResponse:
         """Generate response containing tool call requests. The gateway NEVER executes tools.
 
@@ -544,50 +780,78 @@ class ModelGateway:
         ]
         sdk_tools = [types.Tool(function_declarations=sdk_functions)] if sdk_functions else None
 
-        config = types.GenerateContentConfig(
-            temperature=temperature,
-            system_instruction=sanitize_text(system_instruction) if system_instruction else None,
-            tools=sdk_tools,
-        )
-
         async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> ToolGatewayResponse:
-            await self._ensure_budget(workspace_id, task_id, for_tool_call=True)
-            response = await client.aio.models.generate_content(
-                model=attempt_spec.model_id,
-                contents=sanitized_contents,
-                config=config,
-            )
-            text = response.text or ""
-            usage = self._extract_usage(
-                response.usage_metadata,
+            output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
+            reservation = self._reservation_micro_usd(attempt_spec, output_tokens=output_limit or 0)
+            reserved_usage = self._reserved_usage(attempt_spec, output_tokens=output_limit or 0)
+            token = await self._acquire_budget_call(
+                workspace_id,
+                task_id,
                 attempt_spec,
-                prompt_estimate=prompt_estimate,
-                output_text=text,
+                for_tool_call=True,
+                reservation_micro_usd=reservation,
             )
-
-            call_requests: list[ToolCallRequest] = []
-            for idx, fc in enumerate(response.function_calls or []):
-                call_requests.append(
-                    ToolCallRequest(
-                        call_id=getattr(fc, "id", None) or f"call_{idx}_{fc.name}",
-                        tool_name=fc.name,
-                        arguments=dict(fc.args or {}),
-                    )
+            accounting_attempted = False
+            try:
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=output_limit,
+                    system_instruction=(
+                        sanitize_text(system_instruction) if system_instruction else None
+                    ),
+                    tools=sdk_tools,
+                )
+                response = await client.aio.models.generate_content(
+                    model=attempt_spec.model_id,
+                    contents=sanitized_contents,
+                    config=config,
+                )
+                text = response.text or ""
+                usage = self._extract_usage(
+                    response.usage_metadata,
+                    attempt_spec,
+                    prompt_estimate=prompt_estimate,
+                    output_text=text,
                 )
 
-            is_tool_turn = len(call_requests) > 0
-            await self._record_budget(workspace_id, task_id, usage, is_tool_turn=is_tool_turn)
-            if not call_requests and not text:
-                raise_if_blocked(response)
+                call_requests: list[ToolCallRequest] = []
+                for idx, fc in enumerate(response.function_calls or []):
+                    call_requests.append(
+                        ToolCallRequest(
+                            call_id=getattr(fc, "id", None) or f"call_{idx}_{fc.name}",
+                            tool_name=fc.name,
+                            arguments=dict(fc.args or {}),
+                        )
+                    )
 
-            return ToolGatewayResponse(
-                call_requests=call_requests,
-                text=text,
-                model_id=attempt_spec.model_id,
-                alias_used=attempt_spec.alias,
-                was_fallback=was_fallback,
-                usage=usage,
-            )
+                is_tool_turn = len(call_requests) > 0
+                accounting_attempted = True
+                await self._record_budget(
+                    workspace_id,
+                    task_id,
+                    usage,
+                    is_tool_turn=is_tool_turn,
+                    reservation_token=token,
+                )
+                if not call_requests and not text:
+                    raise_if_blocked(response)
+
+                return ToolGatewayResponse(
+                    call_requests=call_requests,
+                    text=text,
+                    model_id=attempt_spec.model_id,
+                    alias_used=attempt_spec.alias,
+                    was_fallback=was_fallback,
+                    usage=usage,
+                )
+            except BaseException:
+                if token is not None and not accounting_attempted:
+                    await self._record_partial_usage(
+                        workspace_id, task_id, reserved_usage, reservation_token=token
+                    )
+                raise
+            finally:
+                await self._release_budget_call(workspace_id, task_id, token)
 
         result, _, _ = await self._resilience.execute(
             self._registry,
@@ -620,55 +884,89 @@ class ModelGateway:
         client = self._get_client()
 
         config = types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
+        embedding_items = max(1, len(sanitized)) if isinstance(sanitized, list) else 1
 
-        async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> EmbeddingResponse:
-            await self._ensure_budget(workspace_id, task_id)
-            response = await client.aio.models.embed_content(
-                model=attempt_spec.model_id,
-                contents=sanitized,
-                config=config,
-            )
-
-            vectors: list[list[float]] = []
-            for emb in response.embeddings or []:
-                vec = list(emb.values or [])
-                if len(vec) != EMBEDDING_DIMENSIONS:
-                    raise EmbeddingDimensionMismatchError(
-                        f"Model '{attempt_spec.model_id}' returned vector with {len(vec)} "
-                        f"dimensions, expected exactly {EMBEDDING_DIMENSIONS} dimensions."
-                    )
-                vectors.append(vec)
-            if not vectors:
-                raise GatewayError(
-                    f"Model '{attempt_spec.model_id}' returned no embedding vectors."
-                )
-
-            # The embedding API reports no token usage, so input size is estimated and flagged.
-            usage = self._price(
-                TokenUsage(
-                    prompt_tokens=estimate_tokens(sanitized),
-                    price_unknown=attempt_spec.price_unknown,
-                    is_usage_estimate=True,
-                ),
+        async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> Any:
+            reservation = self._reservation_micro_usd(attempt_spec, embedding_items=embedding_items)
+            reserved_usage = self._reserved_usage(attempt_spec, embedding_items=embedding_items)
+            token = await self._acquire_budget_call(
+                workspace_id,
+                task_id,
                 attempt_spec,
+                for_embedding=True,
+                reservation_micro_usd=reservation,
             )
-            await self._record_budget(workspace_id, task_id, usage, is_tool_turn=False)
+            accounting_attempted = False
+            try:
+                response = await client.aio.models.embed_content(
+                    model=attempt_spec.model_id,
+                    contents=sanitized,
+                    config=config,
+                )
+                usage = self._price(
+                    TokenUsage(
+                        prompt_tokens=estimate_tokens(sanitized),
+                        price_unknown=attempt_spec.price_unknown,
+                        is_usage_estimate=True,
+                    ),
+                    attempt_spec,
+                )
+                # Meter a received response before validating its vectors, including malformed ones.
+                accounting_attempted = True
+                await self._record_budget(
+                    workspace_id,
+                    task_id,
+                    usage,
+                    is_tool_turn=False,
+                    reservation_token=token,
+                )
+                return response
+            except BaseException:
+                if token is not None and not accounting_attempted:
+                    await self._record_partial_usage(
+                        workspace_id, task_id, reserved_usage, reservation_token=token
+                    )
+                raise
+            finally:
+                await self._release_budget_call(workspace_id, task_id, token)
 
-            return EmbeddingResponse(
-                vectors=vectors,
-                model_id=attempt_spec.model_id,
-                usage=usage,
-                alias_used=attempt_spec.alias,
-                was_fallback=was_fallback,
-            )
-
-        result, _, _ = await self._resilience.execute(
+        response, attempt_spec, was_fallback = await self._resilience.execute(
             self._registry,
             alias,
             _call_model,
             allow_fallback=allow_fallback,
         )
-        return result
+
+        # A received response can be billed even when its vectors are unusable. Accounting occurs
+        # in the attempt callback before it releases the admission lease.
+        usage = self._price(
+            TokenUsage(
+                prompt_tokens=estimate_tokens(sanitized),
+                price_unknown=attempt_spec.price_unknown,
+                is_usage_estimate=True,
+            ),
+            attempt_spec,
+        )
+
+        vectors: list[list[float]] = []
+        for emb in response.embeddings or []:
+            vec = list(emb.values or [])
+            if len(vec) != EMBEDDING_DIMENSIONS:
+                raise EmbeddingDimensionMismatchError(
+                    f"Model '{attempt_spec.model_id}' returned vector with {len(vec)} "
+                    f"dimensions, expected exactly {EMBEDDING_DIMENSIONS} dimensions."
+                )
+            vectors.append(vec)
+        if not vectors:
+            raise GatewayError(f"Model '{attempt_spec.model_id}' returned no embedding vectors.")
+
+        return EmbeddingResponse(
+            vectors=vectors,
+            model_id=attempt_spec.model_id,
+            usage=usage,
+            alias_used=attempt_spec.alias,
+            was_fallback=was_fallback,
+        )
 
     async def count_tokens(
         self,

@@ -199,7 +199,7 @@ async def test_a_blocked_first_chunk_is_raised_without_fallback() -> None:
 async def test_exhausted_budget_stops_a_stream_before_the_provider_is_contacted() -> None:
     fake = FakeGeminiClient()
     tracker = make_tracker_mock()
-    tracker.ensure_within_budget.side_effect = BudgetExceededError("cap reached")
+    tracker.acquire_call.side_effect = BudgetExceededError("cap reached")
     gateway = make_gateway(fake, tracker=tracker)
 
     with pytest.raises(BudgetExceededError):

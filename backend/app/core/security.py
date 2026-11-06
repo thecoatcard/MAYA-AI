@@ -82,11 +82,30 @@ class PasswordService:
             raise Overloaded
         self._pending += 1
         try:
-            return await asyncio.get_running_loop().run_in_executor(
+            operation = asyncio.get_running_loop().run_in_executor(
                 self._executor, function, *arguments
             )
-        finally:
+        except BaseException:
             self._pending -= 1
+            raise
+
+        def release_capacity(_: asyncio.Future[T]) -> None:
+            self._pending -= 1
+
+        # A cancelled caller must not cancel the executor future: the worker keeps consuming
+        # bounded capacity until its operation really completes.
+        operation.add_done_callback(release_capacity)
+        return await asyncio.shield(operation)
+
+    async def aclose(self) -> None:
+        """Stop accepting work and wait for submitted password operations to finish."""
+        shutdown = asyncio.get_running_loop().run_in_executor(None, self._executor.shutdown, True)
+        try:
+            await asyncio.shield(shutdown)
+        except asyncio.CancelledError:
+            # Keep shutdown awaited even if the lifespan task itself is cancelled.
+            await shutdown
+            raise
 
     async def hash(self, password: str) -> str:
         return await self._run(self._hasher.hash, normalize_password(password))

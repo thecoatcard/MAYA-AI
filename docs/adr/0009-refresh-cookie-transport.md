@@ -29,6 +29,7 @@ The owner approved: **"HttpOnly cookie via proxy (Recommended)"** on 2026-11-06.
 - Positive: refresh credentials are unavailable to application JavaScript, and same-origin routing avoids cross-origin credential handling.
 - Negative: cookie transport relies on the same-origin proxy and needs a `Secure=false` local setting only when the local browser cannot use secure cookies over plain HTTP.
 - Mitigations: the transport is explicit and opt-in; token responses are not cached; the cookie is path-scoped, strict same-site, and HttpOnly; the API keeps its legacy JSON mode.
+- A refresh result is applied only while the initiating tab's in-memory identity is unchanged. Tabs also send a non-secret local-storage change marker when sign-in or sign-out changes that identity; receiving tabs discard their in-memory access token. Where supported, refresh, sign-in, signup completion and logout requests are serialized under the same browser Web Lock, covering the response that rotates, sets or clears the single-use cookie. The client applies the returned sign-in token before releasing that lock. These are best-effort client mitigations, not a way to inspect or synchronize the HttpOnly cookie itself. Browsers without Web Locks, storage access, or active application tabs can still have cookie transitions the client cannot observe.
 
 ## Security and compliance impact
 

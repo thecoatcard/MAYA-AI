@@ -117,6 +117,9 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
     assert paths == {
         ("/api/v1/healthz", "GET"),
         ("/api/v1/readyz", "GET"),
+        (f"{BASE}/identify", "POST"),
+        (f"{BASE}/signup/otp", "POST"),
+        (f"{BASE}/signup/complete", "POST"),
         (f"{BASE}/register", "POST"),
         (f"{BASE}/resend-verification", "POST"),
         (f"{BASE}/verify-email", "POST"),
@@ -128,6 +131,7 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         (f"{BASE}/me", "GET"),
         ("/api/v1/chat/message", "POST"),
         ("/api/v1/chat/sessions", "GET"),
+        ("/api/v1/chat/sessions/{session_id}", "DELETE"),
         ("/api/v1/chat/sessions/{session_id}/messages", "GET"),
     }
 
@@ -135,7 +139,7 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
 def test_the_whole_account_lifecycle_over_http(api: Api) -> None:
     account = api.register()
     assert (
-        api.post("token", username=account["username"], password=GOOD_PASSWORD).status_code == 403
+        api.post("token", username=account["username"], password=GOOD_PASSWORD).status_code == 401
     )
 
     code = api.harness.email.codes_for(account["email"])[-1]
@@ -385,6 +389,19 @@ def test_login_failures_do_not_reveal_which_part_was_wrong(api: Api) -> None:
     assert wrong.json() == {"error": "invalid_credentials"}
 
 
+def test_unverified_login_matches_unknown_and_wrong_password_responses(api: Api) -> None:
+    verified = api.register_and_verify()
+    unverified = api.register()
+    responses = [
+        api.post("token", username=verified["username"], password="not the password"),
+        api.post("token", username="unknown_user", password=GOOD_PASSWORD),
+        api.post("token", username=unverified["email"], password=GOOD_PASSWORD),
+    ]
+    assert len({repr(_shape(response)) for response in responses}) == 1
+    assert responses[0].status_code == 401
+    assert responses[0].json() == {"error": "invalid_credentials"}
+
+
 def test_validation_errors_name_fields_but_never_echo_values(api: Api) -> None:
     secret = "Sentinel-Fake-Value-123"
     bodies = [
@@ -532,3 +549,83 @@ def test_logs_never_contain_credentials_codes_tokens_or_addresses(api: Api) -> N
         account["username"],
     ):
         assert secret not in log
+
+
+def test_identify_is_neutral_and_does_not_query_account_storage(api: Api) -> None:
+    account = api.register_and_verify()
+    expected_body = {"status": "accepted"}
+
+    with (
+        patch.object(api.harness.service, "_find_by_email", new_callable=AsyncMock) as by_email,
+        patch.object(
+            api.harness.service, "_find_by_username", new_callable=AsyncMock
+        ) as by_username,
+    ):
+        responses = [
+            api.post("identify", identifier=account["email"]),
+            api.post("identify", identifier="unknownuser@example.com"),
+            api.post("identify", identifier=account["username"]),
+            api.post("identify", identifier="unknown_username"),
+        ]
+
+    assert all(
+        response.status_code == 200 and response.json() == expected_body for response in responses
+    )
+    by_email.assert_not_awaited()
+    by_username.assert_not_awaited()
+
+
+def test_identify_invalid_format_returns_422(api: Api) -> None:
+    res = api.post("identify", identifier="   ")
+    assert res.status_code == 422
+
+
+def test_signup_otp_and_complete_flow(api: Api) -> None:
+    email = "newbie@example.com"
+    # Step 1: Send signup OTP
+    res_otp = api.post("signup/otp", email=email)
+    assert res_otp.status_code == 202
+
+    codes = api.harness.email.codes_for(email)
+    assert len(codes) == 1
+    code = codes[0]
+
+    # Step 2: Complete signup with OTP
+    res_complete = api.post(
+        "signup/complete",
+        email=email,
+        code=code,
+        username="newbie_user",
+        password=GOOD_PASSWORD,
+        full_name="Newbie User",
+    )
+    assert res_complete.status_code == 200
+    data = res_complete.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+
+    # Step 3: Identify gives the same neutral response after account creation.
+    ident = api.post("identify", identifier=email)
+    assert ident.status_code == 200
+    assert ident.json() == {"status": "accepted"}
+
+    # Step 4: Login with username or email works immediately
+    res_login_user = api.post("token", username="newbie_user", password=GOOD_PASSWORD)
+    assert res_login_user.status_code == 200
+    res_login_email = api.post("token", username=email, password=GOOD_PASSWORD)
+    assert res_login_email.status_code == 200
+
+
+def test_signup_complete_with_invalid_otp_returns_400(api: Api) -> None:
+    email = "testwrongotp@example.com"
+    api.post("signup/otp", email=email)
+    res = api.post(
+        "signup/complete",
+        email=email,
+        code="999999",
+        username="wrong_user",
+        password=GOOD_PASSWORD,
+        full_name="Wrong User",
+    )
+    assert res.status_code == 400
+    assert res.json()["error"] == "invalid_or_expired_code"

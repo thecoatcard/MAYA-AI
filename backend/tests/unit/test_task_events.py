@@ -1,0 +1,176 @@
+"""Unit tests for Redis task events: schema validation, channel naming, and publisher."""
+
+import json
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
+
+from app.tasks.events import (
+    TaskEvent,
+    TaskEventPublisher,
+    TaskEventType,
+    get_task_channel,
+)
+
+
+def test_task_channel_naming() -> None:
+    ws_id = "ws_test_123"
+    assert get_task_channel(ws_id) == "maya:tasks:ws_test_123"
+
+    ws_uuid = uuid4()
+    assert get_task_channel(ws_uuid) == f"maya:tasks:{ws_uuid}"
+
+
+def test_task_event_schema_defaults() -> None:
+    before = datetime.now(UTC)
+    event = TaskEvent(
+        event_type=TaskEventType.PLANNING_STARTED,
+        session_id="sess_1",
+        workspace_id="ws_1",
+    )
+    after = datetime.now(UTC)
+
+    assert event.event_type == "planning_started"
+    assert event.session_id == "sess_1"
+    assert event.workspace_id == "ws_1"
+    assert event.payload == {}
+    assert before <= event.timestamp <= after
+
+
+def test_task_event_json_serialization() -> None:
+    event = TaskEvent(
+        event_type=TaskEventType.SUBTASK_DISPATCHED,
+        session_id="sess_abc",
+        workspace_id="ws_xyz",
+        payload={"subtask_id": "t1", "agent": "research"},
+    )
+    dumped = event.model_dump_json()
+    data = json.loads(dumped)
+
+    assert data["event_type"] == "subtask_dispatched"
+    assert data["session_id"] == "sess_abc"
+    assert data["workspace_id"] == "ws_xyz"
+    assert data["payload"]["subtask_id"] == "t1"
+    assert "timestamp" in data
+
+
+@pytest.mark.parametrize("event_type", ["unknown", "", "TASK_COMPLETED"])
+def test_task_event_rejects_unknown_event_types(event_type: str) -> None:
+    with pytest.raises(ValidationError):
+        TaskEvent(event_type=event_type, session_id="s", workspace_id="w")
+
+
+def test_task_event_rejects_naive_timestamps() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        TaskEvent(
+            event_type=TaskEventType.TASK_COMPLETED,
+            session_id="s",
+            workspace_id="w",
+            timestamp=datetime(2024, 1, 2),
+        )
+
+
+def test_task_event_normalizes_aware_timestamps_to_utc() -> None:
+    event = TaskEvent(
+        event_type=TaskEventType.TASK_COMPLETED,
+        session_id="s",
+        workspace_id="w",
+        timestamp=datetime.fromisoformat("2024-01-02T08:00:00+05:30"),
+    )
+
+    assert event.timestamp == datetime.fromisoformat("2024-01-02T02:30:00+00:00")
+
+
+@pytest.mark.asyncio
+async def test_task_event_publisher_publishes_to_correct_channel() -> None:
+    mock_redis = AsyncMock()
+    mock_redis.publish.return_value = 1
+
+    publisher = TaskEventPublisher(mock_redis)
+    event = TaskEvent(
+        event_type=TaskEventType.TASK_COMPLETED,
+        session_id="s1",
+        workspace_id="ws_99",
+        payload={"result": "ok"},
+    )
+
+    count = await publisher.publish(event)
+    assert count == 1
+
+    mock_redis.publish.assert_called_once()
+    channel, message = mock_redis.publish.call_args[0]
+    assert channel == "maya:tasks:ws_99"
+    payload = json.loads(message)
+    assert payload["event_type"] == "task_completed"
+    assert payload["session_id"] == "s1"
+    assert payload["payload"]["result"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_task_event_publisher_helpers() -> None:
+    mock_redis = AsyncMock()
+    mock_redis.publish.return_value = 1
+    publisher = TaskEventPublisher(mock_redis)
+
+    # 1. planning_started
+    await publisher.publish_planning_started("s", "w", {"instruction": "test"})
+    # 2. subtask_dispatched
+    await publisher.publish_subtask_dispatched("s", "w", "sub_1", "coding")
+    # 3. awaiting_approval
+    await publisher.publish_awaiting_approval("s", "w", "sub_2", {"action": "email"})
+    # 4. task_completed
+    await publisher.publish_task_completed("s", "w", {"summary": "done"})
+    # 5. task_failed
+    await publisher.publish_task_failed("s", "w", "Rate limit exceeded")
+
+    assert mock_redis.publish.call_count == 5
+
+    events = [json.loads(call[0][1]) for call in mock_redis.publish.call_args_list]
+    assert events[0]["event_type"] == TaskEventType.PLANNING_STARTED
+    assert events[1]["event_type"] == TaskEventType.SUBTASK_DISPATCHED
+    assert events[1]["payload"]["subtask_id"] == "sub_1"
+    assert events[2]["event_type"] == TaskEventType.AWAITING_APPROVAL
+    assert events[3]["event_type"] == TaskEventType.TASK_COMPLETED
+    assert events[4]["event_type"] == TaskEventType.TASK_FAILED
+    assert events[4]["payload"]["error"] == "Rate limit exceeded"
+
+
+@pytest.mark.asyncio
+async def test_event_helpers_do_not_allow_payload_to_override_trusted_fields() -> None:
+    mock_redis = AsyncMock()
+    publisher = TaskEventPublisher(mock_redis)
+
+    await publisher.publish_subtask_dispatched(
+        "session-trusted",
+        "workspace-trusted",
+        "subtask-trusted",
+        "coding",
+        {"subtask_id": "subtask-untrusted", "assigned_agent": "email"},
+    )
+    await publisher.publish_task_failed(
+        "session-trusted",
+        "workspace-trusted",
+        "trusted failure",
+        {"error": "overridden failure"},
+    )
+    await publisher.publish_awaiting_approval(
+        "session-trusted",
+        "workspace-trusted",
+        "approval-subtask-trusted",
+        {"subtask_id": "approval-subtask-untrusted"},
+    )
+
+    dispatched = json.loads(mock_redis.publish.call_args_list[0].args[1])
+    failed = json.loads(mock_redis.publish.call_args_list[1].args[1])
+    approval = json.loads(mock_redis.publish.call_args_list[2].args[1])
+    assert dispatched["session_id"] == "session-trusted"
+    assert dispatched["workspace_id"] == "workspace-trusted"
+    assert dispatched["payload"]["subtask_id"] == "subtask-trusted"
+    assert dispatched["payload"]["assigned_agent"] == "coding"
+    assert failed["session_id"] == "session-trusted"
+    assert failed["workspace_id"] == "workspace-trusted"
+    assert failed["payload"]["error"] == "trusted failure"
+    assert approval["payload"]["subtask_id"] == "approval-subtask-trusted"

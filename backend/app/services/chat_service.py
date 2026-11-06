@@ -5,18 +5,18 @@ that can still be answered with a plain JSON status and returns a turn whose ``e
 Server-Sent Events body; the route only wraps it in a response. In this order:
 
 1. validate the ``Idempotency-Key`` header and the body (before any state is touched);
-2. refuse with ``model_unavailable`` when no Gemini client exists (nothing is stored);
+2. if no Gemini client exists, look for a previous request or refuse with ``model_unavailable``;
 3. apply the per-user rate limit;
 4. check the session belongs to the caller;
-5. claim the idempotency key (a repeat is answered from the stored result, never by the model);
+5. claim the idempotency key (a repeat is answered from the stored result, not by the model);
 6. store the user message, creating the session if none was given, in its own short transaction;
 7. stream the reply through ``ModelGateway.generate_stream``.
 
 After ``message.accepted`` is sent the response is already ``200``, so a failure can only end the
 stream with an ``error`` event. Whatever happens, one terminal write records the outcome: the
 assistant reply (completed or interrupted) in ``messages`` and the final state in the idempotency
-record. That write runs as its own task behind ``asyncio.shield``, so a disconnect, a cancellation
-or a closed generator cannot lose a reply the provider already generated and billed.
+record. That write runs as its own task behind ``asyncio.shield`` to resist ordinary cancellation;
+process termination, storage failures and ambiguous commits can still prevent reliable replay.
 
 Neither the message text, the reply, the idempotency key nor any provider error text is ever
 written to a log; failures are logged as a class name or a status code only.
@@ -30,7 +30,7 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass, field, replace
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 from uuid import UUID, uuid4
 
 from google.genai import errors as genai_errors
@@ -51,6 +51,7 @@ from app.core.ratelimit import Limit, RateLimiter, RateLimiterUnavailable
 from app.db.repositories.chat import (
     MAX_RECENT_LIMIT,
     Channel,
+    ChatIdempotencyRecord,
     ChatMessageRecord,
     ChatRepository,
     ChatSessionRecord,
@@ -92,6 +93,7 @@ from app.services.chat_idempotency import (
     IdempotencyStore,
     IdempotencyUnavailable,
     State,
+    idempotency_key_digest,
     request_hash,
 )
 from app.services.context_manager import (
@@ -181,6 +183,10 @@ class _ReplyDeadlineExceeded(Exception):
     """
 
 
+class _ClaimLost(Exception):
+    """The idempotency or concurrency lease expired or was taken over by another attempt."""
+
+
 class ChatStorage(Protocol):
     """The part of ``ChatRepository`` this service uses (tests may supply an in-memory one)."""
 
@@ -189,6 +195,10 @@ class ChatStorage(Protocol):
     ) -> ChatSessionRecord: ...
 
     async def get_session(self, session_id: UUID) -> ChatSessionRecord | None: ...
+
+    async def lock_session(self, session_id: UUID) -> None: ...
+
+    async def delete_session(self, session_id: UUID) -> bool: ...
 
     async def list_sessions(
         self, limit: int = 20, cursor: str | None = None
@@ -211,6 +221,14 @@ class ChatStorage(Protocol):
     ) -> RecordPage[ChatMessageRecord]: ...
 
     async def recent_messages(self, session_id: UUID, limit: int) -> list[ChatMessageRecord]: ...
+
+    async def get_idempotency(self, key_digest: str) -> ChatIdempotencyRecord | None: ...
+
+    async def claim_idempotency(
+        self, key_digest: str, record: ChatIdempotencyRecord
+    ) -> ChatIdempotencyRecord | None: ...
+
+    async def save_idempotency(self, key_digest: str, record: ChatIdempotencyRecord) -> bool: ...
 
 
 ChatStorageFactory = Callable[[AsyncConnection, UUID, UUID], ChatStorage]
@@ -293,10 +311,12 @@ class _Wiring:
 @dataclass(frozen=True, slots=True)
 class _Plan:
     scope: IdempotencyScope
+    key_digest: str
     claim: IdempotencyRecord  # the in_progress record; carries the three ids and the hash
     session_id: UUID
     window: ContextWindow
     stream_lease: ChatStreamLease
+    stream_lease_seconds: int
 
     @property
     def user_message_id(self) -> UUID:
@@ -305,6 +325,30 @@ class _Plan:
     @property
     def assistant_message_id(self) -> UUID:
         return self.claim.assistant_message_id
+
+
+def _database_idempotency(record: IdempotencyRecord) -> ChatIdempotencyRecord:
+    return ChatIdempotencyRecord(
+        state=record.state,
+        request_hash=record.request_hash,
+        session_id=record.session_id,
+        user_message_id=record.user_message_id,
+        assistant_message_id=record.assistant_message_id,
+        finish_reason=record.finish_reason,
+        error_code=record.error_code,
+    )
+
+
+def _service_idempotency(record: ChatIdempotencyRecord) -> IdempotencyRecord:
+    return IdempotencyRecord(
+        state=cast(State, record.state),
+        request_hash=record.request_hash,
+        session_id=record.session_id,
+        user_message_id=record.user_message_id,
+        assistant_message_id=record.assistant_message_id,
+        finish_reason=record.finish_reason,
+        error_code=record.error_code,
+    )
 
 
 @dataclass(slots=True)
@@ -380,11 +424,12 @@ class _LiveTurn:
         self._plan = plan
         self._progress = _Progress()
         self._started_at = 0.0
-        self._last_refresh = 0.0
         self._started = False
         self._finalizer: asyncio.Task[_Finalized] | None = None
         self._summary: _Summary | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
+        self._claim_lost = asyncio.Event()
+        self._refresh_task: asyncio.Task[Any] | None = None
         self._body = self._run()
 
     def events(self) -> AsyncIterator[str]:
@@ -409,9 +454,10 @@ class _LiveTurn:
         self._started = True
         plan = self._plan
         sequence = itertools.count(1)
-        self._started_at = self._last_refresh = self._w.monotonic()
+        self._started_at = self._w.monotonic()
 
         failure: ErrorCode | None = None
+        cancelled_finalizer: asyncio.Task[_Finalized] | None = None
         progress = self._progress
         # Creating the generator does nothing yet: the call is validated when iteration starts.
         stream = self._w.gateway.generate_stream(
@@ -422,6 +468,7 @@ class _LiveTurn:
             workspace_id=self._w.principal.workspace_id,
         )
         try:
+            self._refresh_task = self._spawn(self._refresh_leases())
             yield encode_sse(
                 next(sequence),
                 "message.accepted",
@@ -437,26 +484,33 @@ class _LiveTurn:
             # client), because a cancellation there lands outside this code and the
             # client would get no error frame.
             loop = asyncio.get_running_loop()
-            deadline_at = loop.time() + self._w.reply_deadline_seconds
+            model_waited = 0.0
             chunks = aiter(stream)
             while True:
-                remaining = deadline_at - loop.time()
+                self._check_claim()
+                remaining = self._w.reply_deadline_seconds - model_waited
                 if remaining <= 0:
                     raise _ReplyDeadlineExceeded
                 wait = asyncio.timeout(remaining)
+                wait_started = loop.time()
                 try:
                     async with wait:
                         chunk = await anext(chunks)
                 except StopAsyncIteration:
+                    model_waited += max(0.0, loop.time() - wait_started)
                     break
                 except TimeoutError:
                     if wait.expired():
                         raise _ReplyDeadlineExceeded from None
                     raise
+                model_waited += max(0.0, loop.time() - wait_started)
+                self._check_claim()
                 text = self._observe(chunk)
                 if text:
                     yield encode_sse(next(sequence), "delta", DeltaEvent(text=text))
-                await self._keep_claim_alive()
+        except _ClaimLost:
+            logger.warning("chat_claim_lost")
+            failure = "internal_error"
         except _ReplyDeadlineExceeded:
             logger.warning("chat_reply_deadline_exceeded chunks=%d", progress.chunks)
             failure = "reply_deadline_exceeded"
@@ -477,14 +531,20 @@ class _LiveTurn:
             # nothing to keep, and an empty assistant message would only confuse the history. The
             # write cannot be cancelled by this.
             logger.info("chat_stream_cancelled chunks=%d", progress.chunks)
-            cut: _Outcome = _Interrupted(None) if progress.chunks else _Failed("stream_interrupted")
-            await asyncio.shield(self._finalize(cut))
+            cut: _Outcome = _Interrupted(None) if progress.parts else _Failed("stream_interrupted")
+            # Start persistence now, but do not wait for it before closing the upstream stream.
+            cancelled_finalizer = self._finalize(cut)
             raise
         except Exception as error:
             logger.error("chat_stream_failed error=%s", type(error).__name__)
             failure = "internal_error"
         finally:
-            await self._close_gateway_stream(stream)
+            try:
+                await self._stop_refresh()
+                await self._close_gateway_stream(stream)
+            finally:
+                if cancelled_finalizer is not None:
+                    await asyncio.shield(cancelled_finalizer)
 
         outcome = self._outcome(failure)
         finalized = await asyncio.shield(self._finalize(outcome))
@@ -517,24 +577,50 @@ class _LiveTurn:
             progress.parts.append(text)
         return text
 
-    async def _keep_claim_alive(self) -> None:
-        now = self._w.monotonic()
-        if now - self._last_refresh < CLAIM_REFRESH_SECONDS:
+    async def _wait_for_refresh(self, interval: float) -> None:
+        """One cancellable interval before renewing the Redis leases."""
+        await asyncio.sleep(interval)
+
+    async def _refresh_leases(self) -> None:
+        interval = min(CLAIM_REFRESH_SECONDS, self._plan.stream_lease_seconds / 3)
+        while True:
+            await self._wait_for_refresh(interval)
+            try:
+                await self._w.idempotency.save(
+                    self._plan.scope,
+                    replace(self._plan.claim, session_id=self._plan.session_id),
+                )
+            except IdempotencyUnavailable:
+                logger.warning("chat_claim_refresh_failed")
+            try:
+                renewed = await self._w.stream_limiter.renew(
+                    self._plan.stream_lease,
+                    lease_seconds=self._plan.stream_lease_seconds,
+                )
+            except ChatStreamLimiterUnavailable:
+                logger.warning("chat_stream_lease_renewal_failed")
+            else:
+                if not renewed:
+                    self._claim_lost.set()
+                    return
+
+    def _check_claim(self) -> None:
+        if self._claim_lost.is_set():
+            raise _ClaimLost
+
+    async def _stop_refresh(self) -> None:
+        task = self._refresh_task
+        if task is None or task.done():
             return
-        self._last_refresh = now
-        try:
-            await self._w.idempotency.save(
-                self._plan.scope, replace(self._plan.claim, session_id=self._plan.session_id)
-            )
-        except IdempotencyUnavailable:  # best effort; the stream itself is not at risk
-            logger.warning("chat_claim_refresh_failed")
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     def _outcome(self, failure: ErrorCode | None) -> _Outcome:
         if failure is None:
             return _Completed()
+        received = bool(self._progress.parts)
         if failure == "stream_interrupted":
-            return _Interrupted(failure)
-        received = self._progress.chunks > 0
+            return _Interrupted(failure) if received else _Failed(failure)
         if failure == "reply_deadline_exceeded":
             return _Interrupted("stream_interrupted") if received else _Failed(failure)
         if failure == "internal_error":
@@ -628,7 +714,10 @@ class _LiveTurn:
     async def _persist(self, outcome: _Outcome) -> _Finalized:
         plan = self._plan
         if isinstance(outcome, _Failed):
-            await self._record("failed", error_code=outcome.code)
+            recorded = await self._record("failed", error_code=outcome.code)
+            return _Finalized(stored=recorded)
+        if self._claim_lost.is_set():
+            logger.error("chat_assistant_persist_skipped_claim_lost")
             return _Finalized(stored=False)
         summary = self._summary
         assert summary is not None  # set by _finalize before this task exists
@@ -641,6 +730,13 @@ class _LiveTurn:
             "latency_ms": int((self._w.monotonic() - self._started_at) * 1000),
             "status": "interrupted" if interrupted else "completed",
         }
+        terminal = replace(
+            plan.claim,
+            state="interrupted" if interrupted else "completed",
+            session_id=plan.session_id,
+            finish_reason=summary.finish_reason,
+            error_code=None,
+        )
         try:
             async with self._w.database.transaction() as connection:
                 repository = self._w.repositories(
@@ -653,11 +749,25 @@ class _LiveTurn:
                     metadata=metadata,
                     message_id=plan.assistant_message_id,
                 )
+                if not await repository.save_idempotency(
+                    plan.key_digest, _database_idempotency(terminal)
+                ):
+                    raise _ClaimLost
         except Exception as error:
             logger.error("chat_assistant_persist_failed error=%s", type(error).__name__)
-            await self._record("failed", error_code="internal_error")
-            return _Finalized(stored=False)
-        await self._record("interrupted" if interrupted else "completed", finish=summary)
+            # The transaction may have committed even if its acknowledgement was lost. Keep
+            # a durable terminal record, if committed, is still authoritative on the next request.
+            # Otherwise the permanent claim remains in progress and cannot invoke the model again.
+            try:
+                current = await self._lookup_durable(plan.key_digest)
+            except Exception as lookup_error:
+                logger.error(
+                    "chat_idempotency_reconcile_failed error=%s", type(lookup_error).__name__
+                )
+                return _Finalized(stored=False)
+            if current != terminal:
+                return _Finalized(stored=False)
+        await self._cache_record(terminal)
         logger.info(
             "chat_turn_finished status=%s finish_reason=%s chunks=%d",
             "interrupted" if interrupted else "completed",
@@ -672,7 +782,7 @@ class _LiveTurn:
         *,
         finish: _Summary | None = None,
         error_code: ErrorCode | None = None,
-    ) -> None:
+    ) -> bool:
         record = replace(
             self._plan.claim,
             state=state,
@@ -682,14 +792,43 @@ class _LiveTurn:
         )
         for attempt in range(RECORD_ATTEMPTS):
             try:
-                await self._w.idempotency.save(self._plan.scope, record)
-                return
-            except IdempotencyUnavailable:
+                async with self._w.database.transaction() as connection:
+                    repository = self._w.repositories(
+                        connection, self._w.principal.workspace_id, self._w.principal.user_id
+                    )
+                    saved = await repository.save_idempotency(
+                        self._plan.key_digest, _database_idempotency(record)
+                    )
+                if saved:
+                    await self._cache_record(record)
+                    return True
+                current = await self._lookup_durable(self._plan.key_digest)
+                if current == record:
+                    await self._cache_record(record)
+                    return True
+                logger.error("chat_idempotency_claim_lost")
+                return False
+            except (SQLAlchemyError, OSError):
                 if attempt + 1 < RECORD_ATTEMPTS:
                     await asyncio.sleep(RECORD_RETRY_DELAY_SECONDS * (attempt + 1))
-        # The reply is stored; only the promise that a retry replays it is weakened: the key stays
-        # in progress until its claim expires, then the same key would be treated as new.
+        # A failed terminal update leaves a durable in-progress record that future retries cannot
+        # claim; it is safer to require intervention than invoke the model twice.
         logger.error("chat_idempotency_update_failed")
+        return False
+
+    async def _lookup_durable(self, key_digest: str) -> IdempotencyRecord | None:
+        async with self._w.database.transaction() as connection:
+            repository = self._w.repositories(
+                connection, self._w.principal.workspace_id, self._w.principal.user_id
+            )
+            record = await repository.get_idempotency(key_digest)
+        return None if record is None else _service_idempotency(record)
+
+    async def _cache_record(self, record: IdempotencyRecord) -> None:
+        try:
+            await self._w.idempotency.save(self._plan.scope, record)
+        except IdempotencyUnavailable:
+            logger.warning("chat_idempotency_cache_update_failed")
 
 
 class _ReplayTurn:
@@ -780,15 +919,8 @@ class ChatService:
     async def _begin(self, idempotency_keys: Sequence[str], body: bytes) -> ChatTurn:
         key = parse_idempotency_key(idempotency_keys)
         command = parse_message_request(body, self._settings.chat_max_message_chars)
-        spec = self._orchestrator_spec()
-        self._build_window((), command.content, spec)  # does the message alone fit the budget?
-        if self._gateway.client is None:
-            raise ModelUnavailable
-        await self._enforce_rate_limit()
-        if command.session_id is not None:
-            await self._require_session(command.session_id)
-
         scope = IdempotencyScope(self._principal.workspace_id, self._principal.user_id, key)
+        key_digest = idempotency_key_digest(self._hash_secret, scope)
         claim = IdempotencyRecord(
             state="in_progress",
             request_hash=request_hash(
@@ -798,13 +930,48 @@ class ChatService:
             user_message_id=uuid4(),
             assistant_message_id=uuid4(),
         )
-        existing = await self._idempotency.claim(scope, claim)
+        # PostgreSQL is authoritative and is checked before Redis or provider configuration. A
+        # durable result remains replayable after cache expiry, loss, or process restart.
+        existing = await self._lookup_durable(key_digest)
         if existing is not None:
+            await self._enforce_rate_limit()
+            if command.session_id is not None:
+                await self._require_session(command.session_id)
             return await self._answer_repeat(existing, claim)
 
-        # From here until the turn exists, any exit (a full slot, Redis failing,
-        # a failed write, the client going away) must free the key: nothing has
-        # been stored yet, and a retry with the same key has to be able to start.
+        # Adopt pre-migration cache entries durably before replaying them. Redis is not sufficient
+        # to authorize a new model call once a record exists there.
+        try:
+            existing = await self._idempotency.lookup(scope)
+        except IdempotencyUnavailable:
+            if self._gateway.client is None:
+                raise ModelUnavailable from None
+            raise
+        if existing is not None:
+            durable_existing = await self._claim_durable(key_digest, existing)
+            if durable_existing is not None:
+                existing = durable_existing
+            await self._enforce_rate_limit()
+            if command.session_id is not None:
+                await self._require_session(command.session_id)
+            return await self._answer_repeat(existing, claim)
+
+        spec = self._orchestrator_spec()
+        self._build_window((), command.content, spec)  # does the message alone fit the budget?
+        if self._gateway.client is None:
+            raise ModelUnavailable
+        await self._enforce_rate_limit()
+        if command.session_id is not None:
+            await self._require_session(command.session_id)
+        existing = await self._idempotency.claim(scope, claim)
+        if existing is not None:
+            durable_existing = await self._claim_durable(key_digest, existing)
+            if durable_existing is not None:
+                existing = durable_existing
+            return await self._answer_repeat(existing, claim)
+
+        # Claim PostgreSQL only after the concurrency gate: a rejected pre-stream request has not
+        # durably claimed the key and retains the established retry behavior.
         lease: ChatStreamLease | None = None
         try:
             lease = await self._stream_limiter.acquire(
@@ -815,14 +982,33 @@ class ChatService:
             )
             if lease is None:
                 raise ChatStreamLimitReached
-            session_id, window = await self._store_user_message(command, claim, spec)
+            existing = await self._claim_durable(key_digest, claim)
+            if existing is not None:
+                await self._release_stream_lease(lease)
+                with suppress(IdempotencyUnavailable):
+                    await asyncio.shield(self._idempotency.release(scope, claim))
+                return await self._answer_repeat(existing, claim)
         except BaseException:
-            with suppress(IdempotencyUnavailable):
-                await asyncio.shield(self._idempotency.release(scope, claim))
             if lease is not None:
                 await self._release_stream_lease(lease)
+            with suppress(IdempotencyUnavailable):
+                await asyncio.shield(self._idempotency.release(scope, claim))
             raise
-        return _LiveTurn(self._wiring, _Plan(scope, claim, session_id, window, lease))
+
+        # Once the durable claim commits, any later failure keeps it: a retry must not call the
+        # model again even when the user-message or terminal-write acknowledgement is ambiguous.
+        try:
+            session_id, window = await self._store_user_message(command, claim, key_digest, spec)
+        except BaseException:
+            await self._release_stream_lease(lease)
+            with suppress(IdempotencyUnavailable):
+                await asyncio.shield(self._idempotency.release(scope, claim))
+            raise
+        lease_seconds = self._settings.chat_reply_deadline_seconds + 30
+        return _LiveTurn(
+            self._wiring,
+            _Plan(scope, key_digest, claim, session_id, window, lease, lease_seconds),
+        )
 
     async def _release_stream_lease(self, lease: ChatStreamLease) -> None:
         try:
@@ -864,8 +1050,26 @@ class ChatService:
             if await repository.get_session(session_id) is None:
                 raise SessionNotFound
 
+    async def _lookup_durable(self, key_digest: str) -> IdempotencyRecord | None:
+        async with self._database.transaction() as connection:
+            record = await self._storage(connection).get_idempotency(key_digest)
+        return None if record is None else _service_idempotency(record)
+
+    async def _claim_durable(
+        self, key_digest: str, record: IdempotencyRecord
+    ) -> IdempotencyRecord | None:
+        async with self._database.transaction() as connection:
+            existing = await self._storage(connection).claim_idempotency(
+                key_digest, _database_idempotency(record)
+            )
+        return None if existing is None else _service_idempotency(existing)
+
     async def _store_user_message(
-        self, command: ChatMessageRequest, claim: IdempotencyRecord, spec: ModelSpec
+        self,
+        command: ChatMessageRequest,
+        claim: IdempotencyRecord,
+        key_digest: str,
+        spec: ModelSpec,
     ) -> tuple[UUID, ContextWindow]:
         """One short transaction: read the history, then write the user message and its session."""
         async with self._database.transaction() as connection:
@@ -875,6 +1079,9 @@ class ChatService:
                 history: list[HistoryTurn] = []
             else:
                 session_id = command.session_id
+                # Serialize history snapshots and user-row insertion for one session. The row
+                # lock is released with this short transaction, not held while the model streams.
+                await repository.lock_session(session_id)
                 stored = await repository.recent_messages(session_id, HISTORY_MESSAGE_LIMIT)
                 history = [HistoryTurn(message.role, message.content) for message in stored]
             # Built before the insert: a message that cannot be sent leaves nothing behind, and the
@@ -883,6 +1090,9 @@ class ChatService:
             await repository.add_message(
                 session_id, "user", command.content, message_id=claim.user_message_id
             )
+            attached = replace(claim, session_id=session_id)
+            if not await repository.save_idempotency(key_digest, _database_idempotency(attached)):
+                raise _ClaimLost
         return session_id, window
 
     def _storage(self, connection: AsyncConnection) -> ChatStorage:
@@ -900,11 +1110,11 @@ class ChatService:
         if existing.session_id is None:  # a terminal record always has one; do not guess
             raise ChatUnavailable
         stored: ChatMessageRecord | None = None
-        if existing.state in ("completed", "interrupted"):
-            async with self._database.transaction() as connection:
-                repository = self._storage(connection)
-                if await repository.get_session(existing.session_id) is None:
-                    raise SessionNotFound
+        async with self._database.transaction() as connection:
+            repository = self._storage(connection)
+            if await repository.get_session(existing.session_id) is None:
+                raise SessionNotFound
+            if existing.state in ("completed", "interrupted"):
                 stored = await repository.get_message(existing.assistant_message_id)
         return _ReplayTurn(self._replay_frames(existing, stored))
 
@@ -966,6 +1176,20 @@ class ChatService:
             items=[SessionOut.model_validate(record) for record in page.items],
             next_cursor=page.next_cursor,
         )
+
+    async def delete_session(self, session_id: UUID) -> None:
+        """Delete a chat session and all cascading records (messages, tasks).
+
+        Raises ``SessionNotFound`` if the session does not exist or belongs to another user.
+        """
+        try:
+            async with self._database.transaction() as connection:
+                deleted = await self._storage(connection).delete_session(session_id)
+        except (SQLAlchemyError, OSError) as error:
+            logger.error("chat_database_unavailable error=%s", type(error).__name__)
+            raise ChatUnavailable from None
+        if not deleted:
+            raise SessionNotFound
 
     async def list_messages(
         self, session_id: UUID, limit: int, cursor: str | None

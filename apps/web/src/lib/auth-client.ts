@@ -1,5 +1,10 @@
 import { apiErrorFromResponse, NetworkError } from "./api-client";
-import { refreshSession, type RefreshedSession } from "./auth-session";
+import {
+  refreshSession,
+  type RefreshedSession,
+  setAccessToken,
+  withAuthCookieLock,
+} from "./auth-session";
 
 export type AuthTokens = RefreshedSession;
 
@@ -7,30 +12,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function request(path: string, init: RequestInit): Promise<Response> {
-  const usesRefreshCookie = ["/token", "/refresh", "/logout"].includes(path);
-  let response: Response;
-  try {
-    response = await fetch(`/api/v1/auth${path}`, {
-      ...init,
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-        ...(init.body === undefined
-          ? {}
-          : { "Content-Type": "application/json" }),
-        ...(usesRefreshCookie ? { "X-Maya-Refresh-Transport": "cookie" } : {}),
-        ...init.headers,
-      },
-    });
-  } catch (error) {
-    throw new NetworkError(error);
-  }
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
-  }
-  return response;
+async function request(
+  path: string,
+  init: RequestInit,
+  cookieLockHeld = false,
+): Promise<Response> {
+  const usesRefreshCookie = [
+    "/token",
+    "/refresh",
+    "/logout",
+    "/signup/complete",
+  ].includes(path);
+  const send = async (): Promise<Response> => {
+    let response: Response;
+    try {
+      response = await fetch(`/api/v1/auth${path}`, {
+        ...init,
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          ...(init.body === undefined
+            ? {}
+            : { "Content-Type": "application/json" }),
+          ...(usesRefreshCookie
+            ? { "X-Maya-Refresh-Transport": "cookie" }
+            : {}),
+          ...init.headers,
+        },
+      });
+    } catch (error) {
+      throw new NetworkError(error);
+    }
+    if (!response.ok) {
+      throw await apiErrorFromResponse(response);
+    }
+    return response;
+  };
+  return usesRefreshCookie && !cookieLockHeld
+    ? withAuthCookieLock(send)
+    : send();
 }
 
 async function readTokens(response: Response): Promise<AuthTokens> {
@@ -57,18 +78,29 @@ export async function signIn(
   username: string,
   password: string,
 ): Promise<AuthTokens> {
-  return readTokens(
-    await request("/token", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  );
+  return withAuthCookieLock(async () => {
+    const tokens = await readTokens(
+      await request(
+        "/token",
+        {
+          method: "POST",
+          body: JSON.stringify({ username, password }),
+        },
+        true,
+      ),
+    );
+    setAccessToken(tokens.accessToken, tokens.expiresIn);
+    return tokens;
+  });
 }
 
 export { refreshSession };
 
 export async function signOut(): Promise<void> {
-  await request("/logout", { method: "POST" });
+  await withAuthCookieLock(async () => {
+    await request("/logout", { method: "POST" }, true);
+    setAccessToken(null);
+  });
 }
 
 export interface AcceptedResult {
@@ -141,4 +173,59 @@ export async function resetPassword(body: {
   if (response.status !== 200) {
     throw new Error("The password reset had an unexpected response.");
   }
+}
+
+export async function identifyUser(identifier: string): Promise<void> {
+  const response = await postJson("/identify", { identifier });
+  if (response.status !== 200) {
+    throw new Error("The identifier request had an unexpected response.");
+  }
+  const data: unknown = await response.json();
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("status" in data) ||
+    data.status !== "accepted"
+  ) {
+    throw new Error("The identifier response had an unexpected shape.");
+  }
+}
+
+export async function sendSignupOtp(email: string): Promise<AcceptedResult> {
+  const response = await postJson("/signup/otp", { email });
+  if (response.status !== 202) {
+    throw new Error(
+      "The signup verification request had an unexpected response.",
+    );
+  }
+  const retryAfter = response.headers.get("Retry-After");
+  const parsed = retryAfter === null ? Number.NaN : Number(retryAfter);
+  return {
+    status: "accepted",
+    retryAfterSeconds:
+      Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : null,
+  };
+}
+
+export async function completeSignup(body: {
+  email: string;
+  code: string;
+  username: string;
+  password: string;
+  full_name: string;
+  workspace_name?: string;
+}): Promise<AuthTokens> {
+  return withAuthCookieLock(async () => {
+    const response = await request(
+      "/signup/complete",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      true,
+    );
+    const tokens = await readTokens(response);
+    setAccessToken(tokens.accessToken, tokens.expiresIn);
+    return tokens;
+  });
 }

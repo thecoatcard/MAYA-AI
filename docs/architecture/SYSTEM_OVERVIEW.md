@@ -1,12 +1,12 @@
 # System overview
 
-> **Status: local foundation implemented; product features remain planned.** The authoritative product detail, decisions and roadmap are in [MAYA_AI_FINAL_PLAN.md](../../MAYA_AI_FINAL_PLAN.md).
+> **Status: Phases 01–04 have local implementations; Phase 05 is in progress.** The authoritative product detail, decisions and roadmap are in [MAYA_AI_FINAL_PLAN.md](../../MAYA_AI_FINAL_PLAN.md).
 
 ## Implemented foundation
 
 The [backend](../../backend/README.md) provides typed configuration, redacted JSON logs,
 resource lifecycles and public [health probes](../api/HEALTH.md). The
-[web app](../../apps/web/README.md) provides a static overview and a chat page (`/chat`) that has no sign-in yet.
+[web app](../../apps/web/README.md) provides account pages and a chat page (`/chat`) using a same-origin API proxy.
 Local PostgreSQL/pgvector and Redis AOF are described in the
 [data-store state](DATA_MODEL.md) and [runbook](../operations/LOCAL_DEVELOPMENT.md).
 Phase 02 added the [application schema with forced row-level security](DATA_MODEL.md) and own-account
@@ -18,17 +18,20 @@ input sanitization, structured output self-repair, and an owner-run diagnostic s
 verified offline with test doubles pinned to the SDK's calling convention; it has never been run against the
 real provider and no live external Gemini calls have been executed. Phase 04 added the persisted
 [chat API](../api/CHAT.md) ([ADR-0008](../adr/0008-chat-api-contract.md)): a typed Server-Sent Events stream on
-`POST /api/v1/chat/message`, idempotent per `Idempotency-Key` so a reconnect never calls (or bills) the model
-twice, user-and-workspace-isolated session and message storage, a bounded context window, and read-only session
-list and history endpoints. It is verified with fake Gemini clients, real PostgreSQL and real Redis only. There is
-no browser login, no decided browser-to-API connectivity (CORS or proxy) and no agent engine yet, so the chat page
-has not been used end to end.
+`POST /api/v1/chat/message`, key-scoped replay, user-and-workspace-isolated session and message storage, a bounded
+context window, and read-only session list and history endpoints. Failure and expiry cases can still undermine
+the intended no-duplicate guarantee. Tests use fake Gemini clients; authenticated browser acceptance and the owner-run
+provider check remain pending. The Phase 05 prototype
+([ORCHESTRATOR_SPECIFICATION.md](ORCHESTRATOR_SPECIFICATION.md)) contains execution-state models, a DAG planner,
+checkpointing, relational projection and task-event publishing code. These components are not wired into the
+application lifecycle or routes; checkpoint isolation, approval enforcement and durable projections require
+further work before the task engine can be used.
 
 [S3 voice readiness](SPIKE_S3_GEMINI_LIVE.md) and
 [S4 embedding readiness](SPIKE_S4_EMBEDDINGS.md) have offline fixture analyzers
 and separately locked actual SDK adapters validated with mocked clients.
 They have not contacted Gemini or verified live behavior; the owner's hard spending-cap
-requirement blocks live execution. No voice bridge or model gateway is implemented.
+requirement blocks live execution. No voice bridge is implemented.
 
 ## What MAYA AI is meant to be
 

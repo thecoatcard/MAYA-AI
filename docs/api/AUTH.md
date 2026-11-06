@@ -12,21 +12,70 @@ Design rationale and limits: [authentication security](../security/AUTHENTICATIO
 Normalization: usernames are trimmed and lower-cased (`a-z`, `0-9`, `_`, `.`, `-`, 3 to 32 characters);
 e-mail addresses are trimmed and lower-cased ASCII; passwords are 12 to 128 characters after NFKC normalization.
 
+## POST /identify
+
+Accepts a normalized username or e-mail identifier without checking account existence.
+This endpoint exists for input validation and always returns the same neutral response.
+The client must let the user choose sign-in or account creation; it must not use this response
+to infer whether an account exists.
+
+```json
+{ "identifier": "alice@example.com" }
+```
+
+Response `200` for any valid identifier:
+
+```json
+{"status": "accepted"}
+```
+
+No account lookup is performed. Invalid identifier syntax still returns `422 validation_error`.
+
+## POST /signup/otp
+
+Generate and send an email verification OTP for a new user initiating registration.
+
+```json
+{ "email": "newuser@example.com" }
+```
+
+Response `202`: `{"status": "accepted"}` with `Retry-After` cooldown header.
+
+## POST /signup/complete
+
+Verify the OTP code received by the new user, create their workspace and account as verified, open an authenticated session, and return session tokens (or set refresh cookie).
+
+| Field            | Type   | Required | Description                                 |
+| :--------------- | :----- | :------- | :------------------------------------------ |
+| `email`          | string | yes      | Normalized email address                    |
+| `code`           | string | yes      | 6-digit verification code                   |
+| `username`       | string | yes      | Chosen username                             |
+| `password`       | string | yes      | Chosen password adhering to password policy |
+| `full_name`      | string | yes      | 1 to 255 characters                         |
+| `workspace_name` | string | no       | Optional workspace name                     |
+
+Response `200`: `TokenResponse` or `CookieTokenResponse` (identical to `/token`), immediately signing the user into the application.
+
 ## POST /register
 
 Create an unverified account in a new workspace of its own and e-mail a verification code.
 The registrant becomes the workspace `admin`.
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `username` | string | yes | Unique, normalized as above |
-| `email` | string | yes | Unique |
-| `password` | string | yes | Password policy above |
-| `full_name` | string | yes | 1 to 255 characters, no control characters |
-| `workspace_name` | string | no | Defaults to the full name followed by "'s workspace" |
+| Field            | Type   | Required | Description                                          |
+| :--------------- | :----- | :------- | :--------------------------------------------------- |
+| `username`       | string | yes      | Unique, normalized as above                          |
+| `email`          | string | yes      | Unique                                               |
+| `password`       | string | yes      | Password policy above                                |
+| `full_name`      | string | yes      | 1 to 255 characters, no control characters           |
+| `workspace_name` | string | no       | Defaults to the full name followed by "'s workspace" |
 
 ```json
-{ "username": "alice", "email": "alice@example.com", "password": "correct horse battery staple", "full_name": "Alice Example" }
+{
+  "username": "alice",
+  "email": "alice@example.com",
+  "password": "correct horse battery staple",
+  "full_name": "Alice Example"
+}
 ```
 
 Response `202`: `{"status": "accepted"}` for **every** outcome, including an address or username that is
@@ -58,13 +107,19 @@ Username and password login. No code is needed at login.
 Without the `X-Maya-Refresh-Transport: cookie` header, `200` (with `Cache-Control: no-store`):
 
 ```json
-{ "access_token": "<jwt>", "refresh_token": "<jwt>", "token_type": "bearer", "expires_in": 900 }
+{
+  "access_token": "<jwt>",
+  "refresh_token": "<jwt>",
+  "token_type": "bearer",
+  "expires_in": 900
+}
 ```
 
 With `X-Maya-Refresh-Transport: cookie`, the response omits `refresh_token` and sets the `maya_refresh` cookie. The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/api/v1/auth`, has `Max-Age` equal to the refresh-token TTL, and is `Secure` when `MAYA_AUTH_COOKIE_SECURE=true`. The JSON contains only `access_token`, `token_type`, and `expires_in`.
 
-`401 invalid_credentials` for an unknown user or a wrong password; `403 email_not_verified` for a correct
-password on an unverified account; `429 rate_limited` with `Retry-After`.
+`401 invalid_credentials` for unknown identifiers, wrong passwords, and correct passwords on
+unverified accounts; `429 rate_limited` with `Retry-After`. No constant-time response guarantee
+is made.
 
 ## POST /forgot-password
 
@@ -95,17 +150,16 @@ is live. Used by clients and tests to confirm the principal.
 
 ## Errors
 
-| Status | `error` | Meaning |
-| :--- | :--- | :--- |
-| 400 | `invalid_or_expired_code` | Any one-time-code failure |
-| 401 | `invalid_credentials` | Login failed |
-| 401 | `invalid_token` / `not_authenticated` | Bad, expired, revoked or missing token (`WWW-Authenticate: Bearer`) |
-| 403 | `email_not_verified` | Correct password, address not yet verified |
-| 404 / 405 | `not_found` / `method_not_allowed` | Unknown route or method |
-| 413 | `payload_too_large` | Request body over 64 KiB |
-| 422 | `validation_error` or a password-policy code | Malformed input |
-| 429 | `rate_limited` | Includes `Retry-After` seconds |
-| 503 | `service_unavailable` | E-mail not configured, the rate limiter is down (fails closed), or too many password operations are queued |
+| Status    | `error`                                      | Meaning                                                                                                    |
+| :-------- | :------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| 400       | `invalid_or_expired_code`                    | Any one-time-code failure                                                                                  |
+| 401       | `invalid_credentials`                        | Login failed                                                                                               |
+| 401       | `invalid_token` / `not_authenticated`        | Bad, expired, revoked or missing token (`WWW-Authenticate: Bearer`)                                        |
+| 404 / 405 | `not_found` / `method_not_allowed`           | Unknown route or method                                                                                    |
+| 413       | `payload_too_large`                          | Request body over 64 KiB                                                                                   |
+| 422       | `validation_error` or a password-policy code | Malformed input                                                                                            |
+| 429       | `rate_limited`                               | Includes `Retry-After` seconds                                                                             |
+| 503       | `service_unavailable`                        | E-mail not configured, the rate limiter is down (fails closed), or too many password operations are queued |
 
 ## Compatibility
 

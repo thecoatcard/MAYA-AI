@@ -251,6 +251,22 @@ function classify(error: unknown): Failure {
     };
   }
   if (error instanceof ApiError) {
+    if (
+      error.status >= 200 &&
+      error.status < 300 &&
+      (error.code === "unexpected_response" ||
+        error.code === "stream_protocol_error")
+    ) {
+      // The server may have processed the message even though its successful
+      // response could not be decoded. Retry only with the original key.
+      return {
+        code: error.code,
+        retryable: true,
+        auto: false,
+        retryAfterSeconds: null,
+        unconfirmed: true,
+      };
+    }
     if (error.status === 409 && error.code === "request_in_progress") {
       return {
         code: error.code,
@@ -934,7 +950,9 @@ export function useChatStream(
   const canAskAgain =
     lastMessage !== undefined &&
     lastMessage.role === "assistant" &&
-    lastMessage.state === "interrupted";
+    lastMessage.state === "interrupted" &&
+    turnRef.current !== null &&
+    lastMessage.key === turnRef.current.assistantKey;
 
   const askAgain = useCallback(async (): Promise<void> => {
     const turn = turnRef.current;
@@ -989,7 +1007,12 @@ export function useChatStream(
           id: message.id,
           role: message.role,
           content: message.content,
-          state: message.role === "assistant" ? "complete" : "sent",
+          state:
+            message.role === "assistant"
+              ? message.finish_reason === "interrupted"
+                ? "interrupted"
+                : "complete"
+              : "sent",
           finishReason: message.finish_reason ?? null,
           usage: null,
         })),

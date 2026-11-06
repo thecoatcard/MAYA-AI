@@ -84,15 +84,17 @@ async def test_budget_is_checked_before_every_attempt_including_retries() -> Non
 
     await gateway.generate_text("orchestrator", ["hi"], task_id=task_id, workspace_id=workspace_id)
 
-    assert tracker.ensure_within_budget.await_count == 2  # first attempt + one retry
-    tracker.ensure_within_budget.assert_awaited_with(workspace_id, task_id, for_tool_call=False)
+    assert tracker.acquire_call.await_count == 2  # first attempt + one retry
+    tracker.acquire_call.assert_awaited_with(
+        workspace_id, task_id, for_tool_call=False, price_known=True
+    )
 
 
 @pytest.mark.asyncio
 async def test_exhausted_budget_stops_the_call_before_the_provider_is_contacted() -> None:
     fake = FakeGeminiClient()
     tracker = make_tracker_mock()
-    tracker.ensure_within_budget.side_effect = BudgetExceededError(
+    tracker.acquire_call.side_effect = BudgetExceededError(
         "Task '11111111-5003-4000-8000-429429429429' reached its financial budget cap: $2.500000"
     )
     gateway = make_gateway(fake, tracker=tracker)
@@ -127,7 +129,9 @@ async def test_tool_calls_use_the_tool_turn_budget_check_and_standard_json_schem
     )
 
     assert response.call_requests[0].tool_name == "lookup"
-    tracker.ensure_within_budget.assert_awaited_with(workspace_id, task_id, for_tool_call=True)
+    tracker.acquire_call.assert_awaited_with(
+        workspace_id, task_id, for_tool_call=True, price_known=True
+    )
     declared = fake.aio.models.calls[0]["config"].tools[0].function_declarations[0]
     assert declared.parameters_json_schema == schema
 

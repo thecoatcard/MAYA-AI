@@ -8,8 +8,10 @@ from app.auth.errors import InvalidToken
 from app.auth.models import Principal
 from app.auth.schemas import (
     AcceptedResponse,
+    CompleteSignupRequest,
     CookieTokenResponse,
     EmailRequest,
+    IdentifyRequest,
     LoginRequest,
     MeResponse,
     PasswordResetResponse,
@@ -20,7 +22,7 @@ from app.auth.schemas import (
     VerifiedResponse,
     VerifyEmailRequest,
 )
-from app.auth.service import AuthService, RegisterCommand
+from app.auth.service import AuthService, CompleteSignupCommand, RegisterCommand
 from app.core.config import Settings
 from app.core.email import OutboundEmail
 
@@ -38,6 +40,60 @@ def _queue(
     """E-mail goes out after the response, so timing does not reveal whether one was sent."""
     if message is not None:
         background.add_task(service.deliver, message)
+
+
+@router.post("/identify", response_model=AcceptedResponse)
+async def identify(body: IdentifyRequest) -> AcceptedResponse:
+    """Validate the identifier's shape without checking whether the account exists."""
+    return AcceptedResponse()
+
+
+@router.post("/signup/otp", status_code=202, response_model=AcceptedResponse)
+async def signup_otp(
+    body: EmailRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: Service,
+) -> AcceptedResponse:
+    message = await service.send_signup_otp(body.email, client_address(request))
+    _queue(background, service, message)
+    settings: Settings = request.app.state.settings
+    response.headers["Retry-After"] = str(settings.otp_resend_cooldown_seconds)
+    return AcceptedResponse()
+
+
+@router.post("/signup/complete", response_model=None)
+async def signup_complete(
+    body: CompleteSignupRequest,
+    request: Request,
+    response: Response,
+    service: Service,
+) -> TokenResponse | CookieTokenResponse:
+    pair = await service.complete_signup(
+        CompleteSignupCommand(
+            email=body.email,
+            code=body.code,
+            username=body.username,
+            password=body.password.get_secret_value(),
+            full_name=body.full_name,
+            workspace_name=body.workspace_name,
+        ),
+        client_address(request),
+    )
+    _no_store(response)
+    if _uses_refresh_cookie(request):
+        settings: Settings = request.app.state.settings
+        _set_refresh_cookie(response, pair.refresh_token, settings)
+        return CookieTokenResponse(
+            access_token=pair.access_token,
+            expires_in=pair.expires_in,
+        )
+    return TokenResponse(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        expires_in=pair.expires_in,
+    )
 
 
 @router.post("/register", status_code=202, response_model=AcceptedResponse)

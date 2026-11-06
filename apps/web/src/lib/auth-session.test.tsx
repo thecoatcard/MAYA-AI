@@ -7,6 +7,7 @@ import {
   refreshSession,
   setAccessToken,
   subscribeAccessToken,
+  type RefreshedSession,
 } from "./auth-session";
 
 afterEach(() => {
@@ -28,8 +29,10 @@ describe("auth-session", () => {
   it("never persists an access token in web storage or a readable cookie", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     setAccessToken("secret-token-value");
-    expect(setItem).not.toHaveBeenCalled();
     expect(JSON.stringify({ ...window.localStorage })).not.toContain(
+      "secret-token-value",
+    );
+    expect(JSON.stringify(setItem.mock.calls)).not.toContain(
       "secret-token-value",
     );
     expect(JSON.stringify({ ...window.sessionStorage })).not.toContain(
@@ -118,6 +121,53 @@ describe("auth-session", () => {
     expect(getAccessToken()).toBe("example-access-token-refreshed");
   });
 
+  it("uses an origin-scoped Web Lock for cookie refresh when available", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      navigator,
+      "locks",
+    );
+    const request = vi.fn(
+      (
+        _name: string,
+        callback: (lock: Lock | null) => Promise<RefreshedSession | null>,
+      ) => Promise.resolve(callback(null)),
+    );
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "example-locked-refresh-token",
+              token_type: "bearer",
+              expires_in: 900,
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    try {
+      await expect(refreshSession()).resolves.toEqual({
+        accessToken: "example-locked-refresh-token",
+        expiresIn: 900,
+      });
+      expect(request).toHaveBeenCalledWith(
+        "maya-auth-refresh-cookie",
+        expect.any(Function),
+      );
+    } finally {
+      if (originalDescriptor === undefined) {
+        Reflect.deleteProperty(navigator, "locks");
+      } else {
+        Object.defineProperty(navigator, "locks", originalDescriptor);
+      }
+    }
+  });
+
   it("updates a refreshed access token without changing the sign-in identity", async () => {
     setAccessToken("example-access-token-previous");
     const identity = getAuthIdentityVersion();
@@ -155,5 +205,107 @@ describe("auth-session", () => {
 
     await expect(refreshSession()).resolves.toBeNull();
     expect(getAccessToken()).toBeNull();
+  });
+
+  it("does not apply a late refresh after a newer identity is installed", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveResponse = resolve;
+          }),
+      ),
+    );
+    setAccessToken("account-a-token");
+    const pending = refreshSession();
+
+    setAccessToken("account-b-token");
+    const currentIdentity = getAuthIdentityVersion();
+    resolveResponse?.(
+      new Response(
+        JSON.stringify({
+          access_token: "example-stale-account-a-token",
+          token_type: "bearer",
+          expires_in: 900,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(pending).resolves.toBeNull();
+    expect(getAccessToken()).toBe("account-b-token");
+    expect(getAuthIdentityVersion()).toBe(currentIdentity);
+  });
+
+  it("does not restore a signed-out identity when refresh completes late", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveResponse = resolve;
+          }),
+      ),
+    );
+    setAccessToken("account-a-token");
+    const pending = refreshSession();
+
+    setAccessToken(null);
+    const signedOutIdentity = getAuthIdentityVersion();
+    resolveResponse?.(
+      new Response(
+        JSON.stringify({
+          access_token: "example-late-account-a-token",
+          token_type: "bearer",
+          expires_in: 900,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(pending).resolves.toBeNull();
+    expect(getAccessToken()).toBeNull();
+    expect(getAuthIdentityVersion()).toBe(signedOutIdentity);
+  });
+
+  it("does not let a late unauthorized refresh sign out a newer identity", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveResponse = resolve;
+          }),
+      ),
+    );
+    setAccessToken("account-a-token");
+    const pending = refreshSession();
+
+    setAccessToken("account-b-token");
+    const currentIdentity = getAuthIdentityVersion();
+    resolveResponse?.(new Response(null, { status: 401 }));
+
+    await expect(pending).resolves.toBeNull();
+    expect(getAccessToken()).toBe("account-b-token");
+    expect(getAuthIdentityVersion()).toBe(currentIdentity);
+  });
+
+  it("clears the in-memory identity after another tab signals an identity change", () => {
+    setAccessToken("current-tab-token");
+    const currentIdentity = getAuthIdentityVersion();
+
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "maya-auth-identity-change",
+        newValue: "another-tab-change",
+      }),
+    );
+
+    expect(getAccessToken()).toBeNull();
+    expect(getAuthIdentityVersion()).toBeGreaterThan(currentIdentity);
   });
 });

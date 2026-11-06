@@ -29,6 +29,8 @@ def make_tracker_mock() -> AsyncMock:
     tracker = AsyncMock(spec=BudgetTracker)
     tracker.record_usage = AsyncMock()
     tracker.ensure_within_budget = AsyncMock()
+    tracker.acquire_call = AsyncMock(return_value=None)
+    tracker.release_call = AsyncMock()
     return tracker
 
 

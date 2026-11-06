@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -43,6 +43,7 @@ from app.core.chat_streams import ChatStreamLease, ChatStreamLimiterUnavailable
 from app.core.clock import Clock
 from app.core.config import Settings
 from app.db.repositories.chat import (
+    ChatIdempotencyRecord,
     ChatMessageRecord,
     ChatSessionRecord,
     InvalidCursor,
@@ -53,10 +54,13 @@ from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import ModelRegistry, build_default_registry
 from app.main import create_app
 from app.services.chat_idempotency import (
+    IN_PROGRESS_TTL_SECONDS,
+    TERMINAL_TTL_SECONDS,
     IdempotencyRecord,
     IdempotencyScope,
     IdempotencyUnavailable,
     State,
+    idempotency_key_digest,
     request_hash,
 )
 from app.services.chat_service import ChatService, ChatStorage, ChatStreamLimitReached
@@ -85,9 +89,15 @@ class MemoryChat:
     def __init__(self) -> None:
         self.sessions: dict[UUID, ChatSessionRecord] = {}
         self.messages: list[ChatMessageRecord] = []
+        self.idempotency: dict[tuple[UUID, UUID, str], ChatIdempotencyRecord] = {}
         self.unavailable = False  # the database cannot be reached
         self.fail_assistant_insert = False  # storing the assistant reply raises
         self._tick = 0
+        self.session_locks: dict[UUID, asyncio.Lock] = {}
+        self.transaction_locks: dict[asyncio.Task[Any], asyncio.Lock] = {}
+        self.history_entered: asyncio.Event | None = None
+        self.history_continue: asyncio.Event | None = None
+        self.lock_waiting: asyncio.Event | None = None
 
     def now(self) -> datetime:
         self._tick += 1
@@ -113,7 +123,14 @@ class MemoryDatabase:
     async def transaction(self) -> AsyncIterator[AsyncConnection]:
         if self._chat.unavailable:
             raise ConnectionRefusedError(PROVIDER_MARKER)
-        yield cast(AsyncConnection, None)
+        try:
+            yield cast(AsyncConnection, None)
+        finally:
+            task = asyncio.current_task()
+            if task is not None:
+                lock = self._chat.transaction_locks.pop(task, None)
+                if lock is not None and lock.locked():
+                    lock.release()
 
 
 class MemoryChatStreamLimiter:
@@ -121,6 +138,7 @@ class MemoryChatStreamLimiter:
         self._leases: dict[str, set[str]] = {}
         self.unavailable = False
         self.lease_seconds: list[int] = []
+        self.renewals: list[int] = []
 
     def active(self) -> int:
         return sum(len(leases) for leases in self._leases.values())
@@ -138,6 +156,12 @@ class MemoryChatStreamLimiter:
         member = uuid4().hex
         leases.add(member)
         return ChatStreamLease(key, member)
+
+    async def renew(self, lease: ChatStreamLease, *, lease_seconds: int) -> bool:
+        if self.unavailable:
+            raise ChatStreamLimiterUnavailable
+        self.renewals.append(lease_seconds)
+        return lease.member in self._leases.get(lease.key, set())
 
     async def release(self, lease: ChatStreamLease) -> None:
         leases = self._leases.get(lease.key)
@@ -171,6 +195,41 @@ class MemoryRepository:
             return None
         return record
 
+    def _idempotency_key(self, key_digest: str) -> tuple[UUID, UUID, str]:
+        return (self._workspace_id, self._user_id, key_digest)
+
+    async def get_idempotency(self, key_digest: str) -> ChatIdempotencyRecord | None:
+        return self._chat.idempotency.get(self._idempotency_key(key_digest))
+
+    async def claim_idempotency(
+        self, key_digest: str, record: ChatIdempotencyRecord
+    ) -> ChatIdempotencyRecord | None:
+        key = self._idempotency_key(key_digest)
+        existing = self._chat.idempotency.get(key)
+        if existing is not None:
+            return existing
+        self._chat.idempotency[key] = record
+        return None
+
+    async def save_idempotency(self, key_digest: str, record: ChatIdempotencyRecord) -> bool:
+        key = self._idempotency_key(key_digest)
+        current = self._chat.idempotency.get(key)
+        if (
+            current is None
+            or current.state != "in_progress"
+            or current.request_hash != record.request_hash
+            or current.user_message_id != record.user_message_id
+            or current.assistant_message_id != record.assistant_message_id
+            or (
+                current.session_id is not None
+                and record.session_id is not None
+                and current.session_id != record.session_id
+            )
+        ):
+            return False
+        self._chat.idempotency[key] = record
+        return True
+
     async def create_session(self, title: str | None = None, channel: Any = "web") -> Any:
         record = ChatSessionRecord(
             uuid4(),
@@ -186,6 +245,24 @@ class MemoryRepository:
 
     async def get_session(self, session_id: UUID) -> ChatSessionRecord | None:
         return self._mine(session_id)
+
+    async def lock_session(self, session_id: UUID) -> None:
+        if self._mine(session_id) is None:
+            raise SessionNotFound
+        lock = self._chat.session_locks.setdefault(session_id, asyncio.Lock())
+        if lock.locked() and self._chat.lock_waiting is not None:
+            self._chat.lock_waiting.set()
+        await lock.acquire()
+        task = asyncio.current_task()
+        assert task is not None
+        self._chat.transaction_locks[task] = lock
+
+    async def delete_session(self, session_id: UUID) -> bool:
+        if self._mine(session_id) is None:
+            return False
+        del self._chat.sessions[session_id]
+        self._chat.messages = [m for m in self._chat.messages if m.session_id != session_id]
+        return True
 
     async def list_sessions(
         self, limit: int = 20, cursor: str | None = None
@@ -249,6 +326,10 @@ class MemoryRepository:
         return RecordPage(tuple(rows[start : start + limit]), f"o{start + limit}" if more else None)
 
     async def recent_messages(self, session_id: UUID, limit: int) -> list[ChatMessageRecord]:
+        if self._chat.history_entered is not None and not self._chat.history_entered.is_set():
+            self._chat.history_entered.set()
+            assert self._chat.history_continue is not None
+            await self._chat.history_continue.wait()
         return self._conversation(session_id)[-limit:]
 
 
@@ -263,6 +344,10 @@ class MemoryIdempotencyStore:
         if self.unavailable:
             raise IdempotencyUnavailable
 
+    async def lookup(self, scope: IdempotencyScope) -> IdempotencyRecord | None:
+        self._check()
+        return self.records.get(scope.redis_key)
+
     async def claim(
         self, scope: IdempotencyScope, record: IdempotencyRecord
     ) -> IdempotencyRecord | None:
@@ -273,12 +358,19 @@ class MemoryIdempotencyStore:
         self.records[scope.redis_key] = record
         return None
 
-    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
+    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
         self._check()
+        current = self.records.get(scope.redis_key)
+        if current is None or (
+            current.assistant_message_id != record.assistant_message_id
+            or (current.state != "in_progress" and record.state == "in_progress")
+        ):
+            return False
         self.records[scope.redis_key] = record
         self.saves.append((record.state, len(self.records)))
         if record.state != "in_progress":
             self.terminal.set()
+        return True
 
     async def release(self, scope: IdempotencyScope, record: IdempotencyRecord) -> None:
         current = self.records.get(scope.redis_key)
@@ -292,6 +384,59 @@ class MemoryIdempotencyStore:
     def only(self) -> IdempotencyRecord:
         assert len(self.records) == 1
         return next(iter(self.records.values()))
+
+
+class ExpiringMemoryIdempotencyStore(MemoryIdempotencyStore):
+    """The same fake store with explicit, manually advanced expiry for lease diagnostics."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.now = 0.0
+        self.expires: dict[str, float] = {}
+        self.renewed = asyncio.Event()
+
+    def _expire(self, name: str) -> None:
+        if self.expires.get(name, float("inf")) <= self.now:
+            self.expires.pop(name, None)
+            self.records.pop(name, None)
+
+    async def claim(
+        self, scope: IdempotencyScope, record: IdempotencyRecord
+    ) -> IdempotencyRecord | None:
+        self._expire(scope.redis_key)
+        existing = await super().claim(scope, record)
+        if existing is None:
+            self.expires[scope.redis_key] = self.now + IN_PROGRESS_TTL_SECONDS
+        return existing
+
+    async def save(self, scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
+        self._expire(scope.redis_key)
+        current = self.records.get(scope.redis_key)
+        if current is None or (
+            current.assistant_message_id != record.assistant_message_id
+            or (current.state != "in_progress" and record.state == "in_progress")
+        ):
+            return False
+        saved = await super().save(scope, record)
+        if not saved:
+            return False
+        ttl = IN_PROGRESS_TTL_SECONDS if record.state == "in_progress" else TERMINAL_TTL_SECONDS
+        self.expires[scope.redis_key] = self.now + ttl
+        if record.state == "in_progress":
+            self.renewed.set()
+        return True
+
+
+class SignallingEvent(asyncio.Event):
+    """Signal when a scripted provider has actually begun waiting."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.entered.set()
+        return await super().wait()
 
 
 class ScriptedModels(FakeAsyncModels):
@@ -557,6 +702,7 @@ async def test_every_chat_route_requires_a_valid_access_token(world: World) -> N
     for method, path in (
         ("POST", f"{CHAT}/message"),
         ("GET", f"{CHAT}/sessions"),
+        ("DELETE", f"{CHAT}/sessions/{session}"),
         ("GET", f"{CHAT}/sessions/{session}/messages"),
     ):
         missing = await world.client.request(method, path, json={"content": "hi"})
@@ -770,6 +916,39 @@ async def test_a_database_outage_answers_503_and_frees_the_key() -> None:
         assert world.store.records == {} and stream_calls(world) == []
         world.chat.unavailable = False
         assert (await send(world, account, key=key)).status_code == 200  # the same key works
+
+
+async def test_an_ambiguous_user_commit_cannot_create_a_second_user_message(world: World) -> None:
+    class CommitAckLost:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        @asynccontextmanager
+        async def transaction(self) -> AsyncIterator[AsyncConnection]:
+            yield cast(AsyncConnection, None)
+            self.calls += 1
+            if self.calls == 3:  # 1 lookup, 2 claim, 3 store_user_message
+                raise ConnectionResetError("simulated lost commit acknowledgement")
+
+    account = await sign_in(world)
+    key = new_key()
+    database = CommitAckLost()
+    with patch.object(world.chat, "database", return_value=database):
+        first = await send(world, account, "ambiguous commit", key=key)
+        assert (first.status_code, first.json()) == (503, {"error": "chat_unavailable"})
+        assert len(world.chat.rows("user")) == 1  # the fake committed before losing the response
+        retry = await send(world, account, "ambiguous commit", key=key)
+
+    assert (retry.status_code, retry.json()) == (409, {"error": "request_in_progress"})
+    assert len(world.chat.rows("user")) == 1, "same-key retry duplicated an ambiguous commit"
+    digest = idempotency_key_digest(
+        world.settings.jwt_signing_key.get_secret_value().encode(),
+        IdempotencyScope(account.workspace_id, account.user_id, key),
+    )
+    assert (
+        world.chat.idempotency[(account.workspace_id, account.user_id, digest)].state
+        == "in_progress"
+    )
 
 
 async def test_an_unknown_session_is_a_404_before_the_key_is_claimed(world: World) -> None:
@@ -995,13 +1174,114 @@ async def test_missing_provider_usage_is_estimated_and_flagged(world: World) -> 
     assert usage["cost_usd"] not in (None, "0")
 
 
-async def test_a_long_reply_renews_the_in_progress_claim(world: World) -> None:
+async def test_a_completed_reply_records_latency(world: World) -> None:
     account = await sign_in(world)
-    world.ticker.step = 40.0  # every read of the monotonic clock is 40 seconds later
+    world.ticker.step = 40.0
     events(await send(world, account))
     states = [state for state, _ in world.store.saves]
-    assert states.count("in_progress") >= 1 and states[-1] == "completed"
+    assert states[-1] == "completed"
     assert world.chat.rows("orchestrator")[0].metadata["latency_ms"] > 0
+
+
+@pytest.mark.parametrize("stalled_at", ["client_write", "provider_wait"])
+async def test_a_stalled_live_turn_keeps_its_claim(world: World, stalled_at: str) -> None:
+    account = await sign_in(world)
+    expiring = ExpiringMemoryIdempotencyStore()
+    world.store = expiring
+    gate = SignallingEvent()
+    world.models.script = [chunk("first "), gate]
+    key = new_key()
+    turn = await begin(world, account, "stalled claim", key=key)
+    stream = turn.events()
+    await anext(stream)  # message.accepted
+    await anext(stream)  # first delta; the generator is suspended at the client write
+    scope = IdempotencyScope(account.workspace_id, account.user_id, key)
+    original = expiring.records[scope.redis_key]
+    successor = replace(original, user_message_id=uuid4(), assistant_message_id=uuid4())
+    pending: asyncio.Future[str] | None = None
+    wake, waiting = asyncio.Event(), asyncio.Event()
+
+    async def controlled_wait(_: Any, __: float) -> None:
+        waiting.set()
+        await wake.wait()
+        wake.clear()
+
+    with patch("app.services.chat_service._LiveTurn._wait_for_refresh", new=controlled_wait):
+        try:
+            if stalled_at == "provider_wait":
+                pending = asyncio.ensure_future(anext(stream))
+                await wait_until(gate.entered.is_set)
+            await waiting.wait()
+            expiring.now = IN_PROGRESS_TTL_SECONDS - 1
+            wake.set()
+            await expiring.renewed.wait()
+            expiring.now = IN_PROGRESS_TTL_SECONDS + 1
+            world.ticker.value = expiring.now
+
+            renewed = await expiring.claim(scope, successor)
+            assert renewed is not None
+            assert renewed.assistant_message_id == original.assistant_message_id
+            assert renewed.state == "in_progress"
+        finally:
+            if pending is not None:
+                pending.cancel()
+                try:
+                    await pending
+                except asyncio.CancelledError:
+                    pass
+            await turn.close()
+
+
+async def test_redis_claim_expiry_does_not_transfer_durable_claim_ownership(world: World) -> None:
+    account = await sign_in(world)
+    expiring = ExpiringMemoryIdempotencyStore()
+    world.store = expiring
+    gate = asyncio.Event()
+    world.models.script = [chunk("visible partial "), gate]
+    key = new_key()
+    turn = await begin(world, account, "takeover", key=key)
+    stream = turn.events()
+    await anext(stream)
+    await anext(stream)
+    scope = IdempotencyScope(account.workspace_id, account.user_id, key)
+    current = expiring.records[scope.redis_key]
+    successor = replace(current, user_message_id=uuid4(), assistant_message_id=uuid4())
+    wake, waiting, refreshed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    refresh_waits = 0
+
+    async def controlled_wait(_: Any, __: float) -> None:
+        nonlocal refresh_waits
+        refresh_waits += 1
+        if refresh_waits > 1:
+            refreshed.set()
+            await asyncio.Event().wait()
+        waiting.set()
+        await wake.wait()
+        wake.clear()
+
+    with patch("app.services.chat_service._LiveTurn._wait_for_refresh", new=controlled_wait):
+        try:
+            await waiting.wait()
+            expiring.now = IN_PROGRESS_TTL_SECONDS
+            assert await expiring.claim(scope, successor) is None
+            wake.set()
+            await refreshed.wait()
+            assert not turn._claim_lost.is_set()
+            digest = idempotency_key_digest(
+                world.settings.jwt_signing_key.get_secret_value().encode(), scope
+            )
+            durable_key = (account.workspace_id, account.user_id, digest)
+            assert world.chat.idempotency[durable_key].assistant_message_id == (
+                current.assistant_message_id
+            )
+            gate.set()
+            remaining = [frame async for frame in stream]
+            assert remaining[-1].splitlines()[1] == "event: done"
+            assert len(world.chat.rows("orchestrator")) == 1
+            assert world.chat.idempotency[durable_key].state == "completed"
+        finally:
+            gate.set()
+            await turn.close()
 
 
 # --------------------------------------------------------------- idempotency and replay
@@ -1011,9 +1291,16 @@ async def test_the_same_key_and_body_replays_the_stored_reply_without_calling_th
     world: World,
 ) -> None:
     account = await sign_in(world)
+    expiring = ExpiringMemoryIdempotencyStore()
+    world.store = expiring
     key = new_key()
     first = events(await send(world, account, "Tell me a story", key=key))
     calls, rows = len(stream_calls(world)), len(world.chat.messages)
+    expiring.now = TERMINAL_TTL_SECONDS + 1  # Redis lost the terminal result to expiry.
+    expiring._expire(IdempotencyScope(account.workspace_id, account.user_id, key).redis_key)
+    assert (
+        await expiring.lookup(IdempotencyScope(account.workspace_id, account.user_id, key)) is None
+    )
 
     again = events(await send(world, account, "Tell me a story", key=key))
 
@@ -1024,6 +1311,177 @@ async def test_the_same_key_and_body_replays_the_stored_reply_without_calling_th
     assert len(stream_calls(world)) == calls  # no second model call
     assert len(world.chat.messages) == rows  # no new rows
     assert len(world.chat.sessions) == 1
+
+
+async def test_the_same_key_is_isolated_between_users(world: World) -> None:
+    first_account = await sign_in(world)
+    second_account = await sign_in(world)
+    key = new_key()
+
+    first = events(await send(world, first_account, "same scoped text", key=key))
+    second = events(await send(world, second_account, "same scoped text", key=key))
+
+    assert first[0].data["replayed"] is False
+    assert second[0].data["replayed"] is False
+    assert len(stream_calls(world)) == 2
+    assert len(world.chat.idempotency) == 2
+
+
+async def test_a_stored_reply_replays_when_the_provider_client_is_unavailable(world: World) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    first = events(await send(world, account, "replay offline", key=key))
+    calls, rows = len(stream_calls(world)), len(world.chat.messages)
+    world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+    assert world.gateway.client is None
+
+    response = await send(world, account, "replay offline", key=key)
+
+    assert response.status_code == 200
+    replay = events(response)
+    assert names(replay) == ["message.accepted", "delta", "done"]
+    assert replay[0].data == {**first[0].data, "replayed": True}
+    assert replay[1].data == {"text": REPLY}
+    assert replay[-1].data == first[-1].data
+    assert len(stream_calls(world)) == calls and len(world.chat.messages) == rows
+    assert world.limiter.count("chat-message") == 2  # replays still spend the rate limit
+
+
+async def test_a_stored_failure_replays_when_the_provider_client_is_unavailable(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    world.models.script = [
+        types.GenerateContentResponse(
+            prompt_feedback=types.GenerateContentResponsePromptFeedback(
+                block_reason=types.BlockedReason.SAFETY
+            )
+        )
+    ]
+    first = events(await send(world, account, "blocked offline", key=key))
+    calls, rows = len(stream_calls(world)), len(world.chat.messages)
+    world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+    assert world.gateway.client is None
+
+    response = await send(world, account, "blocked offline", key=key)
+
+    assert response.status_code == 200
+    replay = events(response)
+    assert names(replay) == ["message.accepted", "error"]
+    assert replay[0].data == {**first[0].data, "replayed": True}
+    assert replay[-1].data == first[-1].data
+    assert len(stream_calls(world)) == calls and len(world.chat.messages) == rows
+
+
+async def test_a_replay_without_a_provider_still_obeys_the_rate_limit() -> None:
+    async with make_world(chat_rate_limit_per_minute=1) as world:
+        account = await sign_in(world)
+        key = new_key()
+        assert (await send(world, account, "limited replay", key=key)).status_code == 200
+        world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+        assert world.gateway.client is None
+
+        response = await send(world, account, "limited replay", key=key)
+
+        assert (response.status_code, response.json()) == (429, {"error": "rate_limited"})
+        assert len(stream_calls(world)) == 1
+
+
+async def test_a_replay_without_a_provider_still_rejects_a_different_body(world: World) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    await send(world, account, "original offline", key=key)
+    calls, rows = len(stream_calls(world)), len(world.chat.messages)
+    world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+    assert world.gateway.client is None
+
+    response = await send(world, account, "different offline", key=key)
+
+    assert (response.status_code, response.json()) == (422, {"error": "idempotency_key_reused"})
+    assert len(stream_calls(world)) == calls and len(world.chat.messages) == rows
+    assert world.limiter.count("chat-message") == 2
+
+
+async def test_an_in_progress_key_without_a_provider_still_returns_409(world: World) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    scope = IdempotencyScope(account.workspace_id, account.user_id, key)
+    secret = world.settings.jwt_signing_key.get_secret_value().encode()
+    claim = IdempotencyRecord(
+        "in_progress", request_hash(secret, scope, None, "busy offline"), None, uuid4(), uuid4()
+    )
+    assert await world.store.claim(scope, claim) is None
+    world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+    assert world.gateway.client is None
+
+    response = await send(world, account, "busy offline", key=key)
+
+    assert (response.status_code, response.json()) == (409, {"error": "request_in_progress"})
+    assert world.store.only() == claim
+    assert stream_calls(world) == [] and world.chat.messages == []
+
+
+async def test_provider_and_idempotency_outages_do_not_create_a_claim_or_spend_the_limit() -> None:
+    async with make_world(with_client=False) as world:
+        account = await sign_in(world)
+        world.store.unavailable = True
+
+        response = await send(world, account)
+
+        assert (response.status_code, response.json()) == (503, {"error": "model_unavailable"})
+        assert world.store.records == {} and world.chat.messages == []
+        assert world.limiter.count("chat-message") == 0 and stream_calls(world) == []
+
+
+async def test_a_replay_without_a_provider_does_not_restore_a_deleted_reply(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    first = events(await send(world, account, "deleted replay", key=key))
+    session_id = first[0].data["session_id"]
+    deleted = await world.client.delete(f"{CHAT}/sessions/{session_id}", headers=account.headers)
+    assert deleted.status_code == 204
+    world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+    assert world.gateway.client is None
+
+    response = await send(world, account, "deleted replay", key=key)
+
+    assert (response.status_code, response.json()) == (404, {"error": "session_not_found"})
+    assert len(stream_calls(world)) == 1
+
+
+@pytest.mark.parametrize("without_client", [False, True])
+async def test_a_failed_key_does_not_replay_a_deleted_session(
+    world: World, without_client: bool
+) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    world.models.script = [
+        types.GenerateContentResponse(
+            prompt_feedback=types.GenerateContentResponsePromptFeedback(
+                block_reason=types.BlockedReason.SAFETY
+            )
+        )
+    ]
+    first = events(await send(world, account, "failed then deleted", key=key))
+    session_id = first[0].data["session_id"]
+    assert first[-1].data["code"] == "content_blocked"
+    deleted = await world.client.delete(f"{CHAT}/sessions/{session_id}", headers=account.headers)
+    assert deleted.status_code == 204
+    if without_client:
+        world.gateway = ModelGateway(registry=world.registry, settings=world.settings)
+        assert world.gateway.client is None
+
+    response = await send(world, account, "failed then deleted", key=key)
+
+    if response.status_code == 200:
+        replay = events(response)
+        assert replay[0].data["session_id"] == session_id and replay[0].data["replayed"] is True
+        assert replay[-1].data == first[-1].data
+    assert response.status_code == 404, "failed replay announced a deleted session"
+    assert response.json() == {"error": "session_not_found"}
 
 
 async def test_a_retry_after_a_new_session_was_created_replays_into_that_session(
@@ -1130,6 +1588,28 @@ async def test_a_stream_cut_after_the_first_chunk_stores_the_partial_reply_as_in
     assert len(stream_calls(world)) == calls and len(world.chat.rows("orchestrator")) == 1
 
 
+async def test_a_metadata_only_chunk_before_a_stream_error_stores_no_empty_reply(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    key = new_key()
+    world.models.script = [chunk("", tokens=(3, 0)), ConnectionResetError(PROVIDER_MARKER)]
+
+    frames = events(await send(world, account, "metadata before error", key=key))
+
+    assert names(frames) == ["message.accepted", "error"]
+    assert frames[-1].data == {"code": "stream_interrupted", "retryable": True}
+    assert world.chat.rows("orchestrator") == []
+    assert (world.store.only().state, world.store.only().error_code) == (
+        "failed",
+        "stream_interrupted",
+    )
+    replay = events(await send(world, account, "metadata before error", key=key))
+    assert names(replay) == ["message.accepted", "error"]
+    assert replay[-1].data == frames[-1].data
+    assert len(stream_calls(world)) == 1
+
+
 async def test_a_blocked_prompt_ends_with_content_blocked_and_stores_no_reply(world: World) -> None:
     account = await sign_in(world)
     blocked = types.GenerateContentResponse(
@@ -1215,30 +1695,45 @@ async def test_a_reply_that_cannot_be_stored_ends_with_internal_error_and_never_
     assert frames[-1].data == {"code": "internal_error", "retryable": False}
     assert PROVIDER_MARKER not in response.text
     record = world.store.only()
-    assert (record.state, record.error_code) == ("failed", "internal_error")
+    assert record.state == "in_progress"  # the commit outcome cannot safely be inferred
 
     world.chat.fail_assistant_insert = False
     calls = len(stream_calls(world))
-    again = events(await send(world, account, "store me", key=key))
-    assert names(again) == ["message.accepted", "error"] and len(stream_calls(world)) == calls
+    again = await send(world, account, "store me", key=key)
+    assert (again.status_code, again.json()) == (409, {"error": "request_in_progress"})
+    assert len(stream_calls(world)) == calls
 
 
-async def test_when_redis_fails_after_the_reply_the_reply_is_still_delivered(world: World) -> None:
+async def test_a_completed_request_replays_without_a_model_or_registry(world: World) -> None:
     account = await sign_in(world)
-    original = world.store.save
-
-    async def failing_save(scope: IdempotencyScope, record: IdempotencyRecord) -> None:
-        if record.state != "in_progress":
-            raise IdempotencyUnavailable
-        await original(scope, record)
+    key = new_key()
+    first = await send(world, account, "replay without a model", key=key)
+    assert first.status_code == 200 and names(events(first))[-1] == "done"
+    calls = len(stream_calls(world))
 
     with (
-        patch.object(world.store, "save", failing_save),
-        patch("app.services.chat_service.RECORD_RETRY_DELAY_SECONDS", 0),  # keep the test fast
+        patch.object(world.gateway, "_client", None),
+        patch("app.services.chat_service.ChatService._orchestrator_spec", side_effect=Exception),
     ):
-        frames = events(await send(world, account))
-    assert names(frames)[-1] == "done"
-    assert len(world.chat.rows("orchestrator")) == 1
+        replay = await send(world, account, "replay without a model", key=key)
+
+    frames = events(replay)
+    assert names(frames) == ["message.accepted", "delta", "done"]
+    assert frames[0].data["replayed"] is True
+    assert len(stream_calls(world)) == calls
+
+
+async def test_when_terminal_database_write_fails_the_service_does_not_send_done(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    world.chat.fail_assistant_insert = True
+
+    frames = events(await send(world, account))
+    assert names(frames)[-1] == "error"
+    assert frames[-1].data == {"code": "internal_error", "retryable": False}
+    assert len(world.chat.rows("orchestrator")) == 0
+    assert world.store.only().state == "in_progress"
 
 
 # ----------------------------------------------------------------- turn lifecycle (direct)
@@ -1350,6 +1845,84 @@ async def test_chat_passes_the_approved_output_token_limit_to_the_gateway() -> N
         assert stream_calls(world)[0]["config"].max_output_tokens == 1024
 
 
+async def test_user_message_history_and_inserts_are_serialized_per_session(world: World) -> None:
+    account = await sign_in(world)
+    created = events(await send(world, account, "seed"))
+    session_id = UUID(created[0].data["session_id"])
+    world.chat.history_entered = asyncio.Event()
+    world.chat.history_continue = asyncio.Event()
+    world.chat.lock_waiting = asyncio.Event()
+
+    first_task = asyncio.create_task(
+        begin(world, account, "first concurrent", key=new_key(), session_id=session_id)
+    )
+    await world.chat.history_entered.wait()
+    second_task = asyncio.create_task(
+        begin(world, account, "second concurrent", key=new_key(), session_id=session_id)
+    )
+    await world.chat.lock_waiting.wait()
+    world.chat.history_continue.set()
+    first_turn, second_turn = await asyncio.gather(first_task, second_task)
+
+    user_texts = [message.content for message in world.chat.rows("user")]
+    assert user_texts[-2:] == ["first concurrent", "second concurrent"]
+    await first_turn.close()
+    await second_turn.close()
+
+
+async def test_client_write_delay_does_not_consume_the_model_deadline(world: World) -> None:
+    account = await sign_in(world)
+    world.models.script = [chunk("first "), chunk("second", finish=types.FinishReason.STOP)]
+    turn = await begin(world, account)
+    stream = turn.events()
+    loop = asyncio.get_running_loop()
+    elapsed = [0.0]
+    clock_loop = SimpleNamespace(time=lambda: elapsed[0], create_task=loop.create_task)
+    try:
+        with patch("app.services.chat_service.asyncio.get_running_loop", return_value=clock_loop):
+            accepted = await anext(stream)
+            first_delta = await anext(stream)
+            assert parse_sse(accepted + first_delta)[-1].event == "delta"
+            elapsed[0] = float(world.settings.chat_reply_deadline_seconds + 1)
+            assert elapsed[0] < world.stream_limiter.lease_seconds[0]
+
+            next_frame = parse_sse(accepted + first_delta + await anext(stream))[-1]
+
+            assert next_frame.event == "delta", f"client stall caused {next_frame.event}"
+    finally:
+        await turn.close()
+
+
+async def test_claim_renews_while_the_client_is_stalled_after_a_delta(world: World) -> None:
+    account = await sign_in(world)
+    store = ExpiringMemoryIdempotencyStore()
+    world.store = store
+    world.models.script = [chunk("first "), asyncio.Event()]
+    key = new_key()
+    turn = await begin(world, account, key=key)
+    stream = turn.events()
+    wake = asyncio.Event()
+    waiting = asyncio.Event()
+
+    async def controlled_wait(_: Any, __: float) -> None:
+        waiting.set()
+        await wake.wait()
+        wake.clear()
+
+    with patch("app.services.chat_service._LiveTurn._wait_for_refresh", new=controlled_wait):
+        try:
+            await stream.__anext__()  # accepted
+            await stream.__anext__()  # delta; the generator is now suspended at the client write
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            store.now = IN_PROGRESS_TTL_SECONDS - 1
+            wake.set()
+            await asyncio.wait_for(store.renewed.wait(), timeout=1)
+            redis_key = f"maya:chat:idem:{account.workspace_id}:{account.user_id}:{key}"
+            assert store.expires[redis_key] > store.now
+        finally:
+            await turn.close()
+
+
 async def test_reply_deadline_stops_a_silent_provider_and_replays_its_failure() -> None:
     async with make_world(chat_reply_deadline_seconds=1) as world:
         account = await sign_in(world)
@@ -1393,7 +1966,12 @@ async def test_the_reply_deadline_spans_the_whole_reply_and_keeps_the_text() -> 
 
 
 async def begin(
-    world: World, account: Account, content: str = "hello", *, key: str | None = None
+    world: World,
+    account: Account,
+    content: str = "hello",
+    *,
+    key: str | None = None,
+    session_id: UUID | None = None,
 ) -> Any:
     service = ChatService(
         principal=Principal(account.user_id, account.workspace_id, "admin", uuid4()),
@@ -1408,9 +1986,12 @@ async def begin(
         monotonic=world.ticker,
         repositories=world.chat.repository,
     )
+    body: dict[str, Any] = {"content": content}
+    if session_id is not None:
+        body["session_id"] = str(session_id)
     return await service.begin_message(
         idempotency_keys=[new_key() if key is None else key],
-        body=json.dumps({"content": content}).encode(),
+        body=json.dumps(body).encode(),
     )
 
 
@@ -1459,6 +2040,58 @@ async def test_cancelling_the_consumer_while_the_model_is_silent_stores_what_arr
     )
     assert world.store.only().state == "interrupted"
     assert world.fake.aio.models.open_streams == 0
+
+
+async def test_disconnect_after_only_metadata_stores_no_empty_assistant_reply(world: World) -> None:
+    account = await sign_in(world)
+    world.models.script = [chunk("", tokens=(3, 0)), asyncio.Event()]
+    turn = await begin(world, account)
+    stream = turn.events()
+    await anext(stream)  # message.accepted
+    pending = asyncio.create_task(anext(stream))  # consumes metadata, then the provider is silent
+    await wait_until(lambda: turn._progress.chunks == 1)
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await turn.close()
+
+    assert world.chat.rows("orchestrator") == []
+    assert (world.store.only().state, world.store.only().error_code) == (
+        "failed",
+        "stream_interrupted",
+    )
+    assert world.models.open_streams == 0
+
+
+async def test_disconnect_closes_the_upstream_while_terminal_write_is_blocked(world: World) -> None:
+    account = await sign_in(world)
+    world.models.script = [chunk("partial "), asyncio.Event()]
+    turn = await begin(world, account)
+    stream = turn.events()
+    await anext(stream)  # message.accepted
+    await anext(stream)  # a visible delta
+    assert world.models.open_streams == 1
+    persist_started, allow_persist = asyncio.Event(), asyncio.Event()
+    original = world.store.save
+
+    async def blocked_save(scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
+        if record.state != "in_progress":
+            persist_started.set()
+            await allow_persist.wait()
+        return await original(scope, record)
+
+    with patch.object(world.store, "save", blocked_save):
+        closing = asyncio.create_task(turn.close())
+        try:
+            await wait_until(persist_started.is_set)
+            await wait_until(lambda: world.models.open_streams == 0)
+        finally:
+            allow_persist.set()
+            await closing
+
+    assert world.chat.rows("orchestrator")[0].content == "partial "
+    assert world.store.only().state == "interrupted"
 
 
 async def test_a_turn_that_was_never_iterated_ends_its_request_as_failed(world: World) -> None:
@@ -1734,6 +2367,62 @@ async def test_messages_of_an_unknown_or_foreign_session_are_a_404(world: World)
         assert (response.status_code, response.json()) == (404, {"error": "session_not_found"})
 
 
+async def test_delete_session_success(world: World) -> None:
+    account = await sign_in(world)
+    res = events(await send(world, account, "to be deleted"))
+    session_id = res[0].data["session_id"]
+
+    # Session exists in list
+    listed = await world.client.get(f"{CHAT}/sessions", headers=account.headers)
+    assert any(s["id"] == session_id for s in listed.json()["items"])
+
+    # Delete session
+    delete_resp = await world.client.delete(
+        f"{CHAT}/sessions/{session_id}", headers=account.headers
+    )
+    assert delete_resp.status_code == 204
+    assert delete_resp.headers["cache-control"] == "no-store"
+
+    # Session is gone from list
+    listed_after = await world.client.get(f"{CHAT}/sessions", headers=account.headers)
+    assert not any(s["id"] == session_id for s in listed_after.json()["items"])
+
+    # Messages of deleted session return 404
+    messages_resp = await world.client.get(
+        f"{CHAT}/sessions/{session_id}/messages", headers=account.headers
+    )
+    assert messages_resp.status_code == 404
+    assert messages_resp.json() == {"error": "session_not_found"}
+
+    # Deleting again returns 404
+    delete_again = await world.client.delete(
+        f"{CHAT}/sessions/{session_id}", headers=account.headers
+    )
+    assert delete_again.status_code == 404
+    assert delete_again.json() == {"error": "session_not_found"}
+
+
+async def test_delete_foreign_or_unknown_session_returns_404(world: World) -> None:
+    owner, other = await sign_in(world), await sign_in(world)
+    session_id = events(await send(world, owner, "owner's secret"))[0].data["session_id"]
+
+    # Other user attempts to delete owner's session -> 404
+    foreign_resp = await world.client.delete(f"{CHAT}/sessions/{session_id}", headers=other.headers)
+    assert foreign_resp.status_code == 404
+    assert foreign_resp.json() == {"error": "session_not_found"}
+
+    # Unknown session -> 404
+    unknown_resp = await world.client.delete(f"{CHAT}/sessions/{uuid4()}", headers=owner.headers)
+    assert unknown_resp.status_code == 404
+    assert unknown_resp.json() == {"error": "session_not_found"}
+
+    # Owner's session still exists
+    get_resp = await world.client.get(
+        f"{CHAT}/sessions/{session_id}/messages", headers=owner.headers
+    )
+    assert get_resp.status_code == 200
+
+
 @pytest.mark.parametrize(
     ("path", "params", "fields"),
     [
@@ -1839,6 +2528,7 @@ async def test_the_public_surface_includes_exactly_the_three_documented_chat_rou
     assert chat == {
         (f"{CHAT}/message", "POST"),
         (f"{CHAT}/sessions", "GET"),
+        (f"{CHAT}/sessions/{{session_id}}", "DELETE"),
         (f"{CHAT}/sessions/{{session_id}}/messages", "GET"),
     }
     post = schema["paths"][f"{CHAT}/message"]["post"]
@@ -2059,21 +2749,33 @@ async def test_a_client_that_leaves_before_any_text_arrives_stores_no_reply(worl
     assert len(stream_calls(world)) == calls  # the same key never calls the model again
 
 
-async def test_the_final_idempotency_write_is_retried_after_a_redis_hiccup(world: World) -> None:
+async def test_redis_terminal_cache_failure_does_not_hide_the_durable_result(world: World) -> None:
     account = await sign_in(world)
     original = world.store.save
-    failures = [IdempotencyUnavailable, IdempotencyUnavailable]  # the first two final writes fail
+    failures = [IdempotencyUnavailable, IdempotencyUnavailable]
+    key = new_key()
 
-    async def flaky_save(scope: IdempotencyScope, record: IdempotencyRecord) -> None:
+    async def flaky_save(scope: IdempotencyScope, record: IdempotencyRecord) -> bool:
         if record.state != "in_progress" and failures:
             raise failures.pop()
-        await original(scope, record)
+        return await original(scope, record)
 
     with (
         patch.object(world.store, "save", flaky_save),
         patch("app.services.chat_service.RECORD_RETRY_DELAY_SECONDS", 0),
     ):
-        frames = events(await send(world, account))
+        frames = events(await send(world, account, key=key))
 
     assert names(frames)[-1] == "done"
-    assert world.store.only().state == "completed"  # not left "in progress" for a later re-run
+    digest = idempotency_key_digest(
+        world.settings.jwt_signing_key.get_secret_value().encode(),
+        IdempotencyScope(account.workspace_id, account.user_id, key),
+    )
+    durable = world.chat.idempotency[(account.workspace_id, account.user_id, digest)]
+    assert durable.state == "completed"
+    assert world.store.only().state == "in_progress"  # Redis is only a best-effort cache.
+
+    calls = len(stream_calls(world))
+    replay = events(await send(world, account, key=key))
+    assert replay[0].data["replayed"] is True
+    assert len(stream_calls(world)) == calls

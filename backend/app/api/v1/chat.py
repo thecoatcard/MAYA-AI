@@ -194,3 +194,13 @@ async def list_messages(
     """The messages of one session, oldest first."""
     response.headers["Cache-Control"] = "no-store"  # private conversation data
     return await service.list_messages(session_id, limit, cursor)
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: UUID,
+    service: Service,
+) -> Response:
+    """Delete one session and all its messages. 204 on success; 404 if not found."""
+    await service.delete_session(session_id)
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})

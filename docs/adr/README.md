@@ -32,5 +32,6 @@ The `architecture` rule in `governance/governance.config.json` asks for an ADR (
 | [0007](0007-gemini-model-gateway-architecture.md) | Gemini model gateway architecture, resilience and token accounting | Proposed |
 | [0008](0008-chat-api-contract.md) | Chat API contract, idempotency and persistence | Accepted |
 | [0009](0009-refresh-cookie-transport.md) | HttpOnly refresh-cookie transport for the browser client | Accepted |
+| [0010](0010-checkpoint-owner-isolation.md) | Bind LangGraph checkpoints to workspace and user owners | Proposed |
 
 Product-level decisions from the project plan (modular monolith, voice/task separation, permission tiers, and others) will be recorded here as ADRs when implementation starts.

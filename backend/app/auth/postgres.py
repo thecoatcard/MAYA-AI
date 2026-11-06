@@ -78,16 +78,20 @@ REHASH_PASSWORD = text(
     "UPDATE users SET hashed_password = :hashed_password "
     "WHERE id = :user_id AND password_changed_at = :expected RETURNING id"
 )
-# Only if the password version that was verified is still the current one.
+# Locking the account row serializes this recheck with password resets. The lock is held until
+# the surrounding transaction commits, so a reset either follows and revokes this session or
+# precedes the recheck and prevents the stale login from opening one.
+LOCK_USER_FOR_SESSION = text("SELECT id FROM users WHERE id = :user_id FOR UPDATE")
+PASSWORD_VERSION_FOR_SESSION = text(
+    "SELECT id FROM users WHERE id = :user_id AND password_changed_at = :expected"
+)
 INSERT_SESSION = text(
     "INSERT INTO auth_sessions (id, workspace_id, user_id, refresh_jti, refresh_expires_at, "
     "absolute_expires_at, created_at, last_used_at) "
     "SELECT CAST(:id AS uuid), CAST(:workspace_id AS uuid), CAST(:user_id AS uuid), "
     "CAST(:refresh_jti AS uuid), CAST(:refresh_expires_at AS timestamptz), "
     "CAST(:absolute_expires_at AS timestamptz), CAST(:now AS timestamptz), "
-    "CAST(:now AS timestamptz) "
-    "WHERE EXISTS (SELECT 1 FROM users WHERE id = :user_id "
-    "AND password_changed_at = :expected) RETURNING id"
+    "CAST(:now AS timestamptz) RETURNING id"
 )
 LIVE_SESSION = text(
     "SELECT s.id, s.user_id, s.workspace_id, u.role, s.refresh_jti, s.refresh_expires_at, "
@@ -284,6 +288,15 @@ class PostgresAuthTransaction:
         expected_password_changed_at: datetime,
         now: datetime,
     ) -> bool:
+        user = await self._connection.execute(LOCK_USER_FOR_SESSION, {"user_id": user_id})
+        if user.first() is None:
+            return False
+        current_version = await self._connection.execute(
+            PASSWORD_VERSION_FOR_SESSION,
+            {"user_id": user_id, "expected": expected_password_changed_at},
+        )
+        if current_version.first() is None:
+            return False
         result = await self._connection.execute(
             INSERT_SESSION,
             {
@@ -293,7 +306,6 @@ class PostgresAuthTransaction:
                 "refresh_jti": refresh_jti,
                 "refresh_expires_at": refresh_expires_at,
                 "absolute_expires_at": absolute_expires_at,
-                "expected": expected_password_changed_at,
                 "now": now,
             },
         )

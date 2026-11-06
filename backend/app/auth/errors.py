@@ -26,11 +26,6 @@ class InvalidCredentials(Exception):
         super().__init__("Invalid credentials")
 
 
-class EmailNotVerified(Exception):
-    def __init__(self) -> None:
-        super().__init__("E-mail address not verified")
-
-
 class InvalidToken(Exception):
     def __init__(self) -> None:
         super().__init__("Invalid token")

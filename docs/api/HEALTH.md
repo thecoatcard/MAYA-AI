@@ -1,6 +1,6 @@
 # Health API
 
-The implemented local API exposes only health probes. Neither probe requires
+The local API exposes the following health probes. Neither probe requires
 authentication. They must not be used to expose infrastructure diagnostics.
 
 | Route | Success | Failure |

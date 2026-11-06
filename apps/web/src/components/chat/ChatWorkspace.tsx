@@ -1,6 +1,13 @@
 "use client";
 
-import { Layers3, LogOut, Menu, PanelLeftClose, SquarePen } from "lucide-react";
+import {
+  Layers3,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  SquarePen,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import {
   useCallback,
@@ -13,9 +20,10 @@ import {
   type PointerEvent,
 } from "react";
 
-import { useChatStream } from "../../hooks/useChatStream";
+import { useChatStream, type ChatError } from "../../hooks/useChatStream";
 import {
   ApiError,
+  deleteSession,
   listMessages,
   listSessions,
   NetworkError,
@@ -29,7 +37,7 @@ import {
   subscribeAccessToken,
 } from "../../lib/auth-session";
 import { signOut } from "../../lib/auth-client";
-import type { SessionSummary, StoredMessage } from "../../lib/api-client";
+import type { Page, SessionSummary, StoredMessage } from "../../lib/api-client";
 import { ChatInput } from "./ChatInput";
 import { ChatNotice } from "./ChatNotice";
 import { MessageThread } from "./MessageThread";
@@ -68,6 +76,28 @@ function groupSession(session: SessionSummary): "today" | "earlier" {
     new Date().toDateString()
     ? "today"
     : "earlier";
+}
+
+function mergeSessions(
+  current: readonly SessionSummary[],
+  incoming: readonly SessionSummary[],
+  deleted: ReadonlySet<string>,
+  replaceExisting: boolean,
+): SessionSummary[] {
+  const merged = new Map(
+    current.filter((session) => !deleted.has(session.id)).map((s) => [s.id, s]),
+  );
+  for (const session of incoming) {
+    if (
+      !deleted.has(session.id) &&
+      (replaceExisting || !merged.has(session.id))
+    ) {
+      merged.set(session.id, session);
+    }
+  }
+  return [...merged.values()].sort(
+    (left, right) => Date.parse(right.created_at) - Date.parse(left.created_at),
+  );
 }
 
 function sessionErrorText(error: unknown): string {
@@ -140,6 +170,11 @@ export function ChatWorkspace() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
+    null,
+  );
+  const [hiddenError, setHiddenError] = useState<ChatError | null>(null);
+  const [listRefreshVersion, setListRefreshVersion] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -149,9 +184,57 @@ export function ChatWorkspace() {
   const wasDrawerOpen = useRef(false);
   const wasIdentity = useRef(identity);
   const syncedSessionId = useRef<string | null>(null);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const mountedRef = useRef(true);
+  const conversationGenerationRef = useRef(0);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const moreRequestRef = useRef<AbortController | null>(null);
+  const deleteRequestRef = useRef<object | null>(null);
+  const deletedSessionIdsRef = useRef(new Set<string>());
+  const firstPageRequestRef = useRef(0);
+  const appliedFirstPageRef = useRef(0);
+  const paginationAdvancedRef = useRef(false);
   const runRefreshRef = useRef<(initial: boolean) => Promise<void>>(
     async () => {},
   );
+
+  const invalidateHistory = useCallback(() => {
+    conversationGenerationRef.current += 1;
+    historyRequestRef.current?.abort();
+    historyRequestRef.current = null;
+    setHistoryLoading(false);
+  }, []);
+
+  const applyFirstPage = useCallback(
+    (page: Page<SessionSummary>, request: number): boolean => {
+      if (request < appliedFirstPageRef.current) {
+        return false;
+      }
+      appliedFirstPageRef.current = request;
+      setSessions((current) =>
+        mergeSessions(current, page.items, deletedSessionIdsRef.current, true),
+      );
+      if (!paginationAdvancedRef.current) {
+        setSessionCursor(page.next_cursor);
+      }
+      return true;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      conversationGenerationRef.current += 1;
+      historyRequestRef.current?.abort();
+      historyRequestRef.current = null;
+      moreRequestRef.current?.abort();
+      moreRequestRef.current = null;
+      deleteRequestRef.current = null;
+    };
+  }, []);
 
   const clearRefreshTimer = useCallback(() => {
     if (refreshTimerRef.current !== null) {
@@ -174,10 +257,20 @@ export function ChatWorkspace() {
 
   const runRefresh = useCallback(
     async (initial: boolean) => {
+      const identityAtStart = getAuthIdentityVersion();
       try {
         const refreshed = await refreshSession();
+        if (identityAtStart !== getAuthIdentityVersion()) {
+          setAuthStatus("ready");
+          setAuthWarning(null);
+          clearRefreshTimer();
+          const currentExpiry = getAccessTokenExpiresIn();
+          if (currentExpiry !== null) {
+            scheduleRefresh(currentExpiry);
+          }
+          return;
+        }
         if (refreshed === null) {
-          setAccessToken(null);
           setAuthStatus("ready");
           setAuthWarning(null);
           clearRefreshTimer();
@@ -187,6 +280,9 @@ export function ChatWorkspace() {
         setAuthWarning(null);
         scheduleRefresh(refreshed.expiresIn);
       } catch {
+        if (identityAtStart !== getAuthIdentityVersion()) {
+          return;
+        }
         if (initial) {
           setAuthStatus("offline");
         } else {
@@ -231,69 +327,100 @@ export function ChatWorkspace() {
       return;
     }
     let active = true;
+    const controller = new AbortController();
+    const request = ++firstPageRequestRef.current;
     setSessionsLoading(true);
     setSessionError(null);
-    void listSessions({ limit: 50 })
+    void listSessions({ limit: 50, signal: controller.signal })
       .then((page) => {
-        if (active) {
-          setSessions(page.items);
-          setSessionCursor(page.next_cursor);
+        if (
+          active &&
+          !controller.signal.aborted &&
+          getAuthIdentityVersion() === identity
+        ) {
+          applyFirstPage(page, request);
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (
+          active &&
+          !controller.signal.aborted &&
+          getAuthIdentityVersion() === identity &&
+          request >= appliedFirstPageRef.current
+        ) {
           setSessionError(sessionErrorText(error));
         }
       })
       .finally(() => {
-        if (active) {
+        if (
+          active &&
+          !controller.signal.aborted &&
+          getAuthIdentityVersion() === identity
+        ) {
           setSessionsLoading(false);
         }
       });
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [authStatus, identity, signedIn]);
+  }, [applyFirstPage, authStatus, identity, signedIn]);
 
   useEffect(() => {
-    if (chat.sessionId === null) {
+    if (authStatus !== "ready" || !signedIn || chat.sessionId === null) {
       syncedSessionId.current = null;
       return;
     }
     if (syncedSessionId.current === chat.sessionId) {
       return;
     }
-    if (sessions.some((item) => item.id === chat.sessionId)) {
+    if (sessionsRef.current.some((item) => item.id === chat.sessionId)) {
       syncedSessionId.current = chat.sessionId;
       return;
     }
-    syncedSessionId.current = chat.sessionId;
+    const sessionId = chat.sessionId;
+    const generation = conversationGenerationRef.current;
+    const request = ++firstPageRequestRef.current;
+    const controller = new AbortController();
     let active = true;
-    void listSessions({ limit: 50 })
+    setSessionError(null);
+    void listSessions({ limit: 50, signal: controller.signal })
       .then((page) => {
-        if (active) {
-          setSessions((current) => {
-            const merged = new Map(current.map((item) => [item.id, item]));
-            for (const item of page.items) {
-              merged.set(item.id, item);
-            }
-            return [...merged.values()].sort(
-              (left, right) =>
-                Date.parse(right.created_at) - Date.parse(left.created_at),
-            );
-          });
-          setSessionCursor(page.next_cursor);
+        if (
+          active &&
+          !controller.signal.aborted &&
+          getAuthIdentityVersion() === identity &&
+          conversationGenerationRef.current === generation &&
+          applyFirstPage(page, request) &&
+          page.items.some((item) => item.id === sessionId) &&
+          !deletedSessionIdsRef.current.has(sessionId)
+        ) {
+          syncedSessionId.current = sessionId;
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (
+          active &&
+          !controller.signal.aborted &&
+          getAuthIdentityVersion() === identity &&
+          conversationGenerationRef.current === generation &&
+          request >= appliedFirstPageRef.current
+        ) {
           setSessionError(sessionErrorText(error));
         }
       });
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [chat.sessionId, sessions]);
+  }, [
+    applyFirstPage,
+    authStatus,
+    chat.sessionId,
+    identity,
+    listRefreshVersion,
+    signedIn,
+  ]);
 
   useEffect(() => {
     if (!sidebarOpen || !isMobile) {
@@ -314,24 +441,39 @@ export function ChatWorkspace() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        invalidateHistory();
         reset();
         setDraft("");
+        setHiddenError(null);
         inputRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [reset]);
+  }, [invalidateHistory, reset]);
 
   useLayoutEffect(() => {
     if (wasIdentity.current !== identity) {
       wasIdentity.current = identity;
+      invalidateHistory();
+      moreRequestRef.current?.abort();
+      moreRequestRef.current = null;
+      deleteRequestRef.current = null;
+      deletedSessionIdsRef.current.clear();
+      appliedFirstPageRef.current = 0;
+      paginationAdvancedRef.current = false;
+      syncedSessionId.current = null;
       reset();
       setDraft("");
+      setHiddenError(null);
       setSessions([]);
       setSessionCursor(null);
+      setSessionsLoading(false);
+      setLoadingMore(false);
+      setDeletingSessionId(null);
+      setSessionError(null);
     }
-  }, [identity, reset]);
+  }, [identity, invalidateHistory, reset]);
 
   const changeTheme = (next: ThemePreference) => {
     setTheme(next);
@@ -339,6 +481,9 @@ export function ChatWorkspace() {
   };
 
   const handleSubmit = (text: string) => {
+    invalidateHistory();
+    setListRefreshVersion((version) => version + 1);
+    setHiddenError(null);
     setDraft("");
     void chat.send(text);
   };
@@ -346,17 +491,34 @@ export function ChatWorkspace() {
   const focusComposer = () => inputRef.current?.focus();
 
   const handleRetry = () => {
+    invalidateHistory();
+    setListRefreshVersion((version) => version + 1);
     void chat.retry();
     focusComposer();
   };
 
   const handleAskAgain = () => {
+    invalidateHistory();
+    setListRefreshVersion((version) => version + 1);
     void chat.askAgain();
     focusComposer();
   };
 
   const handleDismiss = () => {
+    const last = chat.messages[chat.messages.length - 1];
+    if (
+      draft !== "" &&
+      chat.error !== null &&
+      last?.role === "user" &&
+      last.state === "failed"
+    ) {
+      // Do not remove the failed bubble when another draft occupies the input.
+      setHiddenError(chat.error);
+      focusComposer();
+      return;
+    }
     const restored = chat.dismissError();
+    setHiddenError(null);
     if (restored !== null && draft === "") {
       setDraft(restored);
     }
@@ -364,49 +526,149 @@ export function ChatWorkspace() {
   };
 
   const handleNewConversation = () => {
+    invalidateHistory();
     reset();
     setDraft("");
+    setHiddenError(null);
     setSessionError(null);
     focusComposer();
   };
 
-  const handleLoadMore = async () => {
-    if (sessionCursor === null || loadingMore) {
+  const handleDeleteSession = async (sessionId: string) => {
+    if (
+      chat.isBusy ||
+      deletingSessionId !== null ||
+      deleteRequestRef.current !== null ||
+      getAuthIdentityVersion() !== identity
+    ) {
       return;
     }
+    const request = {};
+    const generation = conversationGenerationRef.current;
+    const wasSelected = chat.sessionId === sessionId;
+    deleteRequestRef.current = request;
+    const isCurrent = () =>
+      mountedRef.current &&
+      deleteRequestRef.current === request &&
+      getAuthIdentityVersion() === identity;
+    setDeletingSessionId(sessionId);
+    setSessionError(null);
+    try {
+      await deleteSession(sessionId);
+      if (!isCurrent()) {
+        return;
+      }
+      deletedSessionIdsRef.current.add(sessionId);
+      setSessions((current) => current.filter((s) => s.id !== sessionId));
+      if (syncedSessionId.current === sessionId) {
+        syncedSessionId.current = null;
+      }
+      if (wasSelected && conversationGenerationRef.current === generation) {
+        handleNewConversation();
+      }
+    } catch {
+      if (isCurrent()) {
+        setSessionError("Conversation could not be deleted. Try again.");
+      }
+    } finally {
+      if (isCurrent()) {
+        deleteRequestRef.current = null;
+        setDeletingSessionId(null);
+      }
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (
+      sessionCursor === null ||
+      loadingMore ||
+      moreRequestRef.current !== null ||
+      getAuthIdentityVersion() !== identity
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    moreRequestRef.current = controller;
+    const isCurrent = () =>
+      mountedRef.current &&
+      moreRequestRef.current === controller &&
+      !controller.signal.aborted &&
+      getAuthIdentityVersion() === identity;
     setLoadingMore(true);
     setSessionError(null);
     try {
-      const page = await listSessions({ limit: 50, cursor: sessionCursor });
-      setSessions((current) => [...current, ...page.items]);
+      const page = await listSessions({
+        limit: 50,
+        cursor: sessionCursor,
+        signal: controller.signal,
+      });
+      if (!isCurrent()) {
+        return;
+      }
+      setSessions((current) =>
+        mergeSessions(current, page.items, deletedSessionIdsRef.current, false),
+      );
+      paginationAdvancedRef.current = true;
       setSessionCursor(page.next_cursor);
     } catch (error) {
-      setSessionError(sessionErrorText(error));
+      if (isCurrent()) {
+        setSessionError(sessionErrorText(error));
+      }
     } finally {
-      setLoadingMore(false);
+      if (isCurrent()) {
+        moreRequestRef.current = null;
+        setLoadingMore(false);
+      }
     }
   };
 
   const handleOpenSession = async (session: SessionSummary) => {
-    if (historyLoading || chat.isBusy) {
+    if (
+      historyLoading ||
+      historyRequestRef.current !== null ||
+      chat.isBusy ||
+      getAuthIdentityVersion() !== identity
+    ) {
       return;
     }
+    invalidateHistory();
+    const generation = conversationGenerationRef.current;
+    const controller = new AbortController();
+    historyRequestRef.current = controller;
+    const isCurrent = () =>
+      mountedRef.current &&
+      historyRequestRef.current === controller &&
+      !controller.signal.aborted &&
+      conversationGenerationRef.current === generation &&
+      getAuthIdentityVersion() === identity;
     setHistoryLoading(true);
     setSessionError(null);
     try {
       const messages: StoredMessage[] = [];
       let cursor: string | null = null;
       do {
-        const page = await listMessages(session.id, { limit: 100, cursor });
+        const page = await listMessages(session.id, {
+          limit: 100,
+          cursor,
+          signal: controller.signal,
+        });
+        if (!isCurrent()) {
+          return;
+        }
         messages.push(...page.items);
         cursor = page.next_cursor;
       } while (cursor !== null);
       chat.openSession(session.id, messages);
       setSidebarOpen(false);
     } catch (error) {
-      setSessionError(sessionErrorText(error));
+      if (isCurrent()) {
+        setSessionError(sessionErrorText(error));
+      }
     } finally {
-      setHistoryLoading(false);
+      if (isCurrent()) {
+        historyRequestRef.current = null;
+        setHistoryLoading(false);
+      }
     }
   };
 
@@ -455,8 +717,9 @@ export function ChatWorkspace() {
     }
   };
 
+  const displayedError = chat.error === hiddenError ? null : chat.error;
   const inlineAskAgain =
-    chat.canAskAgain && chat.error === null ? handleAskAgain : undefined;
+    chat.canAskAgain && displayedError === null ? handleAskAgain : undefined;
   const todaySessions = sessions.filter(
     (session) => groupSession(session) === "today",
   );
@@ -572,11 +835,15 @@ export function ChatWorkspace() {
                     </h2>
                     <ul>
                       {todaySessions.map((session) => (
-                        <li key={session.id}>
+                        <li key={session.id} className="maya-session__item">
                           <button
                             type="button"
                             className="maya-session maya-ripple"
-                            disabled={historyLoading || chat.isBusy}
+                            disabled={
+                              historyLoading ||
+                              chat.isBusy ||
+                              deletingSessionId !== null
+                            }
                             aria-current={
                               session.id === chat.sessionId ? "page" : undefined
                             }
@@ -584,6 +851,23 @@ export function ChatWorkspace() {
                             onClick={() => void handleOpenSession(session)}
                           >
                             {session.title}
+                          </button>
+                          <button
+                            type="button"
+                            className="maya-session__delete"
+                            aria-label={`Delete conversation ${session.title}`}
+                            title="Delete conversation"
+                            disabled={
+                              historyLoading ||
+                              chat.isBusy ||
+                              deletingSessionId !== null
+                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDeleteSession(session.id);
+                            }}
+                          >
+                            <Trash2 aria-hidden="true" size={14} />
                           </button>
                         </li>
                       ))}
@@ -600,11 +884,15 @@ export function ChatWorkspace() {
                     </h2>
                     <ul>
                       {earlierSessions.map((session) => (
-                        <li key={session.id}>
+                        <li key={session.id} className="maya-session__item">
                           <button
                             type="button"
                             className="maya-session maya-ripple"
-                            disabled={historyLoading || chat.isBusy}
+                            disabled={
+                              historyLoading ||
+                              chat.isBusy ||
+                              deletingSessionId !== null
+                            }
                             aria-current={
                               session.id === chat.sessionId ? "page" : undefined
                             }
@@ -612,6 +900,23 @@ export function ChatWorkspace() {
                             onClick={() => void handleOpenSession(session)}
                           >
                             {session.title}
+                          </button>
+                          <button
+                            type="button"
+                            className="maya-session__delete"
+                            aria-label={`Delete conversation ${session.title}`}
+                            title="Delete conversation"
+                            disabled={
+                              historyLoading ||
+                              chat.isBusy ||
+                              deletingSessionId !== null
+                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDeleteSession(session.id);
+                            }}
+                          >
+                            <Trash2 aria-hidden="true" size={14} />
                           </button>
                         </li>
                       ))}
@@ -670,6 +975,18 @@ export function ChatWorkspace() {
                 >
                   {sessionTitle}
                 </h2>
+                {chat.sessionId !== null && (
+                  <button
+                    type="button"
+                    className="maya-btn maya-btn--quiet maya-conversation__delete"
+                    aria-label="Delete this conversation"
+                    title="Delete this conversation"
+                    disabled={chat.isBusy || deletingSessionId !== null}
+                    onClick={() => void handleDeleteSession(chat.sessionId!)}
+                  >
+                    <Trash2 aria-hidden="true" size={16} />
+                  </button>
+                )}
                 <span className="maya-conversation__status">Text chat</span>
               </div>
               {authWarning ? (
@@ -691,7 +1008,7 @@ export function ChatWorkspace() {
               />
               <div className="maya-chat__dock">
                 <ChatNotice
-                  error={chat.error}
+                  error={displayedError}
                   retrying={chat.retrying}
                   canRetry={chat.canRetry}
                   canAskAgain={chat.canAskAgain}

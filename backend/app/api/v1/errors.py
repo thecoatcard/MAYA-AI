@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth.errors import (
-    EmailNotVerified,
     InvalidCode,
     InvalidCredentials,
     InvalidToken,
@@ -44,8 +43,6 @@ async def _domain_error(request: Request, exc: Exception) -> JSONResponse:
         return _error(400, "invalid_or_expired_code")
     if isinstance(exc, InvalidCredentials):
         return _error(401, "invalid_credentials")
-    if isinstance(exc, EmailNotVerified):
-        return _error(403, "email_not_verified")
     if isinstance(exc, InvalidToken):
         return _error(401, "invalid_token", BEARER)
     if isinstance(exc, NotAuthenticated):
@@ -108,7 +105,6 @@ def install_error_handlers(app: FastAPI) -> None:
         PasswordPolicyViolation,
         InvalidCode,
         InvalidCredentials,
-        EmailNotVerified,
         InvalidToken,
         NotAuthenticated,
         ServiceUnavailable,

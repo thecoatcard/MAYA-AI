@@ -2,12 +2,12 @@
 
 | Metric               | Status                                                                                                                                   |
 | :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| **Current Baseline** | Phase 00 governance, Phase 01 local foundation, Phase 02 schema/RLS/auth, Phase 03 Model Gateway and Phase 04 chat implemented locally on branch `feat/phase-04-chat-conversations` (committed locally, not pushed; Phase 02 and 03 are earlier commits of the same branch line) |
-| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented and tested locally · Phase 03: implemented locally under owner gate exception; O6 caps approved 2026-11-05; exit gate waits for the owner-run live smoke check · Phase 04: local implementation complete; web checks pass, backend full-suite verification is blocked by unavailable local services, and authenticated browser acceptance remains pending |
-| **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Phase 03 owner-run Gemini smoke and Phase 04 authenticated browser acceptance remain pending |
+| **Current Baseline** | Phase 00 governance, Phase 01 local foundation, Phase 02 schema/RLS/auth, Phase 03 Model Gateway and Phase 04 chat are implemented locally. Phase 05 orchestration code exists as an unwired prototype. |
+| **Phase Status**     | Phase 00: locally implemented; GitHub CI unverified · Phase 01: local scope implemented/tested; extended free-tier live evidence pending · Phase 02: implemented locally; current security findings need remediation · Phase 03: implemented locally under owner gate exception; hard budget enforcement and owner-run live smoke remain unresolved · Phase 04: local implementation exists; chat durability and authenticated browser acceptance remain unresolved · Phase 05: prototype only, not integrated or accepted |
+| **Active Tasks** | Queue ADR accepted; extended user-run lifetime/resumption verification approved. Phase 03 owner-run Gemini smoke, Phase 04 authenticated browser acceptance, and the Phase 01–05 audit findings remain open. |
 | **Blocked Tasks**    | Extended user-run evidence pending; paid calls blocked until provider-enforced INR 100 cap verified (future paid-use gate, excluded from revised Phase 01); Phase 02 pre-auth audit/workspace visibility; Phase 03 owner-run live smoke check; `pyasn1` upgrade decision (four advisories, fixed in 0.6.5); Phase 04 owner-run live/browser acceptance |
-| **Last Updated**     | 2026-11-06 (Phase 04 owner decisions and local implementation)                                                                         |
-| **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (applied to disposable test databases and the persistent local database), own-account authentication, an offline-verified model gateway, persisted streaming chat, a same-origin API proxy and minimal login UI; no agents or voice |
+| **Last Updated**     | Status corrected during the Phase 01–05 audit; prior owner decisions are dated below. |
+| **Repository State** | Local scaffolding, isolated S1/S2 evidence, the 14-table schema with forced RLS (previously applied to disposable test databases and the persistent local database), own-account authentication, an offline-tested model gateway, persisted streaming chat, a same-origin API proxy, account pages and an unwired orchestration prototype; no production task engine or voice |
 
 ---
 
@@ -20,7 +20,7 @@
 | [`Phase 02`](IMPLEMENTATION_PHASES/PHASE_02_AUTH_DATABASE_SECURITY.md) | Authentication, Users, Workspaces & Database Security | **Implemented/Tested locally** | Local: 2026-11-05 | 864 backend tests with local PostgreSQL/Redis, strict lint and types; see the [verification record](../testing/AUTH_AND_RLS.md). Started under the owner's gate exception. Persistent local database migrated; ADR-0005/0006 accepted. Not CI-verified (the workflow has never run). The owner reported (2026-11-05) that the SMTP check, e-mail delivery, registration, verification and login all work against the real mail account |
 | [`Phase 03`](IMPLEMENTATION_PHASES/PHASE_03_GEMINI_MODEL_GATEWAY.md)   | Gemini AI Integration & Model Gateway                 | **Implemented locally; exit gate: owner-run live check pending** | 2026-11-05      | Implemented under owner gate exception; 131 gateway and smoke-tool tests passing offline; ADR-0007 Proposed; ModelGateway with 6 typed operations, terminating fallback, exact Decimal token/cost accounting (unknown cost is `None`), Redis micro-USD budgeting with a pre-call guard, and an owner-only smoke tool. Partial: context caching is a workspace-scoped reference store only (no provider cache creation or attachment). Never run against the real provider (owner smoke check pending). O6 caps approved 2026-11-05 ($1.50/task, 10 tool turns; enforcement opt-in). Exit gate waits for the owner-run live smoke check. |
 | [`Phase 04`](IMPLEMENTATION_PHASES/PHASE_04_CHAT_CONVERSATIONS.md)     | Chat & Conversation System                            | **Implemented locally; exit gate: owner-run live and authenticated browser evidence pending** | 2026-11-06 | Owner decisions are recorded in section 2. Web lint, typecheck, build and all 711 web tests pass; 151 deterministic backend auth/chat/proxy tests pass. The full backend run recorded 962 passed, 5 failed (Redis unavailable) and 446 errors (PostgreSQL setup unavailable). Fake Gemini clients only; never run against the real Gemini API. Public landing screenshots were captured; authenticated browser acceptance against the API remains pending. |
-| [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 03                                                                                |
+| [`Phase 05`](IMPLEMENTATION_PHASES/PHASE_05_ORCHESTRATOR_AGENTS.md)    | Orchestrator & Agent Framework                        | **Prototype only; not wired or accepted** | Projected | Checkpoint isolation, approval enforcement, projections and production integration remain unresolved. |
 | [`Phase 06`](IMPLEMENTATION_PHASES/PHASE_06_BACKGROUND_TASK_ENGINE.md) | Background Task Execution Engine                      | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 05                                                                                |
 | [`Phase 07`](IMPLEMENTATION_PHASES/PHASE_07_SECURITY_APPROVALS.md)     | Security, Permissions & Human Approval                | **NOT_STARTED**                        | Projected       | Dependent on Phase 02, 06                                                                                |
 | [`Phase 08`](IMPLEMENTATION_PHASES/PHASE_08_MCP_INTEGRATIONS.md)       | MCP Gateway & Integrations                            | **NOT_STARTED**                        | Projected       | Dependent on Phase 07                                                                                    |
@@ -190,8 +190,8 @@ no SDK installation. The owner subsequently approved actual isolated SDK clients
 and compatibility audit, keeping paid calls blocked. google-genai 2.34.0 is now
 locked and tested in a separate spike project; runtime pins are unchanged and
 no live Gemini call was performed. See [S3 readiness](../architecture/SPIKE_S3_GEMINI_LIVE.md)
-and [S4 readiness](../architecture/SPIKE_S4_EMBEDDINGS.md). Commits and pushes remain
-unapproved. No Phase 02-04 behavior has been implemented.
+and [S4 readiness](../architecture/SPIKE_S4_EMBEDDINGS.md). At that earlier point, commits
+and pushes were unapproved and no Phase 02-04 behavior had been implemented.
 
 The latest owner direction defers spending-cap work to the end/future development
 and requires it to be documented. The
@@ -237,14 +237,15 @@ Only the account/login choice below is recorded as an owner decision. Recommenda
 
 ## 3. Known Technical Risks and Mitigation Status
 
-Mitigation statuses below describe specifications or plans, not deployed product controls.
-The implemented foundation does not include tenant isolation or agent execution.
+Mitigation statuses distinguish locally implemented controls from planned controls. The
+orchestration prototype is not wired into the application, and this audit did not
+revalidate tenant isolation against a live database.
 
 | Risk Description                                         | Severity | Master Mitigation                                                                                                     | Implementing Phase | Current Mitigation Status                                                     |
 | :------------------------------------------------------- | :------- | :-------------------------------------------------------------------------------------------------------------------- | :----------------- | :---------------------------------------------------------------------------- |
 | **Indirect Prompt Injection via untrusted data**         | Critical | Layered defense: permission gate is the true boundary; Research/Email agents read-only; output wrapped in delimiters. | Phase 07, Phase 09 | Specification defined; gate tests designed                                    |
 | **Unintended destructive external action** | Critical | Planned deny-by-default 4-tier model; signed single-use tokens bound to payload SHA-256; atomic database consumption. | Phase 07 | Planned only; the foundation has no action-execution or TOCTOU controls |
-| **Cross-tenant data leakage in SQL or vector queries**   | Critical | Planned PostgreSQL RLS, `app.workspace_id` session binding, restricted DB role, and workspace/user filtering.         | Phase 02, Phase 11 | Planned only; DDL and RLS are not implemented                                 |
+| **Cross-tenant data leakage in SQL or vector queries**   | Critical | PostgreSQL RLS, `app.workspace_id` session binding, restricted DB role, and workspace/user filtering.         | Phase 02, Phase 11 | Schema and RLS exist locally; this audit did not retest live tenant isolation. Vector filtering remains planned. |
 | **Host Docker socket escape from code execution**        | Critical | Decision D14: Docker socket is never mounted. Fixed-function Sandbox Runner with non-root, no host mounts.            | Phase 09           | Architecture specified in P09-T003                                            |
 | **MCP supply-chain poisoning & description drift**       | High     | Pinned package versions baked into images; no runtime npx/uvx; SHA-256 schema-hash monitoring alarms.                 | Phase 08           | Specification defined in P08-T002                                             |
 | **Hallucinated task completion without actual work**     | High     | Planned evidence-based completion checks.                                                                             | Phase 05, Phase 10 | Planned only; no runtime verifiers exist                                      |

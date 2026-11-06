@@ -26,7 +26,9 @@ PLAN_TABLES = {
     "memory_items",
 }
 AUTH_TABLES = {"auth_otp_challenges", "auth_sessions"}
-ALL_TABLES = PLAN_TABLES | AUTH_TABLES
+CHECKPOINT_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes"}
+DURABLE_CHAT_TABLES = {"chat_idempotency"}
+ALL_TABLES = PLAN_TABLES | AUTH_TABLES | CHECKPOINT_TABLES | DURABLE_CHAT_TABLES
 
 SNAPSHOT_QUERIES = {
     "tables": "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1",
@@ -77,7 +79,7 @@ async def snapshot(engine: AsyncEngine) -> dict[str, list[tuple[Any, ...]]]:
     return result
 
 
-async def test_head_creates_the_plan_tables_and_the_authentication_tables(
+async def test_head_creates_the_plan_authentication_and_checkpoint_tables(
     admin_engine: AsyncEngine,
 ) -> None:
     async with admin_engine.connect() as connection:
@@ -129,7 +131,88 @@ async def test_extensions_and_plan_indexes_exist(admin_engine: AsyncEngine) -> N
         "memory_content_trgm",
         "memory_scope_idx",
         "auth_otp_one_live_challenge",
+        "chat_idempotency_workspace_user_idx",
     } <= indexes
+
+
+async def test_checkpoint_tables_bind_both_owner_columns_to_session_settings(
+    admin_engine: AsyncEngine,
+) -> None:
+    async with admin_engine.connect() as connection:
+        columns = await connection.execute(
+            text(
+                "SELECT table_name, column_name, is_nullable, column_default "
+                "FROM information_schema.columns WHERE table_schema = 'public' "
+                "AND table_name IN ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes') "
+                "AND column_name IN ('workspace_id', 'user_id')"
+            )
+        )
+        owner_columns = {(row[0], row[1]): (row[2], row[3]) for row in columns}
+        policies = {
+            row[0]: (row[1], row[2])
+            for row in await connection.execute(
+                text(
+                    "SELECT tablename, qual, with_check FROM pg_policies "
+                    "WHERE schemaname = 'public' AND policyname = 'ws_isolation' "
+                    "AND tablename IN ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes')"
+                )
+            )
+        }
+
+    for table in CHECKPOINT_TABLES:
+        assert owner_columns[(table, "workspace_id")][0] == "YES"
+        assert "app.workspace_id" in owner_columns[(table, "workspace_id")][1]
+        assert owner_columns[(table, "user_id")][0] == "YES"
+        assert "app.user_id" in owner_columns[(table, "user_id")][1]
+        using, with_check = policies[table]
+        assert "app.workspace_id" in using and "app.user_id" in using
+        assert "app.workspace_id" in with_check and "app.user_id" in with_check
+
+
+async def test_checkpoint_migration_preserves_but_does_not_assign_legacy_rows(
+    fresh_database: TestDatabase,
+) -> None:
+    config = alembic_config(fresh_database)
+    engine = create_async_engine(fresh_database.admin_url, poolclass=NullPool)
+    try:
+        await run_in_thread(command.upgrade, config, "0005")
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    CREATE TABLE checkpoints (
+                      thread_id TEXT NOT NULL,
+                      checkpoint_ns TEXT NOT NULL DEFAULT '',
+                      checkpoint_id TEXT NOT NULL,
+                      parent_checkpoint_id TEXT,
+                      type TEXT,
+                      checkpoint JSONB NOT NULL,
+                      metadata JSONB NOT NULL DEFAULT '{}',
+                      PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO checkpoints (thread_id, checkpoint_id, checkpoint) "
+                    "VALUES ('legacy-thread', 'legacy-checkpoint', '{}')"
+                )
+            )
+
+        await run_in_thread(command.upgrade, config, "0006")
+        async with engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT workspace_id, user_id FROM checkpoints "
+                        "WHERE thread_id = 'legacy-thread'"
+                    )
+                )
+            ).one()
+        assert tuple(row) == (None, None)
+    finally:
+        await engine.dispose()
 
 
 async def test_tasks_keep_the_per_workspace_idempotency_key(admin_engine: AsyncEngine) -> None:
@@ -276,7 +359,7 @@ async def test_each_revision_can_be_applied_and_reverted_one_step_at_a_time(
     engine = create_async_engine(fresh_database.admin_url, poolclass=NullPool)
     try:
         previous = await snapshot(engine)
-        for revision in ("0001", "0002", "0003", "0004"):
+        for revision in ("0001", "0002", "0003", "0004", "0005", "0006", "0007"):
             await run_in_thread(command.upgrade, config, revision)
             current = await snapshot(engine)
             assert current != previous

@@ -9,7 +9,11 @@
  * ever placed in the Authorization header.
  */
 
-import { getAccessToken, refreshSession, setAccessToken } from "./auth-session";
+import {
+  getAccessToken,
+  getAuthIdentityVersion,
+  refreshSession,
+} from "./auth-session";
 import { readSseFrames, SseBufferOverflowError, type SseFrame } from "./sse";
 
 export const DEFAULT_API_BASE_URL = "";
@@ -37,7 +41,6 @@ export type KnownApiErrorCode =
   | "not_authenticated"
   | "invalid_token"
   | "invalid_credentials"
-  | "email_not_verified"
   | "session_not_found"
   | "request_in_progress"
   | "validation_error"
@@ -308,11 +311,13 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
   }
   switch (frame.event) {
     case "message.accepted": {
-      const { session_id, user_message_id, assistant_message_id } = data;
+      const { session_id, user_message_id, assistant_message_id, replayed } =
+        data;
       if (
         typeof session_id !== "string" ||
         typeof user_message_id !== "string" ||
-        typeof assistant_message_id !== "string"
+        typeof assistant_message_id !== "string" ||
+        typeof replayed !== "boolean"
       ) {
         return null;
       }
@@ -321,7 +326,7 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
         sessionId: session_id,
         userMessageId: user_message_id,
         assistantMessageId: assistant_message_id,
-        replayed: data.replayed === true,
+        replayed,
       };
     }
     case "delta":
@@ -329,19 +334,22 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
         ? { type: "delta", text: data.text }
         : null;
     case "done": {
-      if (typeof data.assistant_message_id !== "string") {
+      if (
+        typeof data.assistant_message_id !== "string" ||
+        typeof data.finish_reason !== "string"
+      ) {
         return null;
       }
       return {
         type: "done",
         assistantMessageId: data.assistant_message_id,
-        finishReason:
-          typeof data.finish_reason === "string" ? data.finish_reason : "stop",
+        finishReason: data.finish_reason,
         usage: readUsage(data.usage),
       };
     }
     case "error":
-      return typeof data.code === "string"
+      return typeof data.code === "string" &&
+        typeof data.retryable === "boolean"
         ? { type: "error", code: data.code, retryable: data.retryable === true }
         : null;
     default:
@@ -353,7 +361,7 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
 // Requests
 // ---------------------------------------------------------------------------
 
-interface RequestOptions {
+export interface RequestOptions {
   signal?: AbortSignal;
   /** Defaults to the in-memory token from auth-session. */
   accessToken?: string | null;
@@ -383,21 +391,27 @@ async function send(
   options: RequestOptions,
 ): Promise<Response> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const identityAtRequestStart = getAuthIdentityVersion();
   try {
     let response = await fetchImpl(url, init);
     if (
       response.status === 401 &&
       url.startsWith(`${getApiBaseUrl()}${CHAT_PATH}`) &&
-      options.accessToken === undefined
+      options.accessToken === undefined &&
+      getAuthIdentityVersion() === identityAtRequestStart
     ) {
       const refreshed = await refreshSession();
-      if (refreshed !== null) {
-        setAccessToken(refreshed.accessToken);
+      if (
+        refreshed !== null &&
+        getAuthIdentityVersion() === identityAtRequestStart
+      ) {
+        const currentToken = getAccessToken();
+        if (currentToken === null) {
+          return response;
+        }
         const headers = new Headers(init.headers);
-        headers.set("Authorization", `Bearer ${refreshed.accessToken}`);
+        headers.set("Authorization", `Bearer ${currentToken}`);
         response = await fetchImpl(url, { ...init, headers });
-      } else {
-        setAccessToken(null);
       }
     }
     return response;
@@ -413,15 +427,37 @@ async function* decodeEvents(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal | undefined,
 ): AsyncGenerator<ChatEvent, void, undefined> {
+  let malformedKnownEvent = false;
   try {
     for await (const frame of readSseFrames(body, signal)) {
       const event = decodeChatEvent(frame);
-      if (event !== null) {
-        yield event;
+      if (event === null) {
+        if (
+          frame.event === "message.accepted" ||
+          frame.event === "delta" ||
+          frame.event === "done" ||
+          frame.event === "error"
+        ) {
+          malformedKnownEvent = true;
+        }
+        if (frame.event === "done" || frame.event === "error") {
+          throw new ApiError(200, "stream_protocol_error");
+        }
+        continue;
       }
+      if (
+        malformedKnownEvent &&
+        (event.type === "done" || event.type === "error")
+      ) {
+        throw new ApiError(200, "stream_protocol_error");
+      }
+      yield event;
     }
   } catch (error) {
     if (isAbortError(error)) {
+      throw error;
+    }
+    if (error instanceof ApiError) {
       throw error;
     }
     if (error instanceof SseBufferOverflowError) {
@@ -553,11 +589,15 @@ function readPage<T>(
   return { items, next_cursor: nextCursor };
 }
 
-function isSession(item: unknown): item is SessionSummary {
+type SessionWithNullableTitle = Omit<SessionSummary, "title"> & {
+  title: string | null;
+};
+
+function isSession(item: unknown): item is SessionWithNullableTitle {
   return (
     isRecord(item) &&
     typeof item.id === "string" &&
-    typeof item.title === "string" &&
+    (typeof item.title === "string" || item.title === null) &&
     typeof item.created_at === "string"
   );
 }
@@ -576,7 +616,14 @@ function isStoredMessage(item: unknown): item is StoredMessage {
 export async function listSessions(
   options: ListOptions = {},
 ): Promise<Page<SessionSummary>> {
-  return readPage(await getJson("/sessions", options), 200, isSession);
+  const page = readPage(await getJson("/sessions", options), 200, isSession);
+  return {
+    ...page,
+    items: page.items.map((item) => ({
+      ...item,
+      title: item.title ?? "Untitled conversation",
+    })),
+  };
 }
 
 /** GET /api/v1/chat/sessions/{id}/messages: oldest first. */
@@ -592,4 +639,26 @@ export async function listMessages(
     200,
     isStoredMessage,
   );
+}
+
+/** DELETE /api/v1/chat/sessions/{id}: delete a session and all its messages. */
+export async function deleteSession(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<void> {
+  const token = resolveToken(options);
+  const response = await send(
+    `${getApiBaseUrl()}${CHAT_PATH}/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: options.signal,
+      cache: "no-store",
+      credentials: "omit",
+    },
+    options,
+  );
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response);
+  }
 }

@@ -25,7 +25,46 @@ let accessExpiresAt = 0;
 let tokenVersion = 0;
 let identityVersion = 0;
 let refreshInFlight: Promise<RefreshedSession | null> | null = null;
+let identityChangeSequence = 0;
 const listeners = new Set<Listener>();
+const IDENTITY_CHANGE_STORAGE_KEY = "maya-auth-identity-change";
+const AUTH_COOKIE_LOCK_NAME = "maya-auth-refresh-cookie";
+
+function announceIdentityChange(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    // This marker contains no credential. Storage events reach other tabs but
+    // are not delivered back to the tab that wrote the value.
+    identityChangeSequence += 1;
+    window.localStorage.setItem(
+      IDENTITY_CHANGE_STORAGE_KEY,
+      `${Date.now()}-${identityChangeSequence}-${Math.random()}`,
+    );
+  } catch {
+    // Storage can be disabled. Same-tab identity/version checks still apply.
+  }
+}
+
+function clearAccessTokenForPeerChange(): void {
+  if (accessToken === null) {
+    return;
+  }
+  accessToken = null;
+  accessExpiresAt = 0;
+  tokenVersion += 1;
+  identityVersion += 1;
+  notifyTokenChange();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event: StorageEvent) => {
+    if (event.key === IDENTITY_CHANGE_STORAGE_KEY && event.newValue !== null) {
+      clearAccessTokenForPeerChange();
+    }
+  });
+}
 
 export function getAccessToken(): string | null {
   return accessToken;
@@ -51,6 +90,20 @@ export function getAuthIdentityVersion(): number {
   return identityVersion;
 }
 
+/**
+ * Serialize requests whose responses can change the auth refresh cookie.
+ * Web Locks coordinate same-origin tabs; unsupported browsers fall back to
+ * the existing per-tab behavior.
+ */
+export function withAuthCookieLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== "undefined" && "locks" in navigator) {
+    return Promise.resolve(
+      navigator.locks.request(AUTH_COOKIE_LOCK_NAME, operation),
+    );
+  }
+  return operation();
+}
+
 function notifyTokenChange(): void {
   for (const listener of Array.from(listeners)) {
     listener();
@@ -70,6 +123,7 @@ export function setAccessToken(token: string | null, expiresIn?: number): void {
   accessToken = next;
   tokenVersion += 1;
   identityVersion += 1;
+  announceIdentityChange();
   notifyTokenChange();
 }
 
@@ -83,7 +137,9 @@ function setRefreshedAccessToken(token: string, expiresIn: number): void {
   notifyTokenChange();
 }
 
-async function refreshFromCookie(): Promise<RefreshedSession | null> {
+async function refreshFromCookie(
+  identityAtStart: number,
+): Promise<RefreshedSession | null> {
   let response: Response;
   try {
     response = await fetch("/api/v1/auth/refresh", {
@@ -96,7 +152,13 @@ async function refreshFromCookie(): Promise<RefreshedSession | null> {
       },
     });
   } catch {
+    if (identityVersion !== identityAtStart) {
+      return null;
+    }
     throw new AuthSessionError(0);
+  }
+  if (identityVersion !== identityAtStart) {
+    return null;
   }
   if (response.status === 401) {
     setAccessToken(null);
@@ -109,7 +171,13 @@ async function refreshFromCookie(): Promise<RefreshedSession | null> {
   try {
     body = await response.json();
   } catch {
+    if (identityVersion !== identityAtStart) {
+      return null;
+    }
     throw new AuthSessionError(response.status);
+  }
+  if (identityVersion !== identityAtStart) {
+    return null;
   }
   if (
     typeof body !== "object" ||
@@ -135,12 +203,15 @@ async function refreshFromCookie(): Promise<RefreshedSession | null> {
 
 /** Rotate the refresh cookie once even when several requests need it together. */
 export function refreshSession(): Promise<RefreshedSession | null> {
-  if (refreshInFlight === null) {
-    refreshInFlight = refreshFromCookie().finally(() => {
-      refreshInFlight = null;
-    });
+  if (refreshInFlight !== null) {
+    return refreshInFlight;
   }
-  return refreshInFlight;
+  const request = withAuthCookieLock(() => refreshFromCookie(identityVersion));
+  const inFlight = Promise.resolve(request).finally(() => {
+    refreshInFlight = null;
+  });
+  refreshInFlight = inFlight;
+  return inFlight;
 }
 
 /** Subscribe to token changes (shape matches `useSyncExternalStore`). */

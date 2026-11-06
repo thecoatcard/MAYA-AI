@@ -5,8 +5,9 @@ Redis), then reviewed by an independent read-only security reviewer whose confir
 were fixed (see "Review history" below). The CI workflow now provisions PostgreSQL and Redis, but
 No agent has yet observed a GitHub CI result (the repository was pushed on 2026-11-05, and the first workflow run is still unseen). On 2026-11-05 the owner reported running the SMTP check tool
 against the real mail account and registering, verifying and logging in through the running API with real
-e-mail; no agent observed this and no evidence file was kept. Decisions: [ADR-0005](../adr/0005-own-account-authentication.md)
-and [ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md). Endpoint contract:
+e-mail; no agent observed this and no evidence file was kept. Decisions: [ADR-0005](../adr/0005-own-account-authentication.md),
+[ADR-0006](../adr/0006-tenant-isolation-with-row-level-security.md), and the proposed
+[ADR-0010](../adr/0010-checkpoint-owner-isolation.md). Endpoint contract:
 [Auth API](../api/AUTH.md). Schema and roles: [data model](../architecture/DATA_MODEL.md).
 
 ## What exists
@@ -22,7 +23,9 @@ password recovery by e-mailed code, refresh-token rotation, and logout. Code liv
 - Argon2id through `argon2-cffi`, using its RFC 9106 low-memory profile (3 iterations,
   64 MiB, 4 lanes). Hashing runs on its own pool of four threads (not the event loop's default
   executor, which a hung SMTP server could otherwise starve) with a queue of 64; beyond that
-  callers get `503` instead of unbounded memory use.
+  callers get `503` instead of unbounded memory use. Cancelling a request does not free its
+  capacity while the worker is still hashing; application shutdown drains the owned password
+  executor.
 - Policy: 12 to 128 characters after Unicode NFKC normalization, no composition rules, and
   not equal to the username or e-mail address. Raw input is capped at 256 characters before
   normalization. No breached-password list is checked (not implemented).
@@ -31,6 +34,16 @@ password recovery by e-mailed code, refresh-token rotation, and logout. Code liv
 - An unknown username still triggers one full verification against a placeholder hash, so
   response time does not separate "no such user" from "wrong password". Smaller timing
   differences (an extra database round trip) are not claimed to be eliminated.
+
+## Account identification and remaining enumeration risk
+
+The unauthenticated `/identify` endpoint validates the identifier's shape and always returns
+`{"status":"accepted"}` without looking up an account. Clients present sign-in and account
+creation as explicit user choices; no existence boolean is returned. The unused process-local
+Bloom filter was removed from the authentication service.
+
+Login returns `401 invalid_credentials` for unknown identifiers, wrong passwords, and correct
+passwords on unverified accounts. No constant-time response guarantee is made.
 
 ## One-time codes
 
@@ -63,26 +76,27 @@ several concurrent correct submissions consumes the code.
 - **Reset:** a successful password reset changes the hash, marks the address verified,
   revokes every session of the user and voids other outstanding codes.
 - **Login versus reset:** login remembers the password version (`password_changed_at`) it
-  verified, and opens its session only if that version is still current, so a login that was
-  in flight during a reset cannot create a live session or write back an old hash. This relies
-  on a password change always getting a different timestamp (microsecond resolution).
+  verified. Session creation locks the user row and rechecks that version in the same transaction:
+  if login gets the lock first, the following reset revokes the new session; if reset gets it
+  first, login sees the changed version and opens no session. A stale hash upgrade is also
+  conditional on the old version. This relies on a password change always getting a different
+  timestamp (microsecond resolution). The live PostgreSQL transaction-ordering proof for this
+  locking behavior has not been run as part of this fix.
 - Token responses carry `Cache-Control: no-store`. The browser opts into a scoped HttpOnly refresh cookie through `X-Maya-Refresh-Transport: cookie`; see [ADR-0009](../adr/0009-refresh-cookie-transport.md) for the exact contract. Legacy JSON transport remains available to callers that omit the header.
 - Expiry is evaluated against one injected clock, in code and in SQL parameters.
 
 ## Not revealing which accounts exist
 
-| Operation | Same answer for |
-| :--- | :--- |
-| Register | new account, e-mail already verified, e-mail unverified, username taken |
-| Resend verification, forgot password | known and unknown addresses |
-| Verify e-mail, reset password | wrong code, **wrong password (verify only)**, expired, used, exhausted and unknown-account |
-| Login | unknown username and wrong password |
+| Operation                            | Same answer for                                                                            |
+| :----------------------------------- | :----------------------------------------------------------------------------------------- |
+| Register                             | new account, e-mail already verified, e-mail unverified, username taken                    |
+| Resend verification, forgot password | known and unknown addresses                                                                |
+| Verify e-mail, reset password        | wrong code, **wrong password (verify only)**, expired, used, exhausted and unknown-account |
+| Login                                | unknown username and wrong password                                                        |
 
-The one deliberate exception: a correct password on an unverified account returns
-`403 email_not_verified`. That reveals only that someone who already knows the password has
-not verified the address. Mail is sent after the response (background task), so SMTP latency
-does not distinguish the cases. Registering an address that exists but is unverified re-sends
-a code instead of overwriting anything.
+Mail is sent after the response (background task), so SMTP latency does not distinguish
+account existence. Registering an address that exists but is unverified re-sends a code
+instead of overwriting anything.
 
 **Pre-hijacking.** Verifying an address needs the code **and the account's password**. Without that,
 someone could register a victim's address with a password of their own and, when the victim later
@@ -99,11 +113,11 @@ exactly like a wrong code.
 Keyed by HMAC digests of the address or e-mail, never the raw value, in Redis fixed windows
 (a boundary can allow up to twice the limit). If Redis fails the request fails closed (503).
 
-| Counter | Limit |
-| :--- | :--- |
-| Code e-mails (register, resend, forgot) per e-mail / per source address | 5 / 20 per hour |
-| Code attempts (verify, reset) per e-mail / per source address | 20 per hour (and 50 per day) / 60 per hour |
-| Login attempts per username and source address / per source address | 10 / 50 per 15 minutes |
+| Counter                                                                 | Limit                                      |
+| :---------------------------------------------------------------------- | :----------------------------------------- |
+| Code e-mails (register, resend, forgot) per e-mail / per source address | 5 / 20 per hour                            |
+| Code attempts (verify, reset) per e-mail / per source address           | 20 per hour (and 50 per day) / 60 per hour |
+| Login attempts per username and source address / per source address     | 10 / 50 per 15 minutes                     |
 
 Login attempts are counted atomically **before** the password is checked (so a burst of parallel
 guesses is stopped at the limit instead of all being verified) and the count is given back when
@@ -128,10 +142,18 @@ directly; only the by-username function returns it (login needs it) and the by-e
 does not, but any SQL run as `maya_app` can call the former, so this limits accidents and
 queries, not a compromised connection. On `auth_sessions` and `auth_otp_challenges` the role may
 update only the state columns (never `user_id`, `workspace_id`, `code_hmac`, expiry columns).
-Row-level security separates workspaces. Separating users **within** a workspace is done by
-repository queries that always carry the user identifier (tested for the authentication
-tables); the database does not enforce it. Details and tests: [data model](../architecture/DATA_MODEL.md)
-and [verification record](../testing/AUTH_AND_RLS.md).
+Most tenant data is separated by workspace; application repositories separately enforce user
+ownership. LangGraph checkpoint rows are additionally bound at the database layer to both
+`workspace_id` and `user_id`. `create_postgres_checkpointer` requires UUID identities supplied
+by server-side authentication and opens a dedicated Psycopg connection with those fixed owner
+settings; it never takes them from checkpoint state or a client-selected thread ID. Checkpoint
+tables are provisioned by Alembic, not by runtime `checkpointer.setup()`. Existing checkpoint
+rows with no trustworthy owner are retained with NULL owner columns and remain invisible under
+RLS rather than being assigned speculatively. The graph/checkpointer is not yet wired into
+production routes. The added cross-owner PostgreSQL test is not run in this change, so live
+database isolation is not claimed. Details: [data model](../architecture/DATA_MODEL.md),
+[orchestrator specification](../architecture/ORCHESTRATOR_SPECIFICATION.md), and
+[verification record](../testing/AUTH_AND_RLS.md).
 
 ## Logging and audit
 
@@ -157,15 +179,15 @@ migrations as a **non-superuser** owner found and fixed a real defect (the funct
 
 ## Decisions on the review's remaining findings (owner, 2026-11-05)
 
-| Finding | Decision |
-| :--- | :--- |
-| Pre-hijacking of unverified registrations | **Fixed** (option A): `/verify-email` also takes the account's password. A squatter's account cannot be activated by the victim's confirmation, and the victim takes it over with password recovery; the code e-mails state the username |
-| Foreign keys not composite | **Implemented** in the migrations: every reference to a user, session, task or subtask is `(workspace_id, id)`, so a cross-workspace reference or cascade is impossible at the constraint level (deviation from the plan's DDL) |
-| Migrator must be a superuser | **Fixed and tested** with a non-superuser owner; a role that cannot `SET ROLE` to `maya_auth_definer` now fails early with a clear message and must be granted it first (Phase 16 role split) |
+| Finding                                     | Decision                                                                                                                                                                                                                                       |
+| :------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pre-hijacking of unverified registrations   | **Fixed** (option A): `/verify-email` also takes the account's password. A squatter's account cannot be activated by the victim's confirmation, and the victim takes it over with password recovery; the code e-mails state the username       |
+| Foreign keys not composite                  | **Implemented** in the migrations: every reference to a user, session, task or subtask is `(workspace_id, id)`, so a cross-workspace reference or cascade is impossible at the constraint level (deviation from the plan's DDL)                |
+| Migrator must be a superuser                | **Fixed and tested** with a non-superuser owner; a role that cannot `SET ROLE` to `maya_auth_definer` now fails early with a clear message and must be granted it first (Phase 16 role split)                                                  |
 | Per-user row-level security (`app.user_id`) | **Deferred.** A setting the runtime role can change itself protects only against missing filters, which the repository SQL already carries (tested for the authentication tables); revisit when Phase 04 adds user-owned tables with consumers |
-| Recovery denial of service | **Accepted.** Per-e-mail counters are what stop e-mail bombing; the window is an hour |
-| Timing side channel | **Accepted.** One password hash is always spent and mail is sent after the response; per-target sample counts are capped by the rate limits (5 sends and 20 attempts per hour per address), which makes a statistical attack impractical |
-| Username probing through registration | **Accepted** as a residual risk (option A does not close it); it needs a mailbox the attacker controls and is rate limited. Closing it needs pending registrations (a new table) |
+| Recovery denial of service                  | **Accepted.** Per-e-mail counters are what stop e-mail bombing; the window is an hour                                                                                                                                                          |
+| Timing side channel                         | **Accepted.** One password hash is always spent and mail is sent after the response; per-target sample counts are capped by the rate limits (5 sends and 20 attempts per hour per address), which makes a statistical attack impractical       |
+| Username probing through registration       | **Accepted** as a residual risk (option A does not close it); it needs a mailbox the attacker controls and is rate limited. Closing it needs pending registrations (a new table)                                                               |
 
 ## Known limits and residual risks
 

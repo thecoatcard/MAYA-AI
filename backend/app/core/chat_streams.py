@@ -31,6 +31,8 @@ class ChatStreamLimiter(Protocol):
         lease_seconds: int,
     ) -> ChatStreamLease | None: ...
 
+    async def renew(self, lease: ChatStreamLease, *, lease_seconds: int) -> bool: ...
+
     async def release(self, lease: ChatStreamLease) -> None: ...
 
 
@@ -51,6 +53,17 @@ redis.call('ZREM', KEYS[1], ARGV[1])
 if redis.call('ZCARD', KEYS[1]) == 0 then
     redis.call('DEL', KEYS[1])
 end
+return 1
+"""
+    _RENEW = """
+local time = redis.call('TIME')
+local now = time[1] * 1000 + math.floor(time[2] / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) == false then
+    return 0
+end
+redis.call('ZADD', KEYS[1], 'XX', now + tonumber(ARGV[2]), ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
 return 1
 """
 
@@ -76,6 +89,17 @@ return 1
         except RedisError:
             raise ChatStreamLimiterUnavailable from None
         return ChatStreamLease(key, member) if int(acquired) == 1 else None
+
+    async def renew(self, lease: ChatStreamLease, *, lease_seconds: int) -> bool:
+        if lease_seconds < 1:
+            raise ValueError("A positive stream lease duration is required")
+        try:
+            renewed = await self._redis.eval(
+                self._RENEW, 1, lease.key, lease.member, lease_seconds * 1000
+            )
+        except RedisError:
+            raise ChatStreamLimiterUnavailable from None
+        return int(renewed) == 1
 
     async def release(self, lease: ChatStreamLease) -> None:
         try:

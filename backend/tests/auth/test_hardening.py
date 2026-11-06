@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import threading
 
 import pytest
 
@@ -9,9 +10,60 @@ from app.auth.errors import InvalidCode, InvalidCredentials, InvalidToken, RateL
 from app.auth.policy import RateLimits
 from app.auth.store import AuthStore
 from app.core.ratelimit import Limit
-from app.core.security import PasswordService
+from app.core.security import Overloaded, PasswordService
 from tests.support.auth import ADDRESS, GOOD_PASSWORD, NEW_PASSWORD, Harness, build_harness
 from tests.support.passwords import FAST_PARAMETERS
+
+
+async def test_cancelling_password_work_keeps_capacity_until_the_worker_finishes() -> None:
+    passwords = PasswordService(FAST_PARAMETERS, concurrency=1, queue=0)
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def blocked_operation() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("test did not release the password worker")
+        finished.set()
+        return "complete"
+
+    operation = asyncio.create_task(passwords._run(blocked_operation))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+
+        with pytest.raises(Overloaded):
+            await passwords._run(lambda: "should not start")
+    finally:
+        release.set()
+        await asyncio.to_thread(passwords._executor.shutdown, wait=True)
+    assert finished.is_set()
+
+
+async def test_password_service_shutdown_waits_for_running_work() -> None:
+    passwords = PasswordService(FAST_PARAMETERS, concurrency=1, queue=0)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_operation() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("test did not release the password worker")
+        return "complete"
+
+    operation = asyncio.create_task(passwords._run(blocked_operation))
+    assert await asyncio.to_thread(started.wait, 1)
+    shutdown = asyncio.create_task(passwords.aclose())
+    try:
+        await asyncio.sleep(0.01)
+        assert not shutdown.done()
+    finally:
+        release.set()
+    assert await operation == "complete"
+    await shutdown
 
 
 async def test_a_token_stolen_several_rotations_ago_still_revokes_the_session(

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.auth.errors import EmailNotVerified, InvalidCredentials, InvalidToken, RateLimited
+from app.auth.errors import InvalidCredentials, InvalidToken, RateLimited
 from app.auth.policy import RateLimits
 from app.auth.store import AuthStore
 from app.core.ratelimit import Limit
@@ -59,10 +59,32 @@ async def test_unverified_account_is_refused_only_after_the_password_is_right(
     harness: Harness,
 ) -> None:
     command = await harness.register()
-    with pytest.raises(EmailNotVerified):
+    with pytest.raises(InvalidCredentials):
         await harness.login(command)
     with pytest.raises(InvalidCredentials):  # a wrong password reveals nothing about status
         await harness.service.login(command.username, GOOD_PASSWORD + "x", ADDRESS)
+
+
+async def test_unknown_email_and_known_unverified_email_fail_identically(
+    harness: Harness,
+) -> None:
+    command = await harness.register()
+    with pytest.raises(InvalidCredentials) as unknown:
+        await harness.service.login("unknown@example.com", GOOD_PASSWORD, ADDRESS)
+    with pytest.raises(InvalidCredentials) as unverified:
+        await harness.service.login(command.email, GOOD_PASSWORD, ADDRESS)
+    assert str(unknown.value) == str(unverified.value)
+
+
+async def test_unknown_email_attempts_consume_the_per_address_login_limit(
+    auth_store: AuthStore,
+) -> None:
+    harness = build_harness(auth_store, limits=RateLimits(login_attempts_per_address=Limit(2, 900)))
+    for email in ("missing-one@example.com", "missing-two@example.com"):
+        with pytest.raises(InvalidCredentials):
+            await harness.service.login(email, GOOD_PASSWORD, ADDRESS)
+    with pytest.raises(RateLimited):
+        await harness.service.login("missing-three@example.com", GOOD_PASSWORD, ADDRESS)
 
 
 async def test_repeated_failures_lock_the_account_and_address_pair_not_the_account(

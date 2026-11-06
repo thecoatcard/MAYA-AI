@@ -1,4 +1,6 @@
+import asyncio
 import smtplib
+import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -7,6 +9,8 @@ import pytest
 from app.auth.messages import code_email
 from app.core.email import EmailDeliveryError, OutboundEmail, SmtpEmailSender
 from app.core.security_otp import OtpPurpose
+from tests.support.auth import build_harness
+from tests.support.fake_store import FakeAuthStore
 
 
 def sender(security: str = "starttls", **overrides: Any) -> SmtpEmailSender:
@@ -97,6 +101,40 @@ async def test_connection_failure_is_also_generic() -> None:
     with patch("app.core.email.smtplib.SMTP", side_effect=OSError("refused")):
         with pytest.raises(EmailDeliveryError):
             await sender().send(MESSAGE)
+
+
+async def test_smtp_shutdown_waits_for_an_inflight_send() -> None:
+    email_sender = sender()
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_send(_: OutboundEmail) -> None:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("test did not release the SMTP worker")
+
+    with patch.object(email_sender, "_send", blocked_send):
+        sending = asyncio.create_task(email_sender.send(MESSAGE))
+        assert await asyncio.to_thread(started.wait, 1)
+        shutdown = asyncio.create_task(email_sender.aclose())
+        try:
+            await asyncio.sleep(0.01)
+            assert not shutdown.done()
+        finally:
+            release.set()
+        await sending
+        await shutdown
+
+
+async def test_auth_service_shutdown_closes_its_smtp_executor() -> None:
+    harness = build_harness(FakeAuthStore())
+    email_sender = sender()
+    harness.service._email_sender = email_sender
+
+    await harness.service.aclose()
+
+    with pytest.raises(RuntimeError):
+        await email_sender.send(MESSAGE)
 
 
 @pytest.mark.parametrize(

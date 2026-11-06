@@ -29,6 +29,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resources = Resources(configuration)
         app.state.resources = resources
+        service: AuthService | None = None
         try:
             await resources.check()
             await resources.verify_runtime_role()
@@ -44,7 +45,12 @@ def create_app(
             logger.info("application_started")
             yield
         finally:
-            await resources.close()
+            try:
+                # Injected services remain owned by their caller (notably deterministic tests).
+                if auth_service is None and service is not None:
+                    await service.aclose()
+            finally:
+                await resources.close()
             logger.info("application_stopped")
 
     app = FastAPI(title="MAYA AI", version="0.1.0", debug=False, lifespan=lifespan)

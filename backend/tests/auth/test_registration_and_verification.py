@@ -3,7 +3,6 @@ import asyncio
 import pytest
 
 from app.auth.errors import (
-    EmailNotVerified,
     InvalidCode,
     InvalidCredentials,
     RateLimited,
@@ -42,7 +41,7 @@ async def test_registration_creates_an_unverified_account_and_mails_a_code(
     assert account.role == "admin"
     assert account.hashed_password.startswith("$argon2id$")
     assert command.password not in account.hashed_password
-    with pytest.raises(EmailNotVerified):
+    with pytest.raises(InvalidCredentials):
         await harness.login(command)
 
 
@@ -210,7 +209,7 @@ async def test_after_five_wrong_attempts_even_the_right_code_is_dead(harness: Ha
             await harness.service.verify_email(command.email, wrong, GOOD_PASSWORD, ADDRESS)
     with pytest.raises(InvalidCode):
         await harness.service.verify_email(command.email, code, GOOD_PASSWORD, ADDRESS)
-    with pytest.raises(EmailNotVerified):
+    with pytest.raises(InvalidCredentials):
         await harness.login(command)
 
 

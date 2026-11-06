@@ -1,10 +1,13 @@
-// Syntax-checks JSON and YAML configuration, and the YAML front matter of agent
-// instruction files (skills, rules, prompts, subagents, workflows, roles).
+// Syntax-checks tracked JSON and YAML configuration, and the YAML front matter
+// of tracked agent instruction files (skills, rules, prompts, subagents, workflows, roles).
 // YAML needs the pinned "yaml" dev dependency; without it YAML is reported as SKIPPED, not passed.
 //
 // Usage: node scripts/validation/check-config-syntax.mjs [--root <dir>]
-import { ROOT, EXIT, walk, readText, isMain, argValue } from '../lib/fsutil.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { ROOT, EXIT, readText, isMain, argValue } from '../lib/fsutil.mjs';
 import { matchesAny } from '../lib/glob.mjs';
+import * as G from '../lib/git.mjs';
 
 const FRONTMATTER_GLOBS = [
   '.claude/**/*.md',
@@ -32,6 +35,30 @@ function frontmatterBlock(text) {
   return end === -1 ? null : t.slice(4, end);
 }
 
+function isRegularFileWithoutSymlinks(root, rel) {
+  let current = path.resolve(root);
+  try {
+    if (fs.lstatSync(current).isSymbolicLink()) return false;
+  } catch {
+    return false;
+  }
+
+  const parts = rel.split('/');
+  for (let i = 0; i < parts.length; i += 1) {
+    current = path.join(current, parts[i]);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      return false;
+    }
+    if (stat.isSymbolicLink()) return false;
+    if (i === parts.length - 1) return stat.isFile();
+    if (!stat.isDirectory()) return false;
+  }
+  return false;
+}
+
 export async function checkConfigSyntax(root = ROOT) {
   const YAML = await loadYaml();
   const errors = [];
@@ -40,17 +67,28 @@ export async function checkConfigSyntax(root = ROOT) {
   let yamlSkipped = 0;
 
   const yamlProblems = (text, label) => {
-    const docs = YAML.parseAllDocuments(text);
-    for (const d of docs) for (const e of d.errors) errors.push(`${label}: ${e.message.split('\n')[0]}`);
+    try {
+      if (YAML.parseAllDocuments(text).some((doc) => doc.errors.length > 0)) {
+        errors.push(`${label}: invalid YAML`);
+      }
+    } catch {
+      errors.push(`${label}: invalid YAML`);
+    }
   };
 
-  for (const file of walk(root)) {
+  const tracked = G.git(['ls-files', '--cached', '-z'], { cwd: root, allowFail: true });
+  if (tracked === null) {
+    return { errors: ['unable to enumerate tracked files'], jsonCount, yamlCount, yamlSkipped };
+  }
+
+  for (const file of tracked.split('\0').filter(Boolean)) {
+    if (!isRegularFileWithoutSymlinks(root, file)) continue;
     if (file.endsWith('.json')) {
       jsonCount += 1;
       try {
         JSON.parse(readText(root, file));
-      } catch (e) {
-        errors.push(`${file}: invalid JSON (${e.message})`);
+      } catch {
+        errors.push(`${file}: invalid JSON`);
       }
     } else if (/\.ya?ml$/.test(file)) {
       if (!YAML) {

@@ -18,13 +18,14 @@ import {
   countCodePoints,
   createIdempotencyKey,
   decodeChatEvent,
+  deleteSession,
   getApiBaseUrl,
   listMessages,
   listSessions,
   streamChatMessage,
   validateChatContent,
 } from "./api-client";
-import { setAccessToken } from "./auth-session";
+import { getAccessToken, setAccessToken } from "./auth-session";
 
 const SESSION = "8f8b80e8-0b53-4f9e-99f5-748a2784cf22";
 
@@ -250,6 +251,111 @@ describe("streamChatMessage events", () => {
     expect(events).toEqual([{ type: "delta", text: "fine" }]);
   });
 
+  it("does not accept a terminal event after a malformed known event", async () => {
+    stubFetch(
+      sseResponse([
+        acceptedFrame(),
+        deltaFrame("partial"),
+        'event: delta\ndata: {"text":\n\n',
+        doneFrame(),
+      ]),
+    );
+    const events = await streamChatMessage({
+      content: "Hi",
+      idempotencyKey: "key-12345678",
+    });
+    expect((await events.next()).value).toMatchObject({
+      type: "message.accepted",
+    });
+    expect((await events.next()).value).toEqual({
+      type: "delta",
+      text: "partial",
+    });
+    await expect(events.next()).rejects.toMatchObject({
+      code: "stream_protocol_error",
+    });
+  });
+
+  it("rejects a malformed accepted event split at every byte boundary", async () => {
+    const bytes = new TextEncoder().encode(
+      frame("message.accepted", {
+        session_id: SESSION,
+        user_message_id: "user-1",
+        assistant_message_id: "assistant-1",
+        replayed: "true",
+      }),
+    );
+    for (let cut = 1; cut < bytes.length; cut += 1) {
+      stubFetch(
+        sseResponse([bytes.slice(0, cut), bytes.slice(cut), doneFrame()]),
+      );
+      const events = await streamChatMessage({
+        content: "Hi",
+        idempotencyKey: "key-12345678",
+      });
+      await expect(events.next()).rejects.toMatchObject({
+        code: "stream_protocol_error",
+      });
+    }
+  });
+
+  it("rejects a malformed terminal event instead of treating it as clean EOF", async () => {
+    stubFetch(
+      sseResponse([frame("done", { assistant_message_id: "assistant-1" })]),
+    );
+    const events = await streamChatMessage({
+      content: "Hi",
+      idempotencyKey: "key-12345678",
+    });
+    await expect(events.next()).rejects.toMatchObject({
+      status: 200,
+      code: "stream_protocol_error",
+    });
+  });
+
+  it.each([
+    [
+      "accepted without a replay flag",
+      "message.accepted",
+      {
+        session_id: "s",
+        user_message_id: "u",
+        assistant_message_id: "a",
+      },
+    ],
+    [
+      "accepted with a non-boolean replay flag",
+      "message.accepted",
+      {
+        session_id: "s",
+        user_message_id: "u",
+        assistant_message_id: "a",
+        replayed: "true",
+      },
+    ],
+    ["done without a finish reason", "done", { assistant_message_id: "a" }],
+    [
+      "done with a non-string finish reason",
+      "done",
+      { assistant_message_id: "a", finish_reason: 1 },
+    ],
+    ["error without a retryable flag", "error", { code: "internal_error" }],
+    [
+      "error with a non-boolean retryable flag",
+      "error",
+      { code: "internal_error", retryable: "false" },
+    ],
+  ])("rejects %s", (_description, event, data) => {
+    expect(
+      decodeChatEvent({
+        event,
+        data: JSON.stringify(data),
+        id: null,
+        retry: null,
+      }),
+    ).toBeNull();
+  });
+
   it("decodes the error event and keeps cost_usd null as null", () => {
     expect(
       decodeChatEvent({
@@ -359,6 +465,49 @@ describe("streamChatMessage errors", () => {
     });
   });
 
+  describe("refresh races", () => {
+    it("does not replace a newer token when an unauthorized request has a stale refresh", async () => {
+      let resolveRefresh: ((response: Response) => void) | undefined;
+      const refreshResponse = new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      const fetchMock = vi.fn((url: string) => {
+        if (url === "/api/v1/auth/refresh") {
+          return refreshResponse;
+        }
+        return Promise.resolve(new Response(null, { status: 401 }));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      setAccessToken("account-a-token");
+
+      const pending = streamChatMessage({
+        content: "Hi",
+        idempotencyKey: "key-12345678",
+      });
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/v1/auth/refresh",
+          expect.anything(),
+        );
+      });
+      setAccessToken("account-b-token");
+      resolveRefresh?.(
+        jsonResponse({
+          access_token: "example-stale-account-a-token",
+          token_type: "bearer",
+          expires_in: 900,
+        }),
+      );
+
+      await expect(pending).rejects.toMatchObject({
+        status: 401,
+        code: "unknown_error",
+      });
+      expect(getAccessToken()).toBe("account-b-token");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("reads Retry-After on the concurrent stream limit", async () => {
     stubFetch(
       jsonResponse({ error: "concurrent_stream_limit" }, 429, {
@@ -460,6 +609,32 @@ describe("read endpoints", () => {
     );
   });
 
+  it("retains sessions whose valid title is null with a display fallback", async () => {
+    stubFetch(
+      jsonResponse({
+        items: [
+          {
+            id: "untitled",
+            title: null,
+            channel: "web",
+            status: "active",
+            created_at: "2026-11-05T10:00:00Z",
+          },
+        ],
+        next_cursor: null,
+      }),
+    );
+    expect((await listSessions()).items).toEqual([
+      {
+        id: "untitled",
+        title: "Untitled conversation",
+        channel: "web",
+        status: "active",
+        created_at: "2026-11-05T10:00:00Z",
+      },
+    ]);
+  });
+
   it("lists messages of a session", async () => {
     const fetchMock = stubFetch(
       jsonResponse({
@@ -534,5 +709,47 @@ describe("content validation and keys", () => {
     for (const key of keys) {
       expect(key).toMatch(/^[A-Za-z0-9_-]{8,128}$/);
     }
+  });
+});
+
+describe("deleteSession", () => {
+  it("sends DELETE to /api/v1/chat/sessions/{id} with bearer token", async () => {
+    const fetchMock = stubFetch(new Response(null, { status: 204 }));
+    await deleteSession(SESSION);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(`/api/v1/chat/sessions/${SESSION}`);
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
+      "Bearer test-access-token",
+    );
+  });
+
+  it("encodes the session id in the path", async () => {
+    const fetchMock = stubFetch(new Response(null, { status: 204 }));
+    await deleteSession("a/b?c");
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/v1/chat/sessions/a%2Fb%3Fc");
+  });
+
+  it("throws ApiError when the server returns 404 session_not_found", async () => {
+    stubFetch(jsonResponse({ error: "session_not_found" }, 404));
+    await expect(deleteSession(SESSION)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      code: "session_not_found",
+    });
+  });
+
+  it("requires an access token", async () => {
+    setAccessToken(null);
+    await expect(deleteSession(SESSION)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401,
+      code: "not_authenticated",
+    });
   });
 });
