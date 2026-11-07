@@ -525,11 +525,14 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .maya-thread__scroll {
+  display: block;
   flex: 1;
   min-height: 0;
+  height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -543,6 +546,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--maya-space-8);
+  width: 100%;
   max-width: var(--maya-column);
   margin: 0 auto;
   padding: var(--maya-space-8) var(--maya-space-4) var(--maya-space-6);
@@ -969,10 +973,12 @@
 /* ---------------------------------------------------------------- composer */
 
 .maya-chat__dock {
-  position: relative;
+  position: sticky;
+  bottom: 0;
   z-index: var(--maya-z-base);
   display: flex;
   flex: none;
+  flex-shrink: 0;
   flex-direction: column;
   gap: var(--maya-space-3);
   width: 100%;
@@ -1316,6 +1322,7 @@
   flex: 1;
   grid-template-columns: var(--maya-sidebar-width) minmax(0, 1fr);
   min-height: 0;
+  height: 100%;
 }
 
 .maya-workspace--no-sidebar {
@@ -1323,8 +1330,13 @@
 }
 
 .maya-workspace--drawer {
-  display: block;
   position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .maya-workspace--drawer .maya-sidebar {
@@ -1391,18 +1403,26 @@
   overflow: hidden;
 }
 
-.maya-chat--embedded .maya-workspace {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
+.maya-chat--embedded .maya-workspace,
 .maya-chat--embedded .maya-workspace--drawer {
   position: relative;
   height: 100%;
   width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.maya-chat--embedded .maya-conversation {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   overflow: hidden;
 }
 
@@ -1635,10 +1655,14 @@
 }
 
 .maya-conversation {
+  position: relative;
   display: flex;
+  flex: 1;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .maya-conversation__topbar {
@@ -1865,8 +1889,13 @@
 
 @media (max-width: 760px) {
   .maya-workspace {
-    display: block;
     position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .maya-sidebar {
