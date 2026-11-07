@@ -2,53 +2,72 @@
 // Gitleaks, which runs in CI. It never prints a matched value, only rule and location.
 //
 // Usage: node scripts/validation/check-secrets.mjs [--all | --staged | --range <base>] [--root <dir>]
-import fs from 'node:fs';
-import path from 'node:path';
-import { ROOT, EXIT, walk, isBinary, isMain, argValue } from '../lib/fsutil.mjs';
-import * as G from '../lib/git.mjs';
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ROOT,
+  EXIT,
+  walk,
+  isBinary,
+  isMain,
+  argValue,
+} from "../lib/fsutil.mjs";
+import * as G from "../lib/git.mjs";
 
 const PLACEHOLDER =
   /(example|placeholder|changeme|change-me|your[-_ ]|xxxx|dummy|sample|redacted|fake|<[^>]+>|\$\{|\{\{|\*{3,}|todo|replace[-_ ]me|not[-_ ]a[-_ ]real|^(?:password|passwd|secret|pass)$)/i;
 
 export const RULES = [
-  { id: 'aws-access-key-id', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
-  { id: 'github-token', re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/ },
-  { id: 'github-fine-grained-token', re: /\bgithub_pat_[A-Za-z0-9_]{22,}\b/ },
-  { id: 'google-api-key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
-  { id: 'slack-token', re: /\bxox[abprs]-[0-9A-Za-z-]{10,}\b/ },
-  { id: 'private-key-block', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/ },
-  { id: 'anthropic-key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
-  { id: 'openai-style-key', re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b/ },
-  { id: 'stripe-live-key', re: /\b[sr]k_live_[0-9A-Za-z]{16,}\b/ },
-  { id: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
+  { id: "aws-access-key-id", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
+  { id: "github-token", re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/ },
+  { id: "github-fine-grained-token", re: /\bgithub_pat_[A-Za-z0-9_]{22,}\b/ },
+  { id: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+  { id: "slack-token", re: /\bxox[abprs]-[0-9A-Za-z-]{10,}\b/ },
   {
-    id: 'url-with-password',
+    id: "private-key-block",
+    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/,
+  },
+  { id: "anthropic-key", re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
+  { id: "openai-style-key", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b/ },
+  { id: "stripe-live-key", re: /\b[sr]k_live_[0-9A-Za-z]{16,}\b/ },
+  {
+    id: "jwt",
+    re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  },
+  {
+    id: "url-with-password",
     re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:([^\s@/]{6,})@/,
     group: 1,
     placeholderCheck: true,
   },
   {
-    id: 'assigned-secret',
+    id: "assigned-secret",
     re: /(?:api[_-]?key|secret|token|passwd|password|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']([^"'\s]{12,})["']/i,
     group: 1,
     placeholderCheck: true,
   },
   {
-    id: 'env-style-secret',
+    id: "env-style-secret",
     re: /^[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*=([^\s#"']{12,})\s*$/,
     group: 1,
     placeholderCheck: true,
   },
 ];
 
-const SKIP_FILES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'uv.lock']);
+const SKIP_FILES = new Set([
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "poetry.lock",
+  "uv.lock",
+]);
 const MAX_BYTES = 2 * 1024 * 1024;
 
 /** Scan text; returns [{ rule, file, line }] (never the secret itself). */
-export function scanText(text, file = '', firstLine = 1) {
+export function scanText(text, file = "", firstLine = 1) {
   const findings = [];
-  text.split('\n').forEach((line, i) => {
-    if (line.includes('secret-scan:allow')) return;
+  text.split("\n").forEach((line, i) => {
+    if (line.includes("secret-scan:allow")) return;
     for (const rule of RULES) {
       const m = rule.re.exec(line);
       if (!m) continue;
@@ -64,7 +83,7 @@ export function scanText(text, file = '', firstLine = 1) {
 
 function scanBuffer(buf, file) {
   if (buf.length > MAX_BYTES || isBinary(buf)) return [];
-  return scanText(buf.toString('utf8'), file);
+  return scanText(buf.toString("utf8"), file);
 }
 
 export function scanAll(root) {
@@ -104,15 +123,15 @@ export function scanRange(root, base) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const root = argValue(argv, '--root') ?? ROOT;
-  let mode = 'all';
+  const root = argValue(argv, "--root") ?? ROOT;
+  let mode = "all";
   let findings;
-  if (argv.includes('--staged')) {
-    mode = 'staged';
+  if (argv.includes("--staged")) {
+    mode = "staged";
     findings = scanStaged(root);
-  } else if (argv.includes('--range')) {
-    mode = 'range';
-    findings = scanRange(root, argValue(argv, '--range'));
+  } else if (argv.includes("--range")) {
+    mode = "range";
+    findings = scanRange(root, argValue(argv, "--range"));
   } else {
     findings = scanAll(root);
   }
@@ -121,11 +140,13 @@ function main() {
     console.log(`check-secrets (${mode}): no potential secrets found.`);
     process.exit(EXIT.PASS);
   }
-  console.error(`check-secrets (${mode}): ${findings.length} potential secret(s) found:`);
+  console.error(
+    `check-secrets (${mode}): ${findings.length} potential secret(s) found:`,
+  );
   for (const f of findings) console.error(`  ${f.file}:${f.line}  ${f.rule}`);
   console.error(
-    'Values are not printed. If a hit is a false positive, replace the value with an obvious placeholder.\n' +
-      'If a real secret was exposed, treat it as compromised and rotate it (governance/SECURITY_POLICY.md section 5).',
+    "Values are not printed. If a hit is a false positive, replace the value with an obvious placeholder.\n" +
+      "If a real secret was exposed, treat it as compromised and rotate it (governance/SECURITY_POLICY.md section 5).",
   );
   process.exit(EXIT.FAIL);
 }

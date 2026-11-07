@@ -1,7 +1,16 @@
-import { Info, OctagonX, TriangleAlert } from "lucide-react";
-import { memo, type ReactNode } from "react";
+import {
+  Info,
+  Mic,
+  OctagonX,
+  TriangleAlert,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { memo, useCallback, useState, type ReactNode } from "react";
 
 import type { ChatMessage } from "../../hooks/useChatStream";
+import { speakVoiceText, stopVoiceSpeech } from "../../hooks/useLiveVoice";
+import { LiveActionCard } from "../tasks/LiveActionCard";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 /** Three dots plus a text label, so the state never depends on motion. */
@@ -118,13 +127,42 @@ export interface MessageItemProps {
   message: ChatMessage;
   /** Offered inside an interrupted reply's note; omitted when not available. */
   onAskAgain?: () => void;
+  onViewDeliverables?: () => void;
+  onOpenTaskDetails?: (taskId: string) => void;
 }
 
-function MessageItemImpl({ message, onAskAgain }: MessageItemProps) {
+function MessageItemImpl({
+  message,
+  onAskAgain,
+  onViewDeliverables,
+  onOpenTaskDetails,
+}: MessageItemProps) {
+  const [isSpeakingThis, setIsSpeakingThis] = useState<boolean>(false);
+
+  const handleToggleSpeak = useCallback(() => {
+    if (isSpeakingThis) {
+      stopVoiceSpeech();
+      setIsSpeakingThis(false);
+    } else {
+      setIsSpeakingThis(true);
+      speakVoiceText(message.content, () => {
+        setIsSpeakingThis(false);
+      });
+    }
+  }, [isSpeakingThis, message.content]);
+
   if (message.role === "user") {
     return (
       <article className="maya-msg maya-msg--user" data-state={message.state}>
-        <h2 className="maya-sr-only">You said</h2>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h2 className="maya-sr-only">You said</h2>
+          {message.modality === "voice" && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-teal-400 bg-teal-950/60 px-1.5 py-0.5 rounded border border-teal-500/30">
+              <Mic className="w-3 h-3 text-teal-400" />
+              Spoken Turn
+            </span>
+          )}
+        </div>
         <p className="maya-msg__text">{message.content}</p>
         {userNote(message)}
       </article>
@@ -139,15 +177,69 @@ function MessageItemImpl({ message, onAskAgain }: MessageItemProps) {
       aria-busy={streaming}
     >
       <h2 className="maya-sr-only">MAYA said</h2>
-      <div className="maya-msg__head" aria-hidden="true">
-        <span className="maya-msg__mark" />
-        <span className="maya-msg__who">MAYA</span>
+      <div className="flex items-center justify-between gap-2 maya-msg__head">
+        <div className="flex items-center gap-2" aria-hidden="true">
+          <span className="maya-msg__mark" />
+          <span className="maya-msg__who">MAYA</span>
+          {message.modality === "voice" && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-blue-400 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-500/30">
+              Voice Mode
+            </span>
+          )}
+        </div>
+
+        {/* Listen to Maya Speech Button */}
+        {message.content && !streaming && (
+          <button
+            type="button"
+            onClick={handleToggleSpeak}
+            className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
+              isSpeakingThis
+                ? "border-blue-500/50 bg-blue-500/10 text-blue-300 animate-pulse"
+                : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+            }`}
+            title={isSpeakingThis ? "Stop speaking" : "Listen to Maya speak"}
+            aria-label={
+              isSpeakingThis ? "Stop speaking" : "Listen to Maya speak"
+            }
+          >
+            {isSpeakingThis ? (
+              <>
+                <VolumeX className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-[11px] font-mono">Stop</span>
+              </>
+            ) : (
+              <>
+                <Volume2 className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-mono">Speak</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
+
       {streaming && message.content === "" ? (
         <PendingIndicator label="Thinking" />
       ) : (
         <MarkdownRenderer content={message.content} streaming={streaming} />
       )}
+
+      {/* Live Tool Action DAG Card */}
+      {message.toolAction && (
+        <div className="mt-3">
+          <LiveActionCard
+            toolName={message.toolAction.toolName}
+            taskId={message.toolAction.taskId}
+            status={message.toolAction.status}
+            intent={message.toolAction.intent}
+            args={message.toolAction.args}
+            result={message.toolAction.result}
+            onViewDeliverables={onViewDeliverables}
+            onOpenTaskDetails={onOpenTaskDetails}
+          />
+        </div>
+      )}
+
       {assistantNote(message, onAskAgain)}
     </article>
   );

@@ -948,9 +948,10 @@ class ChatService:
                 raise ModelUnavailable from None
             raise
         if existing is not None:
-            durable_existing = await self._claim_durable(key_digest, existing)
-            if durable_existing is not None:
-                existing = durable_existing
+            if existing.state != "in_progress":
+                durable_existing = await self._claim_durable(key_digest, existing)
+                if durable_existing is not None:
+                    existing = durable_existing
             await self._enforce_rate_limit()
             if command.session_id is not None:
                 await self._require_session(command.session_id)
@@ -965,9 +966,10 @@ class ChatService:
             await self._require_session(command.session_id)
         existing = await self._idempotency.claim(scope, claim)
         if existing is not None:
-            durable_existing = await self._claim_durable(key_digest, existing)
-            if durable_existing is not None:
-                existing = durable_existing
+            if existing.state != "in_progress":
+                durable_existing = await self._claim_durable(key_digest, existing)
+                if durable_existing is not None:
+                    existing = durable_existing
             return await self._answer_repeat(existing, claim)
 
         # Claim PostgreSQL only after the concurrency gate: a rejected pre-stream request has not
@@ -983,7 +985,10 @@ class ChatService:
             if lease is None:
                 raise ChatStreamLimitReached
             existing = await self._claim_durable(key_digest, claim)
-            if existing is not None:
+            if existing is not None and (
+                existing.user_message_id != claim.user_message_id
+                or existing.assistant_message_id != claim.assistant_message_id
+            ):
                 await self._release_stream_lease(lease)
                 with suppress(IdempotencyUnavailable):
                     await asyncio.shield(self._idempotency.release(scope, claim))

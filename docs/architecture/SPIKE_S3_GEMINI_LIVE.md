@@ -20,13 +20,13 @@ The user supplied the launcher's redacted JSON, labelled
 `user_run_live_measurement` with `status=completed`. The assistant inspected that
 file, not credentials, and did not execute the API calls.
 
-| Observation | `send_client_content` | `send_realtime_input` |
-| :--- | ---: | ---: |
-| First-audio latency | 484 ms | 453 ms |
-| Output audio duration | 2,740.042 ms | 1,720.042 ms |
-| Audio bytes | 131,522 | 82,562 |
-| Observed session duration | 4.359 s | 4.782 s |
-| End reason / completed turns | turn_complete / 1 | turn_complete / 1 |
+| Observation                  | `send_client_content` | `send_realtime_input` |
+| :--------------------------- | --------------------: | --------------------: |
+| First-audio latency          |                484 ms |                453 ms |
+| Output audio duration        |          2,740.042 ms |          1,720.042 ms |
+| Audio bytes                  |               131,522 |                82,562 |
+| Observed session duration    |               4.359 s |               4.782 s |
+| End reason / completed turns |     turn_complete / 1 |     turn_complete / 1 |
 
 SDK: google-genai 2.34.0. The whole S3/S4 smoke ran from
 2026-11-05T06:18:08.744148+00:00 to 06:18:19.817201+00:00 (11.078 seconds).
@@ -218,13 +218,13 @@ decision was accepted. Live S3 acceptance remains incomplete.
 
 ## Deferred development record
 
-| Work item | Current evidence | Revisit before |
-| :--- | :--- | :--- |
-| Combined S3/S4 spending control | No enforceable INR 100 cap is verified; alerts/timeouts are not substitutes | Any paid Gemini call |
-| Safe non-production credentials and live entry point | Owner executed the hidden-prompt Free/no-billing smoke; no key read by agents, account tier not independently verified | Reconfirm scope/billing before another run |
-| Real first-audio and text-method acceptance | Both independent sessions returned audio in one user-run smoke (484/453 ms) | Broader workload/quality validation before production use |
-| Session lifetime/resumption continuity | Bounded mock lifecycle and handle tests only | Claiming live session recovery or lifetime support |
-| Actual model availability, usage and total cost | Model responded in the short smoke; no measured bill or independently verified cap | Selecting production models or claiming budget compliance |
+| Work item                                            | Current evidence                                                                                                       | Revisit before                                            |
+| :--------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------- |
+| Combined S3/S4 spending control                      | No enforceable INR 100 cap is verified; alerts/timeouts are not substitutes                                            | Any paid Gemini call                                      |
+| Safe non-production credentials and live entry point | Owner executed the hidden-prompt Free/no-billing smoke; no key read by agents, account tier not independently verified | Reconfirm scope/billing before another run                |
+| Real first-audio and text-method acceptance          | Both independent sessions returned audio in one user-run smoke (484/453 ms)                                            | Broader workload/quality validation before production use |
+| Session lifetime/resumption continuity               | Bounded mock lifecycle and handle tests only                                                                           | Claiming live session recovery or lifetime support        |
+| Actual model availability, usage and total cost      | Model responded in the short smoke; no measured bill or independently verified cap                                     | Selecting production models or claiming budget compliance |
 
 Resume with current official pricing/model checks, verified spending controls,
 bounded workload approval and user-managed credentials. Keep the two text methods

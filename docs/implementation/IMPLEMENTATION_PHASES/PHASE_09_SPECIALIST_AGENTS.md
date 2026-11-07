@@ -182,13 +182,13 @@
 
 - **Files to Create:**
   - backend/app/agents/base.py (planned artifact)
-  - backend/app/agents/specialized/__init__.py (planned artifact)
+  - backend/app/agents/specialized/**init**.py (planned artifact)
   - backend/app/agents/specialized/research.py (planned artifact)
   - backend/app/agents/specialized/coding.py (planned artifact)
   - backend/app/agents/specialized/document.py (planned artifact)
   - backend/app/agents/specialized/email.py (planned artifact)
   - backend/app/agents/specialized/pm.py (planned artifact)
-  - backend/app/sandbox/__init__.py (planned artifact)
+  - backend/app/sandbox/**init**.py (planned artifact)
   - backend/app/sandbox/runner.py (planned artifact)
   - backend/app/sandbox/schemas.py (planned artifact)
   - docker/sandbox/Dockerfile (planned artifact)

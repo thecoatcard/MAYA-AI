@@ -16,17 +16,17 @@
 
 ## Permissions
 
-| Tool or operation | Permission level | Approval needed |
-| :--- | :--- | :--- |
-| <name> | READ, WRITE, APPROVAL_REQUIRED or RESTRICTED | <yes or no> |
+| Tool or operation | Permission level                             | Approval needed |
+| :---------------- | :------------------------------------------- | :-------------- |
+| <name>            | READ, WRITE, APPROVAL_REQUIRED or RESTRICTED | <yes or no>     |
 
 ## Failure handling
 
-| Failure | Detection | Response |
-| :--- | :--- | :--- |
-| Server unreachable | <health check> | <retry, fallback, notify> |
-| Rate limited | <status code> | <back-off policy> |
-| Schema changed | <schema hash comparison> | <disable and alert> |
+| Failure            | Detection                | Response                  |
+| :----------------- | :----------------------- | :------------------------ |
+| Server unreachable | <health check>           | <retry, fallback, notify> |
+| Rate limited       | <status code>            | <back-off policy>         |
+| Schema changed     | <schema hash comparison> | <disable and alert>       |
 
 ## Security
 

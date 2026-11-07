@@ -2,9 +2,11 @@
 
 import {
   Layers3,
+  ListTodo,
   LogOut,
   Menu,
   PanelLeftClose,
+  ShieldAlert,
   SquarePen,
   Trash2,
 } from "lucide-react";
@@ -13,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -20,6 +23,7 @@ import {
   type PointerEvent,
 } from "react";
 
+import type { LiveActionInfo, TranscriptItem } from "../../hooks/useLiveVoice";
 import { useChatStream, type ChatError } from "../../hooks/useChatStream";
 import {
   ApiError,
@@ -36,8 +40,13 @@ import {
   setAccessToken,
   subscribeAccessToken,
 } from "../../lib/auth-session";
+import { listApprovals } from "../../lib/approvals-client";
+import { listTasks } from "../../lib/tasks-client";
 import { signOut } from "../../lib/auth-client";
 import type { Page, SessionSummary, StoredMessage } from "../../lib/api-client";
+import { ApprovalCenterModal } from "../approvals/ApprovalCenterModal";
+import { McpStatusIndicator } from "../mcp/McpStatusIndicator";
+import { TaskCenterDrawer } from "../tasks/TaskCenterDrawer";
 import { ChatInput } from "./ChatInput";
 import { ChatNotice } from "./ChatNotice";
 import { MessageThread } from "./MessageThread";
@@ -122,7 +131,7 @@ function EmptyConversation() {
       </p>
       <p className="maya-empty__planned">
         <span className="maya-tag">Planned</span>
-        Voice input and task execution are not available yet.
+        Hardware microphone device switching not available yet.
       </p>
     </section>
   );
@@ -138,11 +147,64 @@ function SessionSkeleton() {
   );
 }
 
+export interface ChatWorkspaceProps {
+  /**
+   * When true, adapts ChatWorkspace for embedding in AppShell or AmbientWorkspace:
+   * hides the redundant outer brand header and converts the outer sidebar into an overlay drawer.
+   */
+  readonly embedded?: boolean;
+  /**
+   * Explicitly hides the outer brand header. Defaults to true when embedded is true.
+   */
+  readonly hideHeader?: boolean;
+  /**
+   * Explicitly hides the conversation history sidebar drawer entirely.
+   */
+  readonly hideSidebar?: boolean;
+  /**
+   * Explicitly hides the inner conversation topbar (useful in AmbientWorkspace where a unified header exists).
+   */
+  readonly hideConversationTopbar?: boolean;
+  /**
+   * Optional microphone listening state from voice engine.
+   */
+  readonly isVoiceListening?: boolean;
+  /**
+   * Toggle voice microphone from composer.
+   */
+  readonly onToggleVoice?: () => void;
+  /**
+   * Active tool or task execution info from voice/agent stream.
+   */
+  readonly activeAction?: LiveActionInfo | null;
+  /**
+   * Callback to open Deliverable Canvas.
+   */
+  readonly onViewDeliverables?: () => void;
+  /**
+   * Real-time voice transcript items to merge with thread.
+   */
+  readonly voiceTranscripts?: readonly TranscriptItem[];
+}
+
 /**
  * The /chat canvas. The access token stays in memory; the rotating refresh
  * token is an HttpOnly cookie and is never available to this component.
  */
-export function ChatWorkspace() {
+export function ChatWorkspace({
+  embedded = false,
+  hideHeader,
+  hideSidebar = false,
+  hideConversationTopbar = false,
+  isVoiceListening = false,
+  onToggleVoice,
+  activeAction = null,
+  onViewDeliverables,
+  voiceTranscripts,
+}: ChatWorkspaceProps = {}) {
+  const shouldHideHeader = hideHeader ?? embedded;
+  const shouldHideSidebar = hideSidebar;
+
   const token = useSyncExternalStore(
     subscribeAccessToken,
     getAccessToken,
@@ -156,6 +218,57 @@ export function ChatWorkspace() {
   const signedIn = token !== null;
   const chat = useChatStream();
   const { reset } = chat;
+
+  const displayedMessages = useMemo(() => {
+    const list = [...chat.messages];
+
+    if (voiceTranscripts && voiceTranscripts.length > 0) {
+      const existingTexts = new Set(list.map((m) => m.content.trim()));
+      voiceTranscripts.forEach((vt, idx) => {
+        if (vt.text && !existingTexts.has(vt.text.trim())) {
+          existingTexts.add(vt.text.trim());
+          list.push({
+            key: `voice-tx-${vt.timestamp}-${idx}`,
+            id: null,
+            role: vt.sender === "model" ? "assistant" : "user",
+            content: vt.text,
+            state: "complete",
+            finishReason: null,
+            usage: null,
+            modality: "voice",
+          });
+        }
+      });
+    }
+
+    if (activeAction) {
+      let foundAssistant = false;
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role === "assistant") {
+          list[i] = {
+            ...list[i],
+            toolAction: activeAction,
+          };
+          foundAssistant = true;
+          break;
+        }
+      }
+      if (!foundAssistant) {
+        list.push({
+          key: `live-action-${activeAction.taskId || activeAction.toolName}`,
+          id: null,
+          role: "assistant",
+          content: `I am executing: ${activeAction.intent || activeAction.toolName}`,
+          state: "complete",
+          finishReason: null,
+          usage: null,
+          toolAction: activeAction,
+        });
+      }
+    }
+
+    return list;
+  }, [chat.messages, voiceTranscripts, activeAction]);
   const [draft, setDraft] = useState("");
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [authStatus, setAuthStatus] = useState<
@@ -177,6 +290,11 @@ export function ChatWorkspace() {
   const [listRefreshVersion, setListRefreshVersion] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const isDrawerMode = isMobile || (embedded && !shouldHideSidebar);
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -423,7 +541,7 @@ export function ChatWorkspace() {
   ]);
 
   useEffect(() => {
-    if (!sidebarOpen || !isMobile) {
+    if (!sidebarOpen || !isDrawerMode) {
       if (wasDrawerOpen.current) {
         menuButtonRef.current?.focus();
       }
@@ -435,7 +553,7 @@ export function ChatWorkspace() {
       "button:not(:disabled), a[href]",
     );
     first?.focus();
-  }, [isMobile, sidebarOpen]);
+  }, [isDrawerMode, sidebarOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -532,6 +650,9 @@ export function ChatWorkspace() {
     setHiddenError(null);
     setSessionError(null);
     focusComposer();
+    if (isDrawerMode) {
+      setSidebarOpen(false);
+    }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
@@ -698,7 +819,7 @@ export function ChatWorkspace() {
       setSidebarOpen(false);
       return;
     }
-    if (event.key !== "Tab" || !isMobile || !sidebarOpen) {
+    if (event.key !== "Tab" || !isDrawerMode || !sidebarOpen) {
       return;
     }
     const focusable = Array.from(
@@ -731,20 +852,22 @@ export function ChatWorkspace() {
     (chat.sessionId === null ? "New conversation" : "Conversation");
 
   return (
-    <div className="maya-chat">
-      <header className="maya-chat__header">
-        <div className="maya-chat__header-inner">
-          <Link href="/" className="maya-brand">
-            <Layers3 aria-hidden="true" size={18} />
-            MAYA AI
-          </Link>
-          <span className="maya-chat__divider" aria-hidden="true" />
-          <h1 className="maya-chat__title">Chat</h1>
-          <div className="maya-chat__tools">
-            <ThemeToggle value={theme} onChange={changeTheme} />
+    <div className={`maya-chat ${embedded ? "maya-chat--embedded" : ""}`}>
+      {!shouldHideHeader && (
+        <header className="maya-chat__header">
+          <div className="maya-chat__header-inner">
+            <Link href="/" className="maya-brand">
+              <Layers3 aria-hidden="true" size={18} />
+              MAYA AI
+            </Link>
+            <span className="maya-chat__divider" aria-hidden="true" />
+            <h1 className="maya-chat__title">Chat</h1>
+            <div className="maya-chat__tools">
+              <ThemeToggle value={theme} onChange={changeTheme} />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
       <main className="maya-chat__main">
         {authStatus === "checking" ? (
           <section className="maya-auth-check" aria-busy="true">
@@ -773,222 +896,309 @@ export function ChatWorkspace() {
             </button>
           </section>
         ) : signedIn ? (
-          <div className="maya-workspace">
-            {isMobile && sidebarOpen ? (
+          <div
+            className={`maya-workspace ${
+              shouldHideSidebar
+                ? "maya-workspace--no-sidebar"
+                : isDrawerMode && !isMobile
+                  ? "maya-workspace--drawer"
+                  : ""
+            }`}
+            style={
+              shouldHideSidebar || (isDrawerMode && !isMobile)
+                ? { gridTemplateColumns: "minmax(0, 1fr)" }
+                : undefined
+            }
+          >
+            {!shouldHideSidebar && isDrawerMode && sidebarOpen ? (
               <button
                 type="button"
                 className="maya-sidebar__scrim"
-                aria-label="Close conversation drawer"
+                aria-label="Dismiss conversation overlay"
                 onClick={() => setSidebarOpen(false)}
               />
             ) : null}
-            <aside
-              className={`maya-sidebar${sidebarOpen ? " is-open" : ""}`}
-              id="maya-conversation-drawer"
-              aria-label="Conversation history"
-              aria-hidden={isMobile && !sidebarOpen}
-              aria-modal={isMobile && sidebarOpen ? true : undefined}
-              role={isMobile && sidebarOpen ? "dialog" : undefined}
-              inert={isMobile && !sidebarOpen}
-              onKeyDown={handleDrawerKeyDown}
-              ref={sidebarRef}
-            >
-              <div className="maya-sidebar__head">
-                <span className="maya-sidebar__wordmark">Conversations</span>
-                <button
-                  type="button"
-                  className="maya-btn maya-btn--quiet maya-sidebar__close"
-                  aria-label="Close conversation drawer"
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <PanelLeftClose aria-hidden="true" size={16} />
-                </button>
-              </div>
-              <button
-                type="button"
-                className="maya-btn maya-btn--primary maya-sidebar__new maya-ripple"
-                onPointerDown={setRipple}
-                onClick={handleNewConversation}
+            {!shouldHideSidebar && (
+              <aside
+                className={`maya-sidebar${sidebarOpen ? " is-open" : ""}`}
+                id="maya-conversation-drawer"
+                aria-label="Conversation history"
+                aria-hidden={isDrawerMode && !sidebarOpen}
+                aria-modal={isDrawerMode && sidebarOpen ? true : undefined}
+                role={isDrawerMode && sidebarOpen ? "dialog" : undefined}
+                inert={isDrawerMode && !sidebarOpen}
+                onKeyDown={handleDrawerKeyDown}
+                ref={sidebarRef}
               >
-                <SquarePen aria-hidden="true" size={16} />
-                <span>New conversation</span>
-                <kbd>Ctrl K</kbd>
-              </button>
-              <nav
-                className="maya-sidebar__sessions"
-                aria-label="Your conversations"
-                aria-busy={sessionsLoading || historyLoading}
-              >
-                {sessionsLoading ? <SessionSkeleton /> : null}
-                {!sessionsLoading && sessions.length === 0 ? (
-                  <p className="maya-sidebar__empty">
-                    Your saved conversations will appear here.
-                  </p>
-                ) : null}
-                {todaySessions.length > 0 ? (
-                  <section aria-labelledby="maya-sessions-today">
-                    <h2
-                      id="maya-sessions-today"
-                      className="maya-sidebar__group"
-                    >
-                      Today
-                    </h2>
-                    <ul>
-                      {todaySessions.map((session) => (
-                        <li key={session.id} className="maya-session__item">
-                          <button
-                            type="button"
-                            className="maya-session maya-ripple"
-                            disabled={
-                              historyLoading ||
-                              chat.isBusy ||
-                              deletingSessionId !== null
-                            }
-                            aria-current={
-                              session.id === chat.sessionId ? "page" : undefined
-                            }
-                            onPointerDown={setRipple}
-                            onClick={() => void handleOpenSession(session)}
-                          >
-                            {session.title}
-                          </button>
-                          <button
-                            type="button"
-                            className="maya-session__delete"
-                            aria-label={`Delete conversation ${session.title}`}
-                            title="Delete conversation"
-                            disabled={
-                              historyLoading ||
-                              chat.isBusy ||
-                              deletingSessionId !== null
-                            }
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDeleteSession(session.id);
-                            }}
-                          >
-                            <Trash2 aria-hidden="true" size={14} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-                {earlierSessions.length > 0 ? (
-                  <section aria-labelledby="maya-sessions-earlier">
-                    <h2
-                      id="maya-sessions-earlier"
-                      className="maya-sidebar__group"
-                    >
-                      Earlier
-                    </h2>
-                    <ul>
-                      {earlierSessions.map((session) => (
-                        <li key={session.id} className="maya-session__item">
-                          <button
-                            type="button"
-                            className="maya-session maya-ripple"
-                            disabled={
-                              historyLoading ||
-                              chat.isBusy ||
-                              deletingSessionId !== null
-                            }
-                            aria-current={
-                              session.id === chat.sessionId ? "page" : undefined
-                            }
-                            onPointerDown={setRipple}
-                            onClick={() => void handleOpenSession(session)}
-                          >
-                            {session.title}
-                          </button>
-                          <button
-                            type="button"
-                            className="maya-session__delete"
-                            aria-label={`Delete conversation ${session.title}`}
-                            title="Delete conversation"
-                            disabled={
-                              historyLoading ||
-                              chat.isBusy ||
-                              deletingSessionId !== null
-                            }
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDeleteSession(session.id);
-                            }}
-                          >
-                            <Trash2 aria-hidden="true" size={14} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-                {sessionCursor !== null ? (
+                <div className="maya-sidebar__head">
+                  <span className="maya-sidebar__wordmark">Conversations</span>
                   <button
                     type="button"
-                    className="maya-btn maya-btn--quiet maya-sidebar__more"
-                    onClick={() => void handleLoadMore()}
-                    disabled={loadingMore}
+                    className="maya-btn maya-btn--quiet maya-sidebar__close"
+                    aria-label="Close conversation drawer"
+                    onClick={() => setSidebarOpen(false)}
                   >
-                    {loadingMore ? "Loading…" : "Load more"}
+                    <PanelLeftClose aria-hidden="true" size={16} />
                   </button>
-                ) : null}
-              </nav>
-              {sessionError ? (
-                <p className="maya-sidebar__error" role="alert">
-                  {sessionError}
-                </p>
-              ) : null}
-              <div className="maya-sidebar__account">
-                <span>Signed in</span>
+                </div>
                 <button
                   type="button"
-                  className="maya-btn maya-btn--quiet"
-                  onClick={() => void handleSignOut()}
-                  disabled={loggingOut}
+                  className="maya-btn maya-btn--primary maya-sidebar__new maya-ripple"
+                  onPointerDown={setRipple}
+                  onClick={handleNewConversation}
                 >
-                  <LogOut aria-hidden="true" size={15} />
-                  {loggingOut ? "Signing out…" : "Sign out"}
+                  <SquarePen aria-hidden="true" size={16} />
+                  <span>New conversation</span>
+                  <kbd>Ctrl K</kbd>
                 </button>
-              </div>
-            </aside>
+                <nav
+                  className="maya-sidebar__sessions"
+                  aria-label="Your conversations"
+                  aria-busy={sessionsLoading || historyLoading}
+                >
+                  {sessionsLoading ? <SessionSkeleton /> : null}
+                  {!sessionsLoading && sessions.length === 0 ? (
+                    <p className="maya-sidebar__empty">
+                      Your saved conversations will appear here.
+                    </p>
+                  ) : null}
+                  {todaySessions.length > 0 ? (
+                    <section aria-labelledby="maya-sessions-today">
+                      <h2
+                        id="maya-sessions-today"
+                        className="maya-sidebar__group"
+                      >
+                        Today
+                      </h2>
+                      <ul>
+                        {todaySessions.map((session) => (
+                          <li key={session.id} className="maya-session__item">
+                            <button
+                              type="button"
+                              className="maya-session maya-ripple"
+                              disabled={
+                                historyLoading ||
+                                chat.isBusy ||
+                                deletingSessionId !== null
+                              }
+                              aria-current={
+                                session.id === chat.sessionId
+                                  ? "page"
+                                  : undefined
+                              }
+                              onPointerDown={setRipple}
+                              onClick={() => void handleOpenSession(session)}
+                            >
+                              {session.title}
+                            </button>
+                            <button
+                              type="button"
+                              className="maya-session__delete"
+                              aria-label={`Delete conversation ${session.title}`}
+                              title="Delete conversation"
+                              disabled={
+                                historyLoading ||
+                                chat.isBusy ||
+                                deletingSessionId !== null
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDeleteSession(session.id);
+                              }}
+                            >
+                              <Trash2 aria-hidden="true" size={14} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                  {earlierSessions.length > 0 ? (
+                    <section aria-labelledby="maya-sessions-earlier">
+                      <h2
+                        id="maya-sessions-earlier"
+                        className="maya-sidebar__group"
+                      >
+                        Earlier
+                      </h2>
+                      <ul>
+                        {earlierSessions.map((session) => (
+                          <li key={session.id} className="maya-session__item">
+                            <button
+                              type="button"
+                              className="maya-session maya-ripple"
+                              disabled={
+                                historyLoading ||
+                                chat.isBusy ||
+                                deletingSessionId !== null
+                              }
+                              aria-current={
+                                session.id === chat.sessionId
+                                  ? "page"
+                                  : undefined
+                              }
+                              onPointerDown={setRipple}
+                              onClick={() => void handleOpenSession(session)}
+                            >
+                              {session.title}
+                            </button>
+                            <button
+                              type="button"
+                              className="maya-session__delete"
+                              aria-label={`Delete conversation ${session.title}`}
+                              title="Delete conversation"
+                              disabled={
+                                historyLoading ||
+                                chat.isBusy ||
+                                deletingSessionId !== null
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDeleteSession(session.id);
+                              }}
+                            >
+                              <Trash2 aria-hidden="true" size={14} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                  {sessionCursor !== null ? (
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet maya-sidebar__more"
+                      onClick={() => void handleLoadMore()}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? "Loading…" : "Load more"}
+                    </button>
+                  ) : null}
+                </nav>
+                {sessionError ? (
+                  <p className="maya-sidebar__error" role="alert">
+                    {sessionError}
+                  </p>
+                ) : null}
+                {!embedded && (
+                  <div className="maya-sidebar__account">
+                    <span>Signed in</span>
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet"
+                      onClick={() => void handleSignOut()}
+                      disabled={loggingOut}
+                    >
+                      <LogOut aria-hidden="true" size={15} />
+                      {loggingOut ? "Signing out…" : "Sign out"}
+                    </button>
+                  </div>
+                )}
+              </aside>
+            )}
             <section
               className="maya-conversation"
               aria-labelledby="maya-current-title"
             >
-              <div className="maya-conversation__topbar">
-                <button
-                  type="button"
-                  className="maya-btn maya-btn--quiet maya-sidebar__trigger"
-                  aria-label="Open conversation history"
-                  aria-controls="maya-conversation-drawer"
-                  aria-expanded={sidebarOpen}
-                  onClick={() => setSidebarOpen(true)}
-                  ref={menuButtonRef}
-                >
-                  <Menu aria-hidden="true" size={18} />
-                </button>
-                <h2
-                  id="maya-current-title"
-                  className="maya-conversation__title"
-                  tabIndex={-1}
-                >
-                  {sessionTitle}
-                </h2>
-                {chat.sessionId !== null && (
-                  <button
-                    type="button"
-                    className="maya-btn maya-btn--quiet maya-conversation__delete"
-                    aria-label="Delete this conversation"
-                    title="Delete this conversation"
-                    disabled={chat.isBusy || deletingSessionId !== null}
-                    onClick={() => void handleDeleteSession(chat.sessionId!)}
+              {!hideConversationTopbar && (
+                <div className="maya-conversation__topbar">
+                  {!shouldHideSidebar && (
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet maya-sidebar__trigger"
+                      aria-label="Open conversation history"
+                      aria-controls="maya-conversation-drawer"
+                      aria-expanded={sidebarOpen}
+                      onClick={() => setSidebarOpen((prev) => !prev)}
+                      ref={menuButtonRef}
+                      style={
+                        isDrawerMode && !isMobile
+                          ? { display: "inline-flex" }
+                          : undefined
+                      }
+                    >
+                      <Menu aria-hidden="true" size={18} />
+                    </button>
+                  )}
+                  <h2
+                    id="maya-current-title"
+                    className="maya-conversation__title"
+                    tabIndex={-1}
                   >
-                    <Trash2 aria-hidden="true" size={16} />
-                  </button>
-                )}
-                <span className="maya-conversation__status">Text chat</span>
-              </div>
+                    {sessionTitle}
+                  </h2>
+                  {chat.sessionId !== null && (
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet maya-conversation__delete"
+                      aria-label="Delete this conversation"
+                      title="Delete this conversation"
+                      disabled={chat.isBusy || deletingSessionId !== null}
+                      onClick={() => void handleDeleteSession(chat.sessionId!)}
+                    >
+                      <Trash2 aria-hidden="true" size={16} />
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <McpStatusIndicator />
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet flex items-center gap-1.5 text-xs font-mono font-medium px-2 py-1 rounded border border-zinc-800 hover:border-zinc-700"
+                      onClick={() => setApprovalModalOpen(true)}
+                      title="Open Approval Center"
+                    >
+                      <ShieldAlert
+                        className={`w-3.5 h-3.5 ${
+                          pendingApprovalsCount > 0
+                            ? "text-amber-400"
+                            : "text-zinc-400"
+                        }`}
+                      />
+                      <span>Approvals</span>
+                      {pendingApprovalsCount > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          {pendingApprovalsCount}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="maya-btn maya-btn--quiet flex items-center gap-1.5 text-xs font-mono font-medium px-2 py-1 rounded border border-zinc-800 hover:border-zinc-700"
+                      onClick={async () => {
+                        if (!selectedTaskId) {
+                          try {
+                            const res = await listTasks(undefined, 1);
+                            if (
+                              res.items &&
+                              res.items.length > 0 &&
+                              res.items[0]
+                            ) {
+                              setSelectedTaskId(res.items[0].id);
+                            }
+                          } catch {
+                            // If none found or error, keep null (drawer shows clean empty state)
+                          }
+                        }
+                        setTaskDrawerOpen(true);
+                      }}
+                      title="Open Task Center"
+                    >
+                      <ListTodo className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Tasks</span>
+                    </button>
+                    {!embedded && (
+                      <Link
+                        href="/workspace"
+                        className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded bg-teal-600 hover:bg-teal-500 text-zinc-950 transition-colors shadow"
+                        title="Open Ambient Voice & Deliverables Workspace"
+                      >
+                        <span>Ambient Workspace →</span>
+                      </Link>
+                    )}
+                    <span className="maya-conversation__status">Text chat</span>
+                  </div>
+                </div>
+              )}
               {authWarning ? (
                 <p className="maya-auth-warning" role="status">
                   {authWarning}
@@ -1000,11 +1210,16 @@ export function ChatWorkspace() {
                 </p>
               ) : null}
               <MessageThread
-                messages={chat.messages}
+                messages={displayedMessages}
                 status={chat.status}
                 retrying={chat.retrying}
                 empty={<EmptyConversation />}
                 onAskAgain={inlineAskAgain}
+                onViewDeliverables={onViewDeliverables}
+                onOpenTaskDetails={(taskId) => {
+                  setSelectedTaskId(taskId);
+                  setTaskDrawerOpen(true);
+                }}
               />
               <div className="maya-chat__dock">
                 <ChatNotice
@@ -1023,9 +1238,30 @@ export function ChatWorkspace() {
                   onStop={chat.stop}
                   busy={chat.isBusy}
                   inputRef={inputRef}
+                  isListening={isVoiceListening}
+                  onToggleVoice={onToggleVoice}
                 />
               </div>
             </section>
+            <ApprovalCenterModal
+              isOpen={approvalModalOpen}
+              onClose={() => {
+                setApprovalModalOpen(false);
+                void listApprovals("pending")
+                  .then((list) => setPendingApprovalsCount(list.length))
+                  .catch(() => {});
+              }}
+              onDecisionMade={() => {
+                void listApprovals("pending")
+                  .then((list) => setPendingApprovalsCount(list.length))
+                  .catch(() => {});
+              }}
+            />
+            <TaskCenterDrawer
+              taskId={selectedTaskId}
+              isOpen={taskDrawerOpen}
+              onClose={() => setTaskDrawerOpen(false)}
+            />
           </div>
         ) : (
           <SignedOutState logoutWarning={logoutWarning} />

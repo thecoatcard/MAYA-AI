@@ -15,22 +15,22 @@ cancellation observations rather than dependency metadata alone.
 
 ## Files Changed
 
-| File | Change | Status |
-| :--- | :--- | :--- |
-| `backend/tests/spikes/spike_s1_queue.py` | Added candidate selection, isolated lock metadata, and candidate plan output. | Implemented |
-| `backend/tests/spikes/s1/celery_compat/pyproject.toml` | Added exact-pinned Celery/Kombu/Redis candidate and strict type-check settings. | Implemented |
-| `backend/tests/spikes/s1/celery_compat/uv.lock` | Added separate resolved candidate lock; historical lock remains unchanged. | Implemented |
-| `backend/tests/spikes/s1/celery_compat/Dockerfile` | Added isolated candidate image build using the candidate lock. | Implemented |
-| `backend/tests/spikes/s1/orchestrator.py` | Added candidate image/run path with existing run-labelled resource ownership and cleanup. | Implemented |
-| `backend/tests/spikes/s1/driver.py` | Made ARQ imports lazy, recorded package versions, and distinguished revoke return from terminal cancellation. | Implemented |
-| `backend/tests/spikes/s1/runtime.py` | Kept shared synthetic task logic importable without installing ARQ in the Celery candidate. | Implemented |
-| `backend/tests/spikes/s1/arq_worker.py` | Isolated ARQ-only worker configuration. | Implemented |
-| `backend/tests/spikes/s1/metrics.py` | Added deterministic cancellation-outcome classification. | Implemented |
-| `backend/tests/unit/test_spike_s1_queue.py` | Added fake-executor candidate selection, collision, lock, and negative cancellation tests. | Tested |
-| `backend/pyproject.toml` | Precisely excluded the ARQ-only worker entrypoint from host mypy discovery; it is checked with the isolated S1 lock. | Implemented |
-| `backend/tests/spikes/s1/results/s1-queue-20261105T053205Z-celery-compat-f0f619c78f47.json` | Persisted measured run evidence and final candidate-specific metadata. | Tested |
-| `docs/architecture/SPIKE_S1_QUEUE.md` | Recorded compatibility run, cancellation limitation, memory scope, cleanup and proposed recommendation. | Implemented |
-| `docs/adr/0003-task-queue-selection.md` | Added measured compatibility follow-up; status remains Proposed. | Implemented |
+| File                                                                                        | Change                                                                                                               | Status      |
+| :------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------- | :---------- |
+| `backend/tests/spikes/spike_s1_queue.py`                                                    | Added candidate selection, isolated lock metadata, and candidate plan output.                                        | Implemented |
+| `backend/tests/spikes/s1/celery_compat/pyproject.toml`                                      | Added exact-pinned Celery/Kombu/Redis candidate and strict type-check settings.                                      | Implemented |
+| `backend/tests/spikes/s1/celery_compat/uv.lock`                                             | Added separate resolved candidate lock; historical lock remains unchanged.                                           | Implemented |
+| `backend/tests/spikes/s1/celery_compat/Dockerfile`                                          | Added isolated candidate image build using the candidate lock.                                                       | Implemented |
+| `backend/tests/spikes/s1/orchestrator.py`                                                   | Added candidate image/run path with existing run-labelled resource ownership and cleanup.                            | Implemented |
+| `backend/tests/spikes/s1/driver.py`                                                         | Made ARQ imports lazy, recorded package versions, and distinguished revoke return from terminal cancellation.        | Implemented |
+| `backend/tests/spikes/s1/runtime.py`                                                        | Kept shared synthetic task logic importable without installing ARQ in the Celery candidate.                          | Implemented |
+| `backend/tests/spikes/s1/arq_worker.py`                                                     | Isolated ARQ-only worker configuration.                                                                              | Implemented |
+| `backend/tests/spikes/s1/metrics.py`                                                        | Added deterministic cancellation-outcome classification.                                                             | Implemented |
+| `backend/tests/unit/test_spike_s1_queue.py`                                                 | Added fake-executor candidate selection, collision, lock, and negative cancellation tests.                           | Tested      |
+| `backend/pyproject.toml`                                                                    | Precisely excluded the ARQ-only worker entrypoint from host mypy discovery; it is checked with the isolated S1 lock. | Implemented |
+| `backend/tests/spikes/s1/results/s1-queue-20261105T053205Z-celery-compat-f0f619c78f47.json` | Persisted measured run evidence and final candidate-specific metadata.                                               | Tested      |
+| `docs/architecture/SPIKE_S1_QUEUE.md`                                                       | Recorded compatibility run, cancellation limitation, memory scope, cleanup and proposed recommendation.              | Implemented |
+| `docs/adr/0003-task-queue-selection.md`                                                     | Added measured compatibility follow-up; status remains Proposed.                                                     | Implemented |
 
 ## Architecture Impact
 
@@ -58,20 +58,20 @@ data. Cleanup targeted only resources labeled with this run ID.
 
 ## Validation Results
 
-| Command | Result |
-| :--- | :--- |
-| `uv lock --project backend/tests/spikes/s1/celery_compat --python 3.12` | Passed; resolved 61 packages. |
-| `uv sync --project backend/tests/spikes/s1/celery_compat --frozen --group dev` | Passed; installed exact candidate and type-check environment in isolated `.venv`. |
-| `python backend/tests/spikes/spike_s1_queue.py --candidate celery-compat --jobs 80 --seed 20261105 --timeout-seconds 120` | Passed; plan-only mode created no Docker resources. |
-| `python backend/tests/spikes/spike_s1_queue.py --candidate celery-compat --run --jobs 80 --seed 20261105 --timeout-seconds 120` | Passed; 80/80 tasks completed, redelivery measured, cleanup reported no errors. |
-| `uv run --directory backend --project tests/spikes/s1 --frozen --group dev pytest -q tests/unit/test_spike_s1_queue.py` | 43 passed. The isolated test environment emitted two non-fatal unknown pytest-asyncio config warnings. |
-| `uv run --directory backend --no-sync pytest -q` | 146 passed. |
-| `uv run --directory backend --no-sync mypy .` | Passed; 30 source files checked. |
-| `uv run --directory backend --no-sync ruff check .` | Passed. |
-| `uv run --project s1/celery_compat --frozen --group dev mypy --config-file s1/celery_compat/pyproject.toml s1/driver.py s1/runtime.py s1/metrics.py` (from `backend/tests/spikes`) | Passed; 3 source files checked. |
-| `uv run --project tests/spikes/s1 --frozen --group dev mypy --config-file tests/spikes/s1/pyproject.toml tests/spikes/s1/driver.py tests/spikes/s1/runtime.py tests/spikes/s1/metrics.py tests/spikes/s1/arq_worker.py` (from `backend`) | Passed; 4 source files checked. |
-| `npm run validate` | First attempt failed because the validator's child processes could not find backend `ruff`, `mypy`, or `pytest` on the inherited `PATH`; no code check was reported as passing by that attempt. |
-| `$env:PATH = (Resolve-Path 'backend\.venv\Scripts').Path + ';' + $env:PATH; npm run validate` | Passed: 10 passed, 0 failed, 4 skipped because no base branch was available. Documentation check covered 134 Markdown files. |
+| Command                                                                                                                                                                                                                                  | Result                                                                                                                                                                                          |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uv lock --project backend/tests/spikes/s1/celery_compat --python 3.12`                                                                                                                                                                  | Passed; resolved 61 packages.                                                                                                                                                                   |
+| `uv sync --project backend/tests/spikes/s1/celery_compat --frozen --group dev`                                                                                                                                                           | Passed; installed exact candidate and type-check environment in isolated `.venv`.                                                                                                               |
+| `python backend/tests/spikes/spike_s1_queue.py --candidate celery-compat --jobs 80 --seed 20261105 --timeout-seconds 120`                                                                                                                | Passed; plan-only mode created no Docker resources.                                                                                                                                             |
+| `python backend/tests/spikes/spike_s1_queue.py --candidate celery-compat --run --jobs 80 --seed 20261105 --timeout-seconds 120`                                                                                                          | Passed; 80/80 tasks completed, redelivery measured, cleanup reported no errors.                                                                                                                 |
+| `uv run --directory backend --project tests/spikes/s1 --frozen --group dev pytest -q tests/unit/test_spike_s1_queue.py`                                                                                                                  | 43 passed. The isolated test environment emitted two non-fatal unknown pytest-asyncio config warnings.                                                                                          |
+| `uv run --directory backend --no-sync pytest -q`                                                                                                                                                                                         | 146 passed.                                                                                                                                                                                     |
+| `uv run --directory backend --no-sync mypy .`                                                                                                                                                                                            | Passed; 30 source files checked.                                                                                                                                                                |
+| `uv run --directory backend --no-sync ruff check .`                                                                                                                                                                                      | Passed.                                                                                                                                                                                         |
+| `uv run --project s1/celery_compat --frozen --group dev mypy --config-file s1/celery_compat/pyproject.toml s1/driver.py s1/runtime.py s1/metrics.py` (from `backend/tests/spikes`)                                                       | Passed; 3 source files checked.                                                                                                                                                                 |
+| `uv run --project tests/spikes/s1 --frozen --group dev mypy --config-file tests/spikes/s1/pyproject.toml tests/spikes/s1/driver.py tests/spikes/s1/runtime.py tests/spikes/s1/metrics.py tests/spikes/s1/arq_worker.py` (from `backend`) | Passed; 4 source files checked.                                                                                                                                                                 |
+| `npm run validate`                                                                                                                                                                                                                       | First attempt failed because the validator's child processes could not find backend `ruff`, `mypy`, or `pytest` on the inherited `PATH`; no code check was reported as passing by that attempt. |
+| `$env:PATH = (Resolve-Path 'backend\.venv\Scripts').Path + ';' + $env:PATH; npm run validate`                                                                                                                                            | Passed: 10 passed, 0 failed, 4 skipped because no base branch was available. Documentation check covered 134 Markdown files.                                                                    |
 
 ## Documentation Updated
 

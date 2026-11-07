@@ -148,7 +148,7 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/app/mcp/__init__.py (planned artifact)
+  - backend/app/mcp/**init**.py (planned artifact)
   - backend/app/mcp/permissions.py (planned artifact)
   - backend/app/mcp/approvals.py (planned artifact)
   - backend/app/mcp/sanitizer.py (planned artifact)

@@ -168,17 +168,17 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/tests/e2e/__init__.py (planned artifact)
+  - backend/tests/e2e/**init**.py (planned artifact)
   - backend/tests/e2e/test_acceptance_workflows.py (planned artifact)
-  - backend/tests/security/__init__.py (planned artifact)
+  - backend/tests/security/**init**.py (planned artifact)
   - backend/tests/security/test_permission_gate_property.py (planned artifact)
   - backend/tests/security/test_cross_tenant_isolation.py (planned artifact)
-  - backend/tests/benchmarks/__init__.py (planned artifact)
+  - backend/tests/benchmarks/**init**.py (planned artifact)
   - backend/tests/benchmarks/test_voice_latency.py (planned artifact)
-  - backend/tests/evals/__init__.py (planned artifact)
+  - backend/tests/evals/**init**.py (planned artifact)
   - backend/tests/evals/test_agent_evaluation.py (planned artifact)
   - backend/tests/evals/golden_dataset.json (planned artifact)
-  - backend/tests/chaos/__init__.py (planned artifact)
+  - backend/tests/chaos/**init**.py (planned artifact)
   - backend/tests/chaos/test_system_recovery.py (planned artifact)
   - docs/operations/ACCEPTANCE_WORKFLOW_REPORT.md (planned artifact)
   - docs/security/GATE_SECURITY_VERIFICATION.md (planned artifact)

@@ -16,9 +16,14 @@ import asyncio
 import os
 import re
 import secrets
+import sys
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import pytest
 from alembic import command
@@ -148,3 +153,28 @@ async def app_engine(migrated_database: TestDatabase) -> AsyncIterator[AsyncEngi
         yield engine
     finally:
         await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def tenants(migrated_database: TestDatabase) -> tuple[Any, Any]:
+    """Two seeded workspaces shared by the whole session."""
+    from tests.support.postgres import seed_tenant
+
+    async def seed() -> tuple[Any, Any]:
+        engine = create_async_engine(migrated_database.admin_url, poolclass=NullPool)
+        try:
+            async with engine.begin() as connection:
+                return await seed_tenant(connection, "a"), await seed_tenant(connection, "b")
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(seed())
+
+
+@pytest.fixture
+async def fresh_tenants(admin_engine: AsyncEngine) -> tuple[Any, Any]:
+    """Two new workspaces for one test that may commit rows."""
+    from tests.support.postgres import seed_tenant
+
+    async with admin_engine.begin() as connection:
+        return await seed_tenant(connection, "a"), await seed_tenant(connection, "b")

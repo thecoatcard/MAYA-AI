@@ -1250,6 +1250,37 @@
   background: var(--maya-surface);
 }
 
+.maya-auth-embedded {
+  width: 100%;
+}
+
+.maya-auth-embedded .maya-signin,
+.maya-auth-embedded .maya-account {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.maya-auth-embedded .maya-signedout__icon {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.maya-auth-embedded .maya-signedout__title,
+.maya-auth-embedded .maya-signedout__body {
+  text-align: center;
+}
+
+.maya-auth-embedded .maya-signedout__link {
+  display: block;
+  text-align: center;
+  margin-top: var(--maya-space-5);
+}
+
 .maya-account__intro,
 .maya-account__notice {
   color: var(--maya-text-muted);
@@ -1285,6 +1316,133 @@
   flex: 1;
   grid-template-columns: var(--maya-sidebar-width) minmax(0, 1fr);
   min-height: 0;
+}
+
+.maya-workspace--no-sidebar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.maya-workspace--drawer {
+  display: block;
+  position: relative;
+}
+
+.maya-workspace--drawer .maya-sidebar {
+  position: fixed;
+  z-index: var(--maya-z-float);
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(var(--maya-sidebar-mobile-width), var(--maya-sidebar-width));
+  border-right: 1px solid var(--maya-glass-border);
+  background: var(--maya-glass-surface);
+  box-shadow: var(--maya-shadow-3);
+  backdrop-filter: blur(var(--maya-glass-blur));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+  transition:
+    transform var(--maya-duration-slow) var(--maya-ease-out),
+    opacity var(--maya-duration-slow) var(--maya-ease-out);
+}
+
+.maya-workspace--drawer .maya-sidebar.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.maya-workspace--drawer .maya-sidebar__close,
+.maya-workspace--drawer .maya-sidebar__trigger {
+  display: inline-flex;
+  min-width: var(--maya-touch);
+  min-height: var(--maya-touch);
+  align-items: center;
+  justify-content: center;
+}
+
+.maya-workspace--drawer .maya-sidebar__scrim {
+  position: fixed;
+  z-index: calc(var(--maya-z-float) - 1);
+  inset: 0;
+  display: block;
+  border: 0;
+  background: var(--maya-scrim);
+  backdrop-filter: blur(var(--maya-scrim-blur));
+}
+
+.maya-chat--embedded {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.maya-chat--embedded .maya-chat__main {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.maya-chat--embedded .maya-workspace {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.maya-chat--embedded .maya-workspace--drawer {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Constrain drawer to embedded workspace so it never overlaps or escapes into AppShell */
+.maya-chat--embedded .maya-sidebar,
+.maya-chat--embedded .maya-workspace--drawer .maya-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  width: min(var(--maya-sidebar-width), 280px);
+  max-width: 85%;
+  height: 100%;
+  border-right: 1px solid var(--maya-glass-border);
+  background: var(--maya-surface);
+  box-shadow: var(--maya-shadow-3);
+  backdrop-filter: blur(var(--maya-glass-blur));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+  transition:
+    transform var(--maya-dur-slow) var(--maya-ease-emphasized),
+    opacity var(--maya-dur-fast) var(--maya-ease-standard);
+}
+
+.maya-chat--embedded .maya-sidebar.is-open,
+.maya-chat--embedded .maya-workspace--drawer .maya-sidebar.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.maya-chat--embedded .maya-sidebar__scrim,
+.maya-chat--embedded .maya-workspace--drawer .maya-sidebar__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: var(--maya-scrim);
+  backdrop-filter: blur(var(--maya-scrim-blur));
 }
 
 .maya-sidebar {
@@ -1753,6 +1911,23 @@
     border: 0;
     background: var(--maya-state-layer);
     opacity: var(--maya-state-scrim-opacity);
+  }
+
+  .maya-chat--embedded .maya-sidebar,
+  .maya-chat--embedded .maya-workspace--drawer .maya-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: 100%;
+    z-index: 30;
+  }
+
+  .maya-chat--embedded .maya-sidebar__scrim,
+  .maya-chat--embedded .maya-workspace--drawer .maya-sidebar__scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
   }
 
   .maya-conversation__topbar {

@@ -30,6 +30,7 @@ uv run --directory backend python -m app.tools.gemini_smoke --alias orchestrator
 ```
 
 Safety gates:
+
 - Free-tier verification by default (`--verify-free-tier`), stopping cleanly on 429 quota exhaustion.
 - Any paid operation requires explicit owner confirmation: `--confirm-paid-calls-up-to-inr-100` (hard spend cap of INR 100).
 - The tool never prints or logs the API key.

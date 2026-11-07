@@ -179,7 +179,13 @@ function errorText(error: unknown): string {
   return "The request could not be completed. Try again.";
 }
 
-export function AccountForm({ mode }: { mode: AccountMode }) {
+export function AccountForm({
+  mode,
+  embedded = false,
+}: {
+  mode: AccountMode;
+  embedded?: boolean;
+}) {
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [fields, setFields] = useState<Partial<Record<FieldName, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -302,6 +308,116 @@ export function AccountForm({ mode }: { mode: AccountMode }) {
     }
   };
 
+  const content = (
+    <section className="maya-account" aria-labelledby="maya-account-title">
+      {embedded ? (
+        <h1 id="maya-account-title" className="maya-signedout__title">
+          {TITLES[mode]}
+        </h1>
+      ) : (
+        <h2 id="maya-account-title" className="maya-signedout__title">
+          {TITLES[mode]}
+        </h2>
+      )}
+      {mode === "verify" ? (
+        <p className="maya-account__intro">
+          Enter the 6-digit code from your email and the password chosen during
+          registration.
+        </p>
+      ) : null}
+      <form className="maya-signin__form" onSubmit={handleSubmit}>
+        {FIELD_SETS[mode].map((field) => (
+          <label className="maya-signin__field" key={field.name}>
+            <span>{field.label}</span>
+            <input
+              autoComplete={field.autoComplete}
+              inputMode={field.inputMode}
+              maxLength={field.maxLength}
+              name={field.name}
+              onChange={(event) => update(field.name, event.target.value)}
+              required={field.required}
+              type={field.type ?? "text"}
+              value={value(field.name)}
+              disabled={busy}
+            />
+          </label>
+        ))}
+        {error === null ? null : (
+          <p className="maya-signin__error" role="alert">
+            {error}
+          </p>
+        )}
+        {notice === null ? null : (
+          <p className="maya-account__notice" role="status">
+            {notice}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+          disabled={busy}
+        >
+          {busy
+            ? "Submitting..."
+            : mode === "register"
+              ? "Create account"
+              : mode === "verify"
+                ? "Verify email"
+                : mode === "forgot"
+                  ? "Send instructions"
+                  : "Update password"}
+        </button>
+      </form>
+      {mode === "verify" ? (
+        <div className="maya-account__resend">
+          <button
+            type="button"
+            className="maya-btn maya-btn--quiet"
+            onClick={() => void handleResend()}
+            disabled={busy || cooldown > 0 || value("email").trim() === ""}
+          >
+            {cooldown > 0
+              ? `Resend code in ${cooldown} seconds`
+              : "Resend code"}
+          </button>
+        </div>
+      ) : null}
+      <nav className="maya-account__links" aria-label="Account options">
+        {mode === "register" ? (
+          <>
+            <Link href={`/verify?email=${encodeURIComponent(value("email"))}`}>
+              Enter a verification code
+            </Link>
+            <Link href="/login">Sign in</Link>
+          </>
+        ) : mode === "verify" ? (
+          <Link href="/login">Sign in</Link>
+        ) : mode === "forgot" ? (
+          <>
+            <Link href="/reset-password">Enter a reset code</Link>
+            <Link href="/login">Back to sign in</Link>
+          </>
+        ) : (
+          <Link href="/login">Back to sign in</Link>
+        )}
+      </nav>
+      <Link href="/" className="maya-signedout__link">
+        Back to overview
+      </Link>
+    </section>
+  );
+
+  if (embedded) {
+    return (
+      <div
+        className="maya-chat maya-auth-embedded w-full"
+        data-maya-theme={theme === "system" ? undefined : theme}
+      >
+        {content}
+      </div>
+    );
+  }
+
   return (
     <div className="maya-chat">
       <header className="maya-chat__header">
@@ -316,100 +432,7 @@ export function AccountForm({ mode }: { mode: AccountMode }) {
           </div>
         </div>
       </header>
-      <main className="maya-chat__main">
-        <section className="maya-account" aria-labelledby="maya-account-title">
-          <h2 id="maya-account-title" className="maya-signedout__title">
-            {TITLES[mode]}
-          </h2>
-          {mode === "verify" ? (
-            <p className="maya-account__intro">
-              Enter the 6-digit code from your email and the password chosen
-              during registration.
-            </p>
-          ) : null}
-          <form className="maya-signin__form" onSubmit={handleSubmit}>
-            {FIELD_SETS[mode].map((field) => (
-              <label className="maya-signin__field" key={field.name}>
-                <span>{field.label}</span>
-                <input
-                  autoComplete={field.autoComplete}
-                  inputMode={field.inputMode}
-                  maxLength={field.maxLength}
-                  name={field.name}
-                  onChange={(event) => update(field.name, event.target.value)}
-                  required={field.required}
-                  type={field.type ?? "text"}
-                  value={value(field.name)}
-                  disabled={busy}
-                />
-              </label>
-            ))}
-            {error === null ? null : (
-              <p className="maya-signin__error" role="alert">
-                {error}
-              </p>
-            )}
-            {notice === null ? null : (
-              <p className="maya-account__notice" role="status">
-                {notice}
-              </p>
-            )}
-            <button
-              type="submit"
-              className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
-              disabled={busy}
-            >
-              {busy
-                ? "Submitting..."
-                : mode === "register"
-                  ? "Create account"
-                  : mode === "verify"
-                    ? "Verify email"
-                    : mode === "forgot"
-                      ? "Send instructions"
-                      : "Update password"}
-            </button>
-          </form>
-          {mode === "verify" ? (
-            <div className="maya-account__resend">
-              <button
-                type="button"
-                className="maya-btn maya-btn--quiet"
-                onClick={() => void handleResend()}
-                disabled={busy || cooldown > 0 || value("email").trim() === ""}
-              >
-                {cooldown > 0
-                  ? `Resend code in ${cooldown} seconds`
-                  : "Resend code"}
-              </button>
-            </div>
-          ) : null}
-          <nav className="maya-account__links" aria-label="Account options">
-            {mode === "register" ? (
-              <>
-                <Link
-                  href={`/verify?email=${encodeURIComponent(value("email"))}`}
-                >
-                  Enter a verification code
-                </Link>
-                <Link href="/login">Sign in</Link>
-              </>
-            ) : mode === "verify" ? (
-              <Link href="/login">Sign in</Link>
-            ) : mode === "forgot" ? (
-              <>
-                <Link href="/reset-password">Enter a reset code</Link>
-                <Link href="/login">Back to sign in</Link>
-              </>
-            ) : (
-              <Link href="/login">Back to sign in</Link>
-            )}
-          </nav>
-          <Link href="/" className="maya-signedout__link">
-            Back to overview
-          </Link>
-        </section>
-      </main>
+      <main className="maya-chat__main">{content}</main>
     </div>
   );
 }

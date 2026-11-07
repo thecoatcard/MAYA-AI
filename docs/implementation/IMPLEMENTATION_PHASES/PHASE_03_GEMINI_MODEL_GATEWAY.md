@@ -139,7 +139,7 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/app/gateway/__init__.py (planned artifact)
+  - backend/app/gateway/**init**.py (planned artifact)
   - backend/app/gateway/registry.py (planned artifact)
   - backend/app/gateway/model_gateway.py (planned artifact)
   - backend/app/gateway/cost_tracker.py (planned artifact)

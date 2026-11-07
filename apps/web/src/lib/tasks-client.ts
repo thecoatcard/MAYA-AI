@@ -10,6 +10,7 @@ export interface TaskSubmissionRequest {
   readonly title?: string;
   readonly idempotency_key?: string;
   readonly budget_usd?: number;
+  readonly session_id?: string;
 }
 
 export interface TaskSubmissionResponse {
@@ -118,9 +119,16 @@ async function authenticatedFetch(
   if (!response.ok) {
     let errorCode = "unknown_error";
     try {
-      const body = (await response.json()) as { error?: string };
-      if (body?.error) {
+      const body = (await response.json()) as {
+        error?: string;
+        detail?: string | { msg?: string }[];
+      };
+      if (typeof body?.error === "string") {
         errorCode = body.error;
+      } else if (typeof body?.detail === "string") {
+        errorCode = body.detail;
+      } else if (Array.isArray(body?.detail) && body.detail[0]?.msg) {
+        errorCode = body.detail[0].msg;
       }
     } catch {
       // not JSON
@@ -149,6 +157,9 @@ export async function submitTask(
 
   return (await response.json()) as TaskSubmissionResponse;
 }
+
+/** Alias for submitTask for backend API compatibility */
+export const createTask = submitTask;
 
 export async function listTasks(
   taskStatus?: string,

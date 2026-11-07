@@ -152,12 +152,12 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/app/automation/__init__.py (planned artifact)
+  - backend/app/automation/**init**.py (planned artifact)
   - backend/app/automation/xlsx_engine.py (planned artifact)
   - backend/app/automation/docx_engine.py (planned artifact)
   - backend/app/automation/pptx_engine.py (planned artifact)
   - backend/app/automation/pdf_engine.py (planned artifact)
-  - backend/app/automation/verifiers/__init__.py (planned artifact)
+  - backend/app/automation/verifiers/**init**.py (planned artifact)
   - backend/app/automation/verifiers/xlsx_verifier.py (planned artifact)
   - backend/app/automation/verifiers/docx_verifier.py (planned artifact)
   - backend/app/automation/verifiers/pptx_verifier.py (planned artifact)

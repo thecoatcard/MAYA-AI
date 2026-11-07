@@ -26,7 +26,7 @@ to infer whether an account exists.
 Response `200` for any valid identifier:
 
 ```json
-{"status": "accepted"}
+{ "status": "accepted" }
 ```
 
 No account lookup is performed. Invalid identifier syntax still returns `422 validation_error`.

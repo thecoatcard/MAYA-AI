@@ -5,6 +5,7 @@ from asyncpg import PostgresError
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import Settings
 from app.core.redis import create_redis_client
@@ -13,6 +14,8 @@ from app.db.tenant import verify_runtime_role
 from app.gateway.cost_tracker import BudgetTracker
 from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import ModelRegistry, build_default_registry
+from app.tasks.events import TaskEventPublisher
+from app.tasks.queue import SubtaskQueue
 
 logger = logging.getLogger("maya")
 
@@ -34,6 +37,9 @@ class Resources:
             settings=settings,
             budget_tracker=self.budget_tracker,
         )
+        self.subtask_queue = SubtaskQueue()
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.event_publisher = TaskEventPublisher(self.redis)
 
     async def check(self) -> None:
         try:

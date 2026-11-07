@@ -3,25 +3,25 @@
 // YAML needs the pinned "yaml" dev dependency; without it YAML is reported as SKIPPED, not passed.
 //
 // Usage: node scripts/validation/check-config-syntax.mjs [--root <dir>]
-import fs from 'node:fs';
-import path from 'node:path';
-import { ROOT, EXIT, readText, isMain, argValue } from '../lib/fsutil.mjs';
-import { matchesAny } from '../lib/glob.mjs';
-import * as G from '../lib/git.mjs';
+import fs from "node:fs";
+import path from "node:path";
+import { ROOT, EXIT, readText, isMain, argValue } from "../lib/fsutil.mjs";
+import { matchesAny } from "../lib/glob.mjs";
+import * as G from "../lib/git.mjs";
 
 const FRONTMATTER_GLOBS = [
-  '.claude/**/*.md',
-  '.agents/**/*.md',
-  '.cursor/**/*.mdc',
-  '.github/prompts/*.md',
-  '.github/instructions/*.md',
-  'governance/workflows/*.md',
-  'governance/roles/*.md',
+  ".claude/**/*.md",
+  ".agents/**/*.md",
+  ".cursor/**/*.mdc",
+  ".github/prompts/*.md",
+  ".github/instructions/*.md",
+  "governance/workflows/*.md",
+  "governance/roles/*.md",
 ];
 
 async function loadYaml() {
   try {
-    const mod = await import('yaml');
+    const mod = await import("yaml");
     return mod.default ?? mod;
   } catch {
     return null;
@@ -29,9 +29,9 @@ async function loadYaml() {
 }
 
 function frontmatterBlock(text) {
-  const t = text.replace(/\r\n/g, '\n');
-  if (!t.startsWith('---\n')) return null;
-  const end = t.indexOf('\n---', 4);
+  const t = text.replace(/\r\n/g, "\n");
+  if (!t.startsWith("---\n")) return null;
+  const end = t.indexOf("\n---", 4);
   return end === -1 ? null : t.slice(4, end);
 }
 
@@ -43,7 +43,7 @@ function isRegularFileWithoutSymlinks(root, rel) {
     return false;
   }
 
-  const parts = rel.split('/');
+  const parts = rel.split("/");
   for (let i = 0; i < parts.length; i += 1) {
     current = path.join(current, parts[i]);
     let stat;
@@ -76,14 +76,22 @@ export async function checkConfigSyntax(root = ROOT) {
     }
   };
 
-  const tracked = G.git(['ls-files', '--cached', '-z'], { cwd: root, allowFail: true });
+  const tracked = G.git(["ls-files", "--cached", "-z"], {
+    cwd: root,
+    allowFail: true,
+  });
   if (tracked === null) {
-    return { errors: ['unable to enumerate tracked files'], jsonCount, yamlCount, yamlSkipped };
+    return {
+      errors: ["unable to enumerate tracked files"],
+      jsonCount,
+      yamlCount,
+      yamlSkipped,
+    };
   }
 
-  for (const file of tracked.split('\0').filter(Boolean)) {
+  for (const file of tracked.split("\0").filter(Boolean)) {
     if (!isRegularFileWithoutSymlinks(root, file)) continue;
-    if (file.endsWith('.json')) {
+    if (file.endsWith(".json")) {
       jsonCount += 1;
       try {
         JSON.parse(readText(root, file));
@@ -113,7 +121,7 @@ export async function checkConfigSyntax(root = ROOT) {
 }
 
 async function main() {
-  const root = argValue(process.argv.slice(2), '--root') ?? ROOT;
+  const root = argValue(process.argv.slice(2), "--root") ?? ROOT;
   const r = await checkConfigSyntax(root);
   if (r.errors.length > 0) {
     console.error(`check-config-syntax: ${r.errors.length} problem(s):`);
@@ -127,7 +135,9 @@ async function main() {
     );
     process.exit(EXIT.SKIPPED);
   }
-  console.log(`check-config-syntax: ${r.jsonCount} JSON and ${r.yamlCount} YAML items valid.`);
+  console.log(
+    `check-config-syntax: ${r.jsonCount} JSON and ${r.yamlCount} YAML items valid.`,
+  );
   process.exit(EXIT.PASS);
 }
 

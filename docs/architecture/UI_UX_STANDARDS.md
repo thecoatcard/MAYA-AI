@@ -18,18 +18,18 @@ Anti-goals: playful or cartoonish, neon "hacker" styling, bland corporate dashbo
 
 ## 2. The "AI slop" ban list
 
-| Looks like slop | Do this instead |
-| :--- | :--- |
-| Untouched default palette, purple-to-blue gradient hero, glowing blobs | A small designed palette from section 4; gradients only where they carry meaning (for example the voice orb glow) |
-| Glass blur and drop shadows on every card | Elevation from a short scale; most surfaces are flat with a hairline border |
-| Three identical feature cards with an icon, a title and a sentence | Layout chosen for the content: a timeline, a split view, a table, a single strong statement |
-| Everything centred, one column, uniform spacing | A real grid, deliberate asymmetry, spacing rhythm from the scale, clear hierarchy |
-| System font stack only, or three font families | One carefully chosen family (two at most), a defined type scale, tabular numerals for data |
-| Emoji or sparkle icons as decoration, "magic" and "supercharge" copy | One consistent icon set (Lucide is already installed), plain and specific copy |
-| Fake testimonials, fake metrics, filler copy standing in for content, invented screenshots | Real content, or a visibly labelled "planned" or sample state. Never simulate behavior that does not exist |
-| Animation on everything, bounce on every hover, endless looping | Motion only where it explains something (section 6) |
-| Spinners as the only loading state, blank screens, "Oops!" errors | Designed skeletons, empty states with a next step, errors that say what happened and what to do |
-| Components that only look right in the happy state | Every component specified for default, hover, focus, active, disabled, loading, error and empty |
+| Looks like slop                                                                            | Do this instead                                                                                                   |
+| :----------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| Untouched default palette, purple-to-blue gradient hero, glowing blobs                     | A small designed palette from section 4; gradients only where they carry meaning (for example the voice orb glow) |
+| Glass blur and drop shadows on every card                                                  | Elevation from a short scale; most surfaces are flat with a hairline border                                       |
+| Three identical feature cards with an icon, a title and a sentence                         | Layout chosen for the content: a timeline, a split view, a table, a single strong statement                       |
+| Everything centred, one column, uniform spacing                                            | A real grid, deliberate asymmetry, spacing rhythm from the scale, clear hierarchy                                 |
+| System font stack only, or three font families                                             | One carefully chosen family (two at most), a defined type scale, tabular numerals for data                        |
+| Emoji or sparkle icons as decoration, "magic" and "supercharge" copy                       | One consistent icon set (Lucide is already installed), plain and specific copy                                    |
+| Fake testimonials, fake metrics, filler copy standing in for content, invented screenshots | Real content, or a visibly labelled "planned" or sample state. Never simulate behavior that does not exist        |
+| Animation on everything, bounce on every hover, endless looping                            | Motion only where it explains something (section 6)                                                               |
+| Spinners as the only loading state, blank screens, "Oops!" errors                          | Designed skeletons, empty states with a next step, errors that say what happened and what to do                   |
+| Components that only look right in the happy state                                         | Every component specified for default, hover, focus, active, disabled, loading, error and empty                   |
 
 ## 3. Design system first
 
@@ -60,16 +60,16 @@ Motion is a language, not a layer of sparkle. It must do at least one of these j
 
 **Proposed motion tokens** (the design brief may tune them):
 
-| Token | Value | Use |
-| :--- | :--- | :--- |
-| `instant` | 90 ms | press and hover feedback |
-| `fast` | 150 ms | small state changes, tooltips, toggles |
-| `base` | 220 ms | panels, popovers, list changes |
-| `slow` | 360 ms | drawers, view changes |
-| `deliberate` | 560 ms | first-load sequence and large layout shifts only |
-| `ease-out` | `cubic-bezier(0.16, 1, 0.3, 1)` | things entering |
-| `ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | things moving or resizing |
-| `ease-in` | `cubic-bezier(0.4, 0, 1, 1)` | things leaving (shorter than entering) |
+| Token         | Value                            | Use                                              |
+| :------------ | :------------------------------- | :----------------------------------------------- |
+| `instant`     | 90 ms                            | press and hover feedback                         |
+| `fast`        | 150 ms                           | small state changes, tooltips, toggles           |
+| `base`        | 220 ms                           | panels, popovers, list changes                   |
+| `slow`        | 360 ms                           | drawers, view changes                            |
+| `deliberate`  | 560 ms                           | first-load sequence and large layout shifts only |
+| `ease-out`    | `cubic-bezier(0.16, 1, 0.3, 1)`  | things entering                                  |
+| `ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | things moving or resizing                        |
+| `ease-in`     | `cubic-bezier(0.4, 0, 1, 1)`     | things leaving (shorter than entering)           |
 
 **Rules**
 
@@ -82,13 +82,13 @@ Motion is a language, not a layer of sparkle. It must do at least one of these j
 
 **The voice orb** (proposal; the Phase 14 states are the contract):
 
-| State | Behaviour |
-| :--- | :--- |
-| idle | slow breathing (a few seconds per cycle), very small amplitude |
-| listening | reacts to the microphone level with smoothing (fast attack, slower release) |
-| thinking | steady rotating glow or noise, independent of volume, clearly different from listening |
-| speaking | follows the output audio envelope |
-| interrupted | contracts within about 120 ms, then settles into listening |
+| State       | Behaviour                                                                              |
+| :---------- | :------------------------------------------------------------------------------------- |
+| idle        | slow breathing (a few seconds per cycle), very small amplitude                         |
+| listening   | reacts to the microphone level with smoothing (fast attack, slower release)            |
+| thinking    | steady rotating glow or noise, independent of volume, clearly different from listening |
+| speaking    | follows the output audio envelope                                                      |
+| interrupted | contracts within about 120 ms, then settles into listening                             |
 
 Each state also shows a text label for assistive technology and for reduced motion. The orb is a visual of the real audio state and never fakes activity when nothing is happening.
 

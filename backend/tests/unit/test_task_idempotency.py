@@ -75,6 +75,44 @@ async def test_idempotency_creates_new_task() -> None:
     assert task.idempotency_key == key
     assert task.title == "Custom Title"
     assert task.budget_usd == Decimal("2.50")
+    assert session.add.call_count == 2
+    assert session.add.call_args_list[1][0][0] == task
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_idempotency_creates_new_task_with_existing_session() -> None:
+    session = AsyncMock()
+    session.add = MagicMock()
+    ws_id = uuid4()
+    u_id = uuid4()
+    s_id = uuid4()
+    key = "idem-new-with-session-789"
+
+    mock_res_task = MagicMock()
+    mock_res_task.scalars.return_value.first.return_value = None
+
+    mock_res_sess = MagicMock()
+    mock_res_sess.scalars.return_value.first.return_value = s_id
+
+    session.execute = AsyncMock(side_effect=[mock_res_task, mock_res_sess])
+
+    task, is_new = await TaskIdempotencyService.get_or_create_task(
+        session=session,
+        workspace_id=ws_id,
+        user_id=u_id,
+        idempotency_key=key,
+        user_instruction="New analysis with session",
+        title="Custom Title",
+        budget_usd=Decimal("2.50"),
+        session_id=str(s_id),
+    )
+
+    assert is_new
+    assert task.workspace_id == ws_id
+    assert task.user_id == u_id
+    assert task.session_id == s_id
+    assert task.idempotency_key == key
     session.add.assert_called_once_with(task)
     session.flush.assert_awaited_once()
 

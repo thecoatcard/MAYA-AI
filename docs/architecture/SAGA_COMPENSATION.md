@@ -10,15 +10,16 @@ When an agent executes an action that produces external side effects, it registe
 
 External actions fall into two categories:
 
-| Forward Action | Reversible? | Compensating Tool | Compensation Tier | Behavior on Rollback |
-| :--- | :--- | :--- | :--- | :--- |
-| `github_create_branch` | Yes | `github_delete_branch` | `CONTROLLED_WRITE` | Automatically deleted via compensating tool |
-| `notion_create_page` | Yes | `notion_archive_page` | `CONTROLLED_WRITE` | Page is archived via compensating tool |
-| `slack_create_channel` | Yes | `slack_archive_channel` | `CONTROLLED_WRITE` | Channel is archived |
-| `gmail_send` / `email_send` | **No** | None (`NULL`) | `APPROVAL_REQUIRED` | Marked `not_applicable`, notification generated for human review |
-| `stripe_charge` | **No** | None (`NULL`) | `RESTRICTED` | Marked `not_applicable`, human review required for refund |
+| Forward Action              | Reversible? | Compensating Tool       | Compensation Tier   | Behavior on Rollback                                             |
+| :-------------------------- | :---------- | :---------------------- | :------------------ | :--------------------------------------------------------------- |
+| `github_create_branch`      | Yes         | `github_delete_branch`  | `CONTROLLED_WRITE`  | Automatically deleted via compensating tool                      |
+| `notion_create_page`        | Yes         | `notion_archive_page`   | `CONTROLLED_WRITE`  | Page is archived via compensating tool                           |
+| `slack_create_channel`      | Yes         | `slack_archive_channel` | `CONTROLLED_WRITE`  | Channel is archived                                              |
+| `gmail_send` / `email_send` | **No**      | None (`NULL`)           | `APPROVAL_REQUIRED` | Marked `not_applicable`, notification generated for human review |
+| `stripe_charge`             | **No**      | None (`NULL`)           | `RESTRICTED`        | Marked `not_applicable`, human review required for refund        |
 
 ### Irreversible Handling
+
 Irreversible actions are explicitly flagged (`IRREVERSIBLE_TOOLS`). When the rollback sequence encounters an irreversible action, it does **not** fail the saga; instead, it marks the compensation record as `not_applicable` and emits a human-review notification.
 
 ## 3. Data Model

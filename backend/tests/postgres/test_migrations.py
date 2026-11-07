@@ -28,7 +28,8 @@ PLAN_TABLES = {
 AUTH_TABLES = {"auth_otp_challenges", "auth_sessions"}
 CHECKPOINT_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes"}
 DURABLE_CHAT_TABLES = {"chat_idempotency"}
-ALL_TABLES = PLAN_TABLES | AUTH_TABLES | CHECKPOINT_TABLES | DURABLE_CHAT_TABLES
+OUTBOX_TABLES = {"task_outbox_events"}
+ALL_TABLES = PLAN_TABLES | AUTH_TABLES | CHECKPOINT_TABLES | DURABLE_CHAT_TABLES | OUTBOX_TABLES
 
 SNAPSHOT_QUERIES = {
     "tables": "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1",
@@ -359,7 +360,19 @@ async def test_each_revision_can_be_applied_and_reverted_one_step_at_a_time(
     engine = create_async_engine(fresh_database.admin_url, poolclass=NullPool)
     try:
         previous = await snapshot(engine)
-        for revision in ("0001", "0002", "0003", "0004", "0005", "0006", "0007"):
+        for revision in (
+            "0001",
+            "0002",
+            "0003",
+            "0004",
+            "0005",
+            "0006",
+            "0007",
+            "0008",
+            "0009",
+            "0010",
+            "0011",
+        ):
             await run_in_thread(command.upgrade, config, revision)
             current = await snapshot(engine)
             assert current != previous

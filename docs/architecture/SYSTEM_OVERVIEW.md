@@ -39,15 +39,15 @@ A voice-first, multi-agent "digital employee": it accepts an instruction by voic
 
 ## Planned components
 
-| Component | Responsibility |
-| :--- | :--- |
-| Web client | Chat and voice canvas, task center, approval center |
-| Voice service | Real-time audio to and from the Gemini Live API; hands work to the task engine |
-| API and task engine | Planning, orchestration, checkpointing, idempotency, permission gate, approvals |
-| Agent workers | Research, coding, document, email and read-only project-management agents |
-| MCP gateway | Connects agents to tool servers; enforces permissions, sanitises output, supervises servers |
-| Sandbox runner | Fixed-function, isolated code execution (no Docker socket exposed to agents) |
-| Data stores | PostgreSQL with pgvector and row-level security, Redis, S3-compatible artifact storage |
+| Component           | Responsibility                                                                              |
+| :------------------ | :------------------------------------------------------------------------------------------ |
+| Web client          | Chat and voice canvas, task center, approval center                                         |
+| Voice service       | Real-time audio to and from the Gemini Live API; hands work to the task engine              |
+| API and task engine | Planning, orchestration, checkpointing, idempotency, permission gate, approvals             |
+| Agent workers       | Research, coding, document, email and read-only project-management agents                   |
+| MCP gateway         | Connects agents to tool servers; enforces permissions, sanitises output, supervises servers |
+| Sandbox runner      | Fixed-function, isolated code execution (no Docker socket exposed to agents)                |
+| Data stores         | PostgreSQL with pgvector and row-level security, Redis, S3-compatible artifact storage      |
 
 ## Planned stack
 

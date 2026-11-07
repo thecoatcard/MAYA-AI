@@ -3,11 +3,11 @@
 /** Remove git comment lines ("# ...") and trailing whitespace. */
 export function cleanMessage(message) {
   return message
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .filter((l) => !l.startsWith('#'))
-    .join('\n')
-    .replace(/\s+$/, '');
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((l) => !l.startsWith("#"))
+    .join("\n")
+    .replace(/\s+$/, "");
 }
 
 export function shouldSkip(header, cfg) {
@@ -21,16 +21,19 @@ export function shouldSkip(header, cfg) {
 export function validateHeader(header, cfg) {
   const types = cfg.commits.types;
   const max = cfg.commits.maxHeaderLength;
-  const re = new RegExp(`^(${types.join('|')})(\\([a-z0-9._/-]+\\))?(!)?: (\\S.*)$`);
+  const re = new RegExp(
+    `^(${types.join("|")})(\\([a-z0-9._/-]+\\))?(!)?: (\\S.*)$`,
+  );
   const m = re.exec(header);
   const errors = [];
   if (!m) {
     errors.push(
-      `Header must look like "<type>(<scope>): <summary>" with type one of: ${types.join(', ')}. Got: "${header}"`,
+      `Header must look like "<type>(<scope>): <summary>" with type one of: ${types.join(", ")}. Got: "${header}"`,
     );
     return { ok: false, errors };
   }
-  if (header.length > max) errors.push(`Header is ${header.length} characters; the limit is ${max}.`);
+  if (header.length > max)
+    errors.push(`Header is ${header.length} characters; the limit is ${max}.`);
   return { ok: errors.length === 0, errors, type: m[1] };
 }
 
@@ -39,7 +42,9 @@ export function parseTrailers(message) {
   const paragraphs = cleanMessage(message).split(/\n\s*\n/);
   const trailers = new Map();
   if (paragraphs.length < 2) return trailers; // first paragraph is the header
-  const last = paragraphs[paragraphs.length - 1].split('\n').filter((l) => l.trim() !== '');
+  const last = paragraphs[paragraphs.length - 1]
+    .split("\n")
+    .filter((l) => l.trim() !== "");
   const line = /^([A-Za-z][A-Za-z0-9-]*):\s+(\S.*)$/;
   if (last.length === 0 || !last.every((l) => line.test(l))) return trailers;
   for (const l of last) {
@@ -60,7 +65,8 @@ export function parseWaiver(value) {
   const m = /^not-required:\s*(.+)$/i.exec(value.trim());
   if (!m) return { valid: false };
   const reason = m[1].trim();
-  if (reason.length < 8 || GENERIC_REASONS.test(reason)) return { valid: false, reason };
+  if (reason.length < 8 || GENERIC_REASONS.test(reason))
+    return { valid: false, reason };
   return { valid: true, reason };
 }
 
@@ -83,7 +89,7 @@ export function hasApproval(message, trailerName) {
 }
 
 export function commitType(message, cfg) {
-  const header = cleanMessage(message).split('\n')[0] ?? '';
+  const header = cleanMessage(message).split("\n")[0] ?? "";
   const v = validateHeader(header, cfg);
   return v.type ?? null;
 }

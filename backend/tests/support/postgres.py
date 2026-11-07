@@ -122,7 +122,7 @@ async def seed_tenant(connection: AsyncConnection, label: str) -> SeededTenant:
     ids["tasks"] = {task}
     await run(
         "INSERT INTO subtasks (id, workspace_id, task_id, assigned_agent, description) "
-        "VALUES (:id, :ws, :task, 'agent', 'seed')",
+        "VALUES (:id, :ws, :task, 'research', 'seed')",
         id=subtask,
         ws=workspace,
         task=task,
@@ -238,7 +238,7 @@ def insert_statement(table: str, tenant: SeededTenant) -> tuple[str, dict[str, A
         ),
         "subtasks": (
             "INSERT INTO subtasks (workspace_id, task_id, assigned_agent, description) "
-            "VALUES (:ws, :task, 'a', 'd')"
+            "VALUES (:ws, :task, 'research', 'd')"
         ),
         "approval_requests": (
             "INSERT INTO approval_requests (workspace_id, task_id, subtask_id, user_id, tool_name, "

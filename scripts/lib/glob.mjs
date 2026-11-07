@@ -3,40 +3,40 @@
 // Like .gitignore, a pattern with no "/" matches the basename at any depth.
 
 const cache = new Map();
-const escapeRe = (s) => s.replace(/[.+^$()|[\]\\]/g, '\\$&');
+const escapeRe = (s) => s.replace(/[.+^$()|[\]\\]/g, "\\$&");
 
 export function globToRegExp(glob) {
-  let re = '';
+  let re = "";
   let i = 0;
   while (i < glob.length) {
     const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        if (glob[i + 2] === '/') {
-          re += '(?:.*/)?';
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        if (glob[i + 2] === "/") {
+          re += "(?:.*/)?";
           i += 3;
         } else {
-          re += '.*';
+          re += ".*";
           i += 2;
         }
       } else {
-        re += '[^/]*';
+        re += "[^/]*";
         i += 1;
       }
-    } else if (c === '?') {
-      re += '[^/]';
+    } else if (c === "?") {
+      re += "[^/]";
       i += 1;
-    } else if (c === '{') {
-      const end = glob.indexOf('}', i);
+    } else if (c === "{") {
+      const end = glob.indexOf("}", i);
       if (end === -1) {
-        re += '\\{';
+        re += "\\{";
         i += 1;
       } else {
         const alts = glob
           .slice(i + 1, end)
-          .split(',')
+          .split(",")
           .map(escapeRe);
-        re += `(?:${alts.join('|')})`;
+        re += `(?:${alts.join("|")})`;
         i = end + 1;
       }
     } else {
@@ -54,8 +54,11 @@ export function matchGlob(filePath, glob) {
     re = globToRegExp(glob);
     cache.set(glob, re);
   }
-  const target = glob.includes('/') ? filePath : filePath.slice(filePath.lastIndexOf('/') + 1);
+  const target = glob.includes("/")
+    ? filePath
+    : filePath.slice(filePath.lastIndexOf("/") + 1);
   return re.test(target);
 }
 
-export const matchesAny = (filePath, globs = []) => globs.some((g) => matchGlob(filePath, g));
+export const matchesAny = (filePath, globs = []) =>
+  globs.some((g) => matchGlob(filePath, g));

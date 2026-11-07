@@ -15,18 +15,20 @@ Authentication, tenant isolation and the account tables are documented in
 
 ### Tables (18, all with forced row-level security)
 
-| Table | Purpose | Notes |
-| :--- | :--- | :--- |
-| `workspaces` | One tenant | Policy on `id`; a tenant cannot list other workspaces' names or slugs |
-| `users` | Accounts | Plan table plus `username`, `email_verified_at`, `password_changed_at`; `hashed_password` is mandatory |
-| `sessions`, `messages` | Chat conversations | Plan tables, unchanged. The Phase 04 chat repository (`backend/app/db/repositories/chat.py`) uses them: every statement names the workspace and the user (user-level ownership on top of row-level security), and keyset pagination orders by `(created_at, id)`. No index serves those queries yet; adding one needs a migration (Level 3), recommended before large histories exist |
-| `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals | Phase 05 added SQLAlchemy declarative models (`backend/app/db/models.py`) and migration `0005_phase_05_tasks_subtasks.py` adding `user_instruction`, `plan_status`, `active_plan`, `shared_context`, `execution_trace`, and `updated_at` to `tasks`, and `updated_at` plus role check constraints to `subtasks` |
-| `audit_log` | Audit trail | Plan table; the runtime role may insert and read only. Hash chaining is not computed yet (Phase 07) |
-| `mcp_servers`, `file_artifacts`, `memory_items` | Integrations, artifacts, memory | Plan tables and indexes, unchanged (Phases 08, 10, 11) |
-| `auth_otp_challenges` | One-time codes | New. Only an HMAC of the code is stored; one live row per user and purpose |
-| `auth_sessions` | Refresh-token sessions | New. Holds the current refresh token id and a generation counter (any older generation is a replay); revocation and expiry |
-| `checkpoints`, `checkpoint_blobs`, `checkpoint_writes` | LangGraph durable state | Phase 05 checkpointer storage; forced RLS binds rows to both workspace and user. Existing rows without an owner remain NULL and inaccessible; no owner is guessed |
-| `chat_idempotency` | Durable chat claims and results | Revision `0007`; scoped by workspace and user, stores keyed digests only (no raw key or request content), forced RLS binds both owner settings; claims are permanent and finalized with an owned compare-and-set |
+| Table                                                     | Purpose                         | Notes                                                                                                                                                                                                                                                                                                                                                                                 |
+| :-------------------------------------------------------- | :------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspaces`                                              | One tenant                      | Policy on `id`; a tenant cannot list other workspaces' names or slugs                                                                                                                                                                                                                                                                                                                 |
+| `users`                                                   | Accounts                        | Plan table plus `username`, `email_verified_at`, `password_changed_at`; `hashed_password` is mandatory                                                                                                                                                                                                                                                                                |
+| `sessions`, `messages`                                    | Chat conversations              | Plan tables, unchanged. The Phase 04 chat repository (`backend/app/db/repositories/chat.py`) uses them: every statement names the workspace and the user (user-level ownership on top of row-level security), and keyset pagination orders by `(created_at, id)`. No index serves those queries yet; adding one needs a migration (Level 3), recommended before large histories exist |
+| `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals       | Phase 05 added SQLAlchemy declarative models (`backend/app/db/models.py`) and migration `0005_phase_05_tasks_subtasks.py` adding `user_instruction`, `plan_status`, `active_plan`, `shared_context`, `execution_trace`, and `updated_at` to `tasks`, and `updated_at` plus role check constraints to `subtasks`                                                                       |
+| `audit_log`                                               | Audit trail                     | Plan table; the runtime role may insert and read only. Hash chaining is not computed yet (Phase 07)                                                                                                                                                                                                                                                                                   |
+| `mcp_servers`                                             | MCP external integrations       | Phase 08 (migration `0011_phase_08_mcp_servers.py`) added `health_status`, `last_ping_at`, `consecutive_failures`, `tool_count`, `tools_manifest`, `updated_at`, and composite index `idx_mcp_servers_workspace_active`. Declarative model in `backend/app/db/models.py`                                                                                                              |
+| `file_artifacts`                                          | Generated artifacts             | Phase 09 added declarative model `FileArtifact` tracking `/artifacts/{workspace_id}/` files, SHA-256 checksums, and mime types                                                                                                                                                                                                                                                        |
+| `memory_items`                                            | Memory items                    | Plan table; Phase 11                                                                                                                                                                                                                                                                                                                                                                  |
+| `auth_otp_challenges`                                     | One-time codes                  | New. Only an HMAC of the code is stored; one live row per user and purpose                                                                                                                                                                                                                                                                                                            |
+| `auth_sessions`                                           | Refresh-token sessions          | New. Holds the current refresh token id and a generation counter (any older generation is a replay); revocation and expiry                                                                                                                                                                                                                                                            |
+| `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`    | LangGraph durable state         | Phase 05 checkpointer storage; forced RLS binds rows to both workspace and user. Existing rows without an owner remain NULL and inaccessible; no owner is guessed                                                                                                                                                                                                                     |
+| `chat_idempotency`                                        | Durable chat claims and results | Revision `0007`; scoped by workspace and user, stores keyed digests only (no raw key or request content), forced RLS binds both owner settings; claims are permanent and finalized with an owned compare-and-set                                                                                                                                                                      |
 
 The plan lists 12 tables, 11 of them tenant-scoped. This implementation adds the two `auth_*` tables and also
 protects `workspaces`, then adds the three LangGraph checkpointer tables and the durable chat-idempotency table, so all 18 have row-level security. The plan's
@@ -98,15 +100,15 @@ uv run --directory backend alembic -x env_file=..\.env.example downgrade base
 
 `MAYA_MIGRATION_DATABASE_URL` in the process environment works without `-x`. Each revision is one transaction.
 
-| Revision | Content |
-| :--- | :--- |
-| `0001` | Extensions (if missing), `workspaces`, `users` |
-| `0002` | The remaining plan tables and indexes |
-| `0003` | `auth_otp_challenges`, `auth_sessions` |
-| `0004` | Roles, row-level security, grants, the definer functions |
-| `0005` | Phase 05 task and subtask projection columns and indexes |
-| `0006` | LangGraph checkpoint tables and workspace-plus-user RLS |
-| `0007` | Durable chat idempotency claims/results, workspace-plus-user RLS and least-privilege runtime grants |
+| Revision | Content                                                                                             |
+| :------- | :-------------------------------------------------------------------------------------------------- |
+| `0001`   | Extensions (if missing), `workspaces`, `users`                                                      |
+| `0002`   | The remaining plan tables and indexes                                                               |
+| `0003`   | `auth_otp_challenges`, `auth_sessions`                                                              |
+| `0004`   | Roles, row-level security, grants, the definer functions                                            |
+| `0005`   | Phase 05 task and subtask projection columns and indexes                                            |
+| `0006`   | LangGraph checkpoint tables and workspace-plus-user RLS                                             |
+| `0007`   | Durable chat idempotency claims/results, workspace-plus-user RLS and least-privilege runtime grants |
 
 For a deployment with an older checkpoint writer, stop checkpoint writes before applying `0006`, then deploy the
 owner-bound checkpointer. Old rows remain inaccessible; the revision does not infer owners or migrate their content.

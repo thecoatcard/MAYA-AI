@@ -122,6 +122,7 @@ async def submit_task(
             user_instruction=payload.instruction,
             title=payload.title,
             budget_usd=payload.budget_usd,
+            session_id=str(payload.session_id) if payload.session_id else None,
         )
 
         if not is_new:
@@ -340,7 +341,7 @@ async def get_task(
             id=task.id,
             workspace_id=task.workspace_id,
             user_id=task.user_id,
-            session_id=task.session_id,
+            session_id=str(task.session_id),
             title=task.title,
             instruction=task.user_instruction or task.instruction or "",
             idempotency_key=task.idempotency_key,

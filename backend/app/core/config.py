@@ -1,10 +1,13 @@
+import ast
+import json
 import re
 from decimal import Decimal
-from typing import Any, Literal, Self
+from pathlib import Path
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -17,6 +20,20 @@ SENDER_ADDRESS = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Z
 def _validate_secret_key(value: SecretStr) -> SecretStr:
     if len(value.get_secret_value().encode()) < MIN_SECRET_KEY_BYTES:
         raise ValueError(f"Use at least {MIN_SECRET_KEY_BYTES} bytes of random key material")
+    return value
+
+
+def _split_list(value: Any) -> Any:
+    """Accept a JSON list or a comma-separated string for list settings."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                raise ValueError("Invalid list value") from None
+            return parsed
+        return [part.strip() for part in text.split(",") if part.strip()]
     return value
 
 
@@ -57,6 +74,28 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = True
     otp_resend_cooldown_seconds: int = Field(default=60, ge=1, le=3600)
 
+    # Deployment profile. Anything but "development" is treated as production-like: the
+    # interactive API documentation is off unless explicitly enabled.
+    environment: Literal["development", "production"] = "production"
+    api_docs_enabled: bool | None = None
+    # Hostnames the API answers to (Host header allow-list, enforced by the application).
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["localhost", "127.0.0.1"]
+    )
+    # Origins allowed to open the live voice WebSocket (compared to the Origin header).
+    voice_allowed_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    )
+    # Directory of the exported web app. When set the API serves it (see core/static_web.py).
+    web_static_dir: Path | None = None
+    # Local-owner bootstrap for the desktop app (ADR-0014). Off unless explicitly enabled.
+    local_owner_bootstrap: bool = False
+
     # Outbound e-mail for one-time codes. All optional; absent means e-mail is unavailable.
     smtp_host: str | None = Field(default=None, min_length=1, max_length=253)
     smtp_port: int = Field(default=587, ge=1, le=65535)
@@ -67,7 +106,7 @@ class Settings(BaseSettings):
 
     # Model Gateway (Phase 03)
     gemini_api_key: SecretStr | None = None
-    gemini_model_overrides: dict[str, str] = Field(default_factory=dict)
+    gemini_model_overrides: Any = Field(default_factory=dict)
     gemini_verify_models_on_startup: bool = False
     gemini_request_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     budget_enforcement_mode: Literal["log_only", "enforce"] = "log_only"
@@ -90,6 +129,36 @@ class Settings(BaseSettings):
     def validate_secret_keys(cls, value: SecretStr) -> SecretStr:
         return _validate_secret_key(value)
 
+    @field_validator("allowed_hosts", "voice_allowed_origins", mode="before")
+    @classmethod
+    def parse_lists(cls, value: Any) -> Any:
+        return _split_list(value)
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def validate_allowed_hosts(cls, value: list[str]) -> list[str]:
+        if not value or any(not host or "/" in host for host in value):
+            raise ValueError("Use a non-empty list of host names without paths")
+        return value
+
+    @field_validator("voice_allowed_origins")
+    @classmethod
+    def validate_voice_origins(cls, value: list[str]) -> list[str]:
+        for origin in value:
+            parts = urlsplit(origin)
+            if (
+                parts.scheme not in ("http", "https")
+                or not parts.hostname
+                or parts.path not in ("", "/")
+            ):
+                raise ValueError("Each voice origin must look like https://host[:port]")
+        return [origin.rstrip("/") for origin in value]
+
+    @field_validator("web_static_dir", mode="before")
+    @classmethod
+    def empty_static_dir_is_unset(cls, value: Any) -> Any:
+        return None if isinstance(value, str) and not value.strip() else value
+
     @field_validator("smtp_from_address")
     @classmethod
     def validate_sender_address(cls, value: str | None) -> str | None:
@@ -109,6 +178,35 @@ class Settings(BaseSettings):
         if isinstance(value, SecretStr):
             if not value.get_secret_value().strip():
                 return None
+        return value
+
+    @field_validator("gemini_model_overrides", mode="before")
+    @classmethod
+    def parse_model_overrides_before(cls, value: Any) -> Any:
+        if value is None or value == "" or value == "{}":
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            s = value.strip()
+            if not s or s in ("{}", "None"):
+                return {}
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            try:
+                parsed = ast.literal_eval(s)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            cleaned = s.strip("{}").strip()
+            if cleaned in ("gemini-3.5-flash-lite", "gemini-3.8-flash"):
+                return {"orchestrator": cleaned}
+            return {}
         return value
 
     @field_validator("gemini_model_overrides")
@@ -149,6 +247,19 @@ class Settings(BaseSettings):
     @property
     def email_configured(self) -> bool:
         return self.smtp_host is not None
+
+    @property
+    def docs_enabled(self) -> bool:
+        """Interactive docs and the OpenAPI schema: explicit setting, else development only."""
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.environment == "development"
+
+    def fastapi_docs_kwargs(self) -> dict[str, str | None]:
+        """Keyword arguments for ``FastAPI(...)`` that switch the documentation URLs on or off."""
+        if self.docs_enabled:
+            return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
     @field_validator("database_url")
     @classmethod

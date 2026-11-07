@@ -1,0 +1,848 @@
+[
+  {
+    "id": "eval_01",
+    "instruction": "Summarize my calendar for today and check Notion for upcoming deadlines.",
+    "category": "single_agent_pm",
+    "expected_intent": "daily_briefing",
+    "expected_agents": ["pm"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Fetch calendar events and query Notion deadlines for today",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_02",
+    "instruction": "Fix the division by zero bug in service/calc.py and run unit tests.",
+    "category": "single_agent_coding",
+    "expected_intent": "code_bugfix",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Reproduce division by zero bug in sandbox and patch service/calc.py",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_03",
+    "instruction": "Research the top 3 open-source vector databases and compare their performance.",
+    "category": "single_agent_research",
+    "expected_intent": "market_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Search web for pgvector, Qdrant, and Milvus benchmark metrics with citations",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_04",
+    "instruction": "Generate an 8-slide presentation reviewing Q3 platform reliability metrics.",
+    "category": "single_agent_document",
+    "expected_intent": "presentation_generation",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Generate 8-slide PowerPoint deck with widescreen layout and metrics",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_05",
+    "instruction": "Parse supplier invoice receipts and create an Excel spreadsheet with totals.",
+    "category": "single_agent_document",
+    "expected_intent": "spreadsheet_generation",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Create XLSX workbook with calculated formulas for invoice totals",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_06",
+    "instruction": "Draft an email to the security team summarizing the recent vulnerability scan.",
+    "category": "single_agent_email",
+    "expected_intent": "email_draft",
+    "expected_agents": ["email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "email",
+        "description": "Create draft email with vulnerability scan summary",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_07",
+    "instruction": "Conduct competitor research on enterprise AI agents and compile a verified PDF report.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "research_and_report",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Gather competitor market intelligence and source citations",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Synthesize research into multi-page verified PDF report",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_08",
+    "instruction": "Investigate GitHub issue #402, patch the bug in sandbox, and create a gated pull request.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "issue_fix_and_pr",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Reproduce issue #402 in sandbox and verify failing test",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "coding",
+        "description": "Apply code patch and verify all tests pass green",
+        "dependencies": ["task_1"]
+      },
+      {
+        "id": "task_3",
+        "assigned_agent": "coding",
+        "description": "Request human approval and create GitHub pull request",
+        "dependencies": ["task_2"]
+      }
+    ]
+  },
+  {
+    "id": "eval_09",
+    "instruction": "Retrieve today's calendar meetings and draft a summary email to my manager.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "calendar_and_email",
+    "expected_agents": ["pm", "email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Fetch and organize today's schedule from Google Calendar",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "email",
+        "description": "Draft schedule update email with meeting overview",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_10",
+    "instruction": "Scrape market pricing for cloud GPUs and generate an Excel comparison table.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "pricing_research_to_excel",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Discover current cloud GPU hourly rates across AWS, GCP, and Azure",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Format GPU pricing comparison into formula-verified XLSX sheet",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_11",
+    "instruction": "Review sprint progress on Notion board and create an executive presentation deck.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "sprint_review_to_pptx",
+    "expected_agents": ["pm", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Query Notion database for completed and in-flight sprint stories",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Generate 8-slide sprint completion deck with cards and metrics",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_12",
+    "instruction": "Refactor database connection pool settings to support retry backoff.",
+    "category": "single_agent_coding",
+    "expected_intent": "code_refactor",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Implement exponential backoff retry policy in database pool config",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_13",
+    "instruction": "Analyze SOC2 compliance requirements for audit logging and draft security policy doc.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "compliance_analysis_doc",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Research SOC2 Trust Services Criteria for append-only audit logs",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Generate formatted compliance policy PDF document",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_14",
+    "instruction": "Search for latest RFC standards on canonical JSON serialization.",
+    "category": "single_agent_research",
+    "expected_intent": "standards_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Extract specifications from RFC 8785 for canonical JSON",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_15",
+    "instruction": "Generate quarterly financial revenue projections spreadsheet with sum formulas.",
+    "category": "single_agent_document",
+    "expected_intent": "financial_model_xlsx",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Build multi-quarter financial workbook with SUM and AVERAGE formulas",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_16",
+    "instruction": "Find unassigned P0 tasks on Notion and schedule a triage meeting on Google Calendar.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "triage_and_schedule",
+    "expected_agents": ["pm"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Query Notion database for unassigned P0 status tickets",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "pm",
+        "description": "Schedule 30-minute triage meeting on Google Calendar with team",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_17",
+    "instruction": "Write unit tests for the HMAC token verification function in auth module.",
+    "category": "single_agent_coding",
+    "expected_intent": "test_authoring",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Implement comprehensive positive and negative unit tests for HMAC token verification",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_18",
+    "instruction": "Discover research papers on multi-agent consensus algorithms published in 2026.",
+    "category": "single_agent_research",
+    "expected_intent": "academic_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Search academic repositories for distributed multi-agent consensus papers",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_19",
+    "instruction": "Compile an executive investor pitch deck highlighting customer testimonials and growth metrics.",
+    "category": "single_agent_document",
+    "expected_intent": "pitch_deck",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Create 8-slide investor pitch presentation with metrics and customer quotes",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_20",
+    "instruction": "Draft an incident postmortem email to executive stakeholders regarding yesterday's outage.",
+    "category": "single_agent_email",
+    "expected_intent": "postmortem_email",
+    "expected_agents": ["email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "email",
+        "description": "Draft formal incident postmortem with root cause analysis and action items",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_21",
+    "instruction": "Research AI voice agent latency benchmarks, analyze data, and build an Excel spreadsheet.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "latency_benchmarking_sheet",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Collect industry audio turnaround and barge-in latency figures",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Tabulate latency figures into formula-validated XLSX workbook",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_22",
+    "instruction": "Add input sanitization to user comment API endpoint to prevent XSS attacks.",
+    "category": "single_agent_coding",
+    "expected_intent": "security_patch",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Implement HTML escaping and input boundary sanitizer on comment endpoints",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_23",
+    "instruction": "Check Google Calendar for conflicting meetings next Monday and resolve overlaps.",
+    "category": "single_agent_pm",
+    "expected_intent": "calendar_conflict_resolution",
+    "expected_agents": ["pm"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Query Google Calendar for next Monday and identify double-booked slots",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_24",
+    "instruction": "Generate product release notes PDF for version 1.5 with change tables.",
+    "category": "single_agent_document",
+    "expected_intent": "release_notes_pdf",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Generate multi-page PDF document summarizing features, fixes, and migration guides",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_25",
+    "instruction": "Research enterprise SSO providers supporting SAML 2.0 and OIDC.",
+    "category": "single_agent_research",
+    "expected_intent": "vendor_evaluation",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Compare Okta, Azure AD, and Auth0 enterprise SSO capabilities and pricing",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_26",
+    "instruction": "Investigate database deadlocks in order processing worker and add retry logic.",
+    "category": "single_agent_coding",
+    "expected_intent": "bugfix_concurrency",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Reproduce deadlock in test harness and implement optimistic concurrency control",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_27",
+    "instruction": "Summarize weekly customer feedback in Notion and email leadership highlights.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "feedback_summary_email",
+    "expected_agents": ["pm", "email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Extract customer sentiment and recurring requests from Notion feedback log",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "email",
+        "description": "Draft executive leadership feedback email with top 3 action items",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_28",
+    "instruction": "Create an automated employee onboarding checklist presentation deck.",
+    "category": "single_agent_document",
+    "expected_intent": "onboarding_presentation",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Create 8-slide PowerPoint onboarding guide with cards and contact metrics",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_29",
+    "instruction": "Extract quarterly tax deductions from receipts and compile verified Excel workbook.",
+    "category": "single_agent_document",
+    "expected_intent": "tax_deductions_xlsx",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Build Excel spreadsheet with tax deduction categories and SUM formulas",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_30",
+    "instruction": "Research global privacy regulations (GDPR, CCPA) for AI memory retention.",
+    "category": "single_agent_research",
+    "expected_intent": "compliance_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Gather statutory retention guidelines and right-to-be-forgotten mandates",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_31",
+    "instruction": "Fix memory leak in websocket event bridge and write regression test.",
+    "category": "single_agent_coding",
+    "expected_intent": "memory_leak_fix",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Identify uncollected event listener references and add teardown logic with tests",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_32",
+    "instruction": "Review Notion project blockers, schedule engineering alignment, and draft status report.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "blocker_resolution_workflow",
+    "expected_agents": ["pm", "email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Identify critical path blockers in Notion project database",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "pm",
+        "description": "Schedule 45-minute technical unblocking sync on Google Calendar",
+        "dependencies": ["task_1"]
+      },
+      {
+        "id": "task_3",
+        "assigned_agent": "email",
+        "description": "Draft meeting prep email with identified blockers and agenda",
+        "dependencies": ["task_2"]
+      }
+    ]
+  },
+  {
+    "id": "eval_33",
+    "instruction": "Analyze security vulnerabilities in dependencies and submit PR with version upgrades.",
+    "category": "single_agent_coding",
+    "expected_intent": "dependency_update_pr",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Upgrade vulnerable packages in pyproject.toml, verify tests, and submit PR",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_34",
+    "instruction": "Research competitor pricing models for enterprise seat licenses.",
+    "category": "single_agent_research",
+    "expected_intent": "pricing_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Survey tiered user licensing and usage-based pricing across AI SaaS platforms",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_35",
+    "instruction": "Generate product architecture documentation as a verified PDF report.",
+    "category": "single_agent_document",
+    "expected_intent": "architecture_doc_pdf",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Create multi-page PDF with system architecture diagrams, invariants, and tables",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_36",
+    "instruction": "Audit Notion team OKRs and compile quarterly progress presentation.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "okr_presentation",
+    "expected_agents": ["pm", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "pm",
+        "description": "Extract completion percentages for key results from Notion OKR database",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Generate 8-slide executive OKR review deck with metrics layouts",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_37",
+    "instruction": "Implement RFC 8785 canonical JSON sorting helper in serialization utility.",
+    "category": "single_agent_coding",
+    "expected_intent": "feature_implementation",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Implement recursive dictionary key sorting and UTF-8 encoding conforming to RFC 8785",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_38",
+    "instruction": "Research best practices for PostgreSQL connection pooling under high concurrency.",
+    "category": "single_agent_research",
+    "expected_intent": "database_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Compile tuning guidelines for PgBouncer transaction pooling and max_connections",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_39",
+    "instruction": "Create annual departmental budget breakdown spreadsheet with dynamic variance formulas.",
+    "category": "single_agent_document",
+    "expected_intent": "budget_variance_xlsx",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Build department budget workbook with sum, difference, and percent change formulas",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_40",
+    "instruction": "Draft invitation email to keynote speakers for annual developer conference.",
+    "category": "single_agent_email",
+    "expected_intent": "speaker_invitation_email",
+    "expected_agents": ["email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "email",
+        "description": "Compose professional speaker invitation draft outlining themes and logistics",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_41",
+    "instruction": "Perform deep research on LLM inference optimization techniques and compile PDF whitepaper.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "technical_whitepaper",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Investigate speculative decoding, vLLM paged attention, and FlashAttention-3",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Author formatted multi-page technical whitepaper PDF with citations",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_42",
+    "instruction": "Fix race condition in background task queue worker and verify with concurrency tests.",
+    "category": "single_agent_coding",
+    "expected_intent": "concurrency_bugfix",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Add atomic row claiming via SELECT FOR UPDATE SKIP LOCKED and verify with tests",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_43",
+    "instruction": "Fetch next week's travel schedule from Gmail reservations and populate Google Calendar.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "itinerary_sync",
+    "expected_agents": ["email", "pm"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "email",
+        "description": "Parse flight and hotel confirmation details from recent reservation emails",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "pm",
+        "description": "Create corresponding calendar events with locations and flight numbers",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_44",
+    "instruction": "Design corporate security awareness presentation for all engineering staff.",
+    "category": "single_agent_document",
+    "expected_intent": "security_presentation",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Generate 8-slide security training slide deck covering phishing and credential hygiene",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_45",
+    "instruction": "Research Redis 7.4 stream consumer groups and message acknowledgment semantics.",
+    "category": "single_agent_research",
+    "expected_intent": "stream_research",
+    "expected_agents": ["research"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Analyze XADD, XREADGROUP, and XACK patterns for reliable outbox processing",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_46",
+    "instruction": "Build financial inventory audit spreadsheet calculating reorder points and costs.",
+    "category": "single_agent_document",
+    "expected_intent": "inventory_xlsx",
+    "expected_agents": ["document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "document",
+        "description": "Create warehouse inventory sheet with automated formula computations",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_47",
+    "instruction": "Write end-to-end integration test verifying task event outbox publishing.",
+    "category": "single_agent_coding",
+    "expected_intent": "integration_test",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Author async pytest verifying outbox write, Redis relay, and message delivery",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_48",
+    "instruction": "Draft welcome onboarding email for new hire starting in product management.",
+    "category": "single_agent_email",
+    "expected_intent": "onboarding_email",
+    "expected_agents": ["email"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "email",
+        "description": "Compose friendly welcome email with first week schedule and resource links",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "id": "eval_49",
+    "instruction": "Research AI agent evaluation benchmarks, synthesize methodology, and build evaluation deck.",
+    "category": "multi_agent_pipeline",
+    "expected_intent": "eval_benchmarks_to_pptx",
+    "expected_agents": ["research", "document"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "research",
+        "description": "Review GAIA, SWE-bench, and HumanEval evaluation methodologies",
+        "dependencies": []
+      },
+      {
+        "id": "task_2",
+        "assigned_agent": "document",
+        "description": "Synthesize findings into 8-slide presentation deck with cards and benchmark metrics",
+        "dependencies": ["task_1"]
+      }
+    ]
+  },
+  {
+    "id": "eval_50",
+    "instruction": "Identify open PR review requests in GitHub, review code diffs in sandbox, and post review comments.",
+    "category": "single_agent_coding",
+    "expected_intent": "automated_code_review",
+    "expected_agents": ["coding"],
+    "plan": [
+      {
+        "id": "task_1",
+        "assigned_agent": "coding",
+        "description": "Inspect PR diffs in sandbox runner, verify test coverage, and submit review feedback",
+        "dependencies": []
+      }
+    ]
+  }
+]

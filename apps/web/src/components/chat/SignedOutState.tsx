@@ -18,13 +18,23 @@ export function SignedOutState({
         Chat needs a MAYA account. Sign in to start a conversation.
       </p>
       <p className="maya-signedout__body">
-        Voice input and task execution are also planned and not available.
+        Voice interaction, autonomous multi-agent task execution, and
+        deliverables are ready.
       </p>
       {logoutWarning ? (
         <p className="maya-signin__error" role="status">
           {logoutWarning}
         </p>
       ) : null}
+      <div className="p-3 my-2 rounded border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400 text-left max-w-sm">
+        <p className="font-semibold text-zinc-300">
+          Local Development Account:
+        </p>
+        <p className="mt-1 font-mono text-[11px] text-teal-300">
+          User: <span className="text-zinc-200">admin</span> • Pass:{" "}
+          <span className="text-zinc-200">AdminPassword123!</span>
+        </p>
+      </div>
       <Link href="/login" className="maya-btn maya-btn--primary">
         Sign in
       </Link>

@@ -14,8 +14,8 @@
 
 ### Request
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
+| Field  | Type   | Required    | Description               |
+| :----- | :----- | :---------- | :------------------------ |
 | <name> | <type> | <yes or no> | <meaning and constraints> |
 
 Example:
@@ -36,9 +36,9 @@ Example:
 
 ### Errors
 
-| Code | Meaning | Client action |
-| :--- | :--- | :--- |
-| <status> | <condition> | <what to do> |
+| Code     | Meaning     | Client action |
+| :------- | :---------- | :------------ |
+| <status> | <condition> | <what to do>  |
 
 ### Compatibility
 

@@ -21,17 +21,18 @@ The `architecture` rule in `governance/governance.config.json` asks for an ADR (
 
 ## Index
 
-| ADR | Title | Status |
-| :--- | :--- | :--- |
-| [0001](0001-canonical-agent-governance.md) | Canonical AI-agent governance with generated per-tool wrappers | Proposed |
-| [0002](0002-native-git-hooks-with-node-automation.md) | Native Git hooks with zero-dependency Node.js automation | Proposed |
-| [0003](0003-task-queue-selection.md) | Compatible Celery task queue; durable cooperative cancellation required | Accepted |
-| [0004](0004-local-foundation.md) | Local API, web and data-service foundation | Proposed |
-| [0005](0005-own-account-authentication.md) | Own-account authentication, one-time codes and sessions | Accepted |
-| [0006](0006-tenant-isolation-with-row-level-security.md) | Tenant isolation with forced row-level security | Accepted |
-| [0007](0007-gemini-model-gateway-architecture.md) | Gemini model gateway architecture, resilience and token accounting | Proposed |
-| [0008](0008-chat-api-contract.md) | Chat API contract, idempotency and persistence | Accepted |
-| [0009](0009-refresh-cookie-transport.md) | HttpOnly refresh-cookie transport for the browser client | Accepted |
-| [0010](0010-checkpoint-owner-isolation.md) | Bind LangGraph checkpoints to workspace and user owners | Proposed |
+| ADR                                                      | Title                                                                   | Status   |
+| :------------------------------------------------------- | :---------------------------------------------------------------------- | :------- |
+| [0001](0001-canonical-agent-governance.md)               | Canonical AI-agent governance with generated per-tool wrappers          | Proposed |
+| [0002](0002-native-git-hooks-with-node-automation.md)    | Native Git hooks with zero-dependency Node.js automation                | Proposed |
+| [0003](0003-task-queue-selection.md)                     | Compatible Celery task queue; durable cooperative cancellation required | Accepted |
+| [0004](0004-local-foundation.md)                         | Local API, web and data-service foundation                              | Proposed |
+| [0005](0005-own-account-authentication.md)               | Own-account authentication, one-time codes and sessions                 | Accepted |
+| [0006](0006-tenant-isolation-with-row-level-security.md) | Tenant isolation with forced row-level security                         | Accepted |
+| [0007](0007-gemini-model-gateway-architecture.md)        | Gemini model gateway architecture, resilience and token accounting      | Proposed |
+| [0008](0008-chat-api-contract.md)                        | Chat API contract, idempotency and persistence                          | Accepted |
+| [0009](0009-refresh-cookie-transport.md)                 | HttpOnly refresh-cookie transport for the browser client                | Accepted |
+| [0010](0010-checkpoint-owner-isolation.md)               | Bind LangGraph checkpoints to workspace and user owners                 | Proposed |
+| [0011](0011-mcp-gateway-and-specialist-agents.md)        | MCP Gateway and Specialist Agent Architecture                           | Proposed |
 
 Product-level decisions from the project plan (modular monolith, voice/task separation, permission tiers, and others) will be recorded here as ADRs when implementation starts.

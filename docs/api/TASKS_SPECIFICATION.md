@@ -24,7 +24,7 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
     "instruction": "Download invoices from email, compute summary in Excel, and generate PDF report.",
     "title": "Quarterly Financial Analysis",
     "idempotency_key": "fin-q3-2026-run-01",
-    "budget_usd": 1.50
+    "budget_usd": 1.5
   }
   ```
 - **Responses:**
@@ -70,7 +70,7 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
         "instruction": "Download invoices...",
         "status": "executing",
         "plan_status": "executing",
-        "budget_usd": 1.50,
+        "budget_usd": 1.5,
         "spent_usd": 0.12,
         "created_at": "2026-11-06T12:00:00Z",
         "completed_at": null,
@@ -100,7 +100,7 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
     "idempotency_key": "fin-q3-2026-run-01",
     "status": "executing",
     "plan_status": "executing",
-    "budget_usd": 1.50,
+    "budget_usd": 1.5,
     "spent_usd": 0.12,
     "tool_turns": 4,
     "created_at": "2026-11-06T12:00:00Z",
@@ -116,8 +116,8 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
         "dependencies": [],
         "status": "completed",
         "input_data": {},
-        "output_result": {"attachments": ["inv-1.pdf"]},
-        "verification_proof": {"verified": true, "exit_code": 0},
+        "output_result": { "attachments": ["inv-1.pdf"] },
+        "verification_proof": { "verified": true, "exit_code": 0 },
         "error_message": null,
         "retry_count": 0,
         "created_at": "2026-11-06T12:00:00Z",

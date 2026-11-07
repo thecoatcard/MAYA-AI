@@ -77,20 +77,20 @@ stats, and cleanup outcome.
 
 ## Measurements
 
-| Measurement | Celery 5.6.3 | ARQ 0.28.0 |
-| :--- | ---: | ---: |
-| Completed throughput batch | 80 / 80 | 80 / 80 |
-| Throughput (tasks/s) | 20.81 | 28.68 |
-| Queue-to-completion latency p50 (ms) | 1,574.68 | 1,317.86 |
-| Queue-to-completion latency p95 (ms) | 3,123.05 | 2,387.75 |
-| Per-task worker event-loop lag p95 (ms) | 1.294 | 1.259 |
-| Producer event-loop maximum lag (ms) | 27.38 | 1.41 |
-| Native cancellation observation | Revoke request returned; task row still `running` at 4 s; no terminal state observed | `Job.abort` acknowledged; task reached `aborted` in 54.55 ms |
-| Redelivery after worker kill | Completed on attempt 2; 4,037 ms from worker kill to attempt 2 | Completed on attempt 2; 18,975 ms from worker kill to attempt 2 |
-| Synthetic effect rows / observations | 1 / 2 | 1 / 2 |
-| Maximum driver-container memory (bytes) | 241,487,052 | 151,414,374 |
-| Maximum driver-container CPU | 100.17% | 99.41% |
-| Maximum process count | 10 | 4 |
+| Measurement                             |                                                                         Celery 5.6.3 |                                                      ARQ 0.28.0 |
+| :-------------------------------------- | -----------------------------------------------------------------------------------: | --------------------------------------------------------------: |
+| Completed throughput batch              |                                                                              80 / 80 |                                                         80 / 80 |
+| Throughput (tasks/s)                    |                                                                                20.81 |                                                           28.68 |
+| Queue-to-completion latency p50 (ms)    |                                                                             1,574.68 |                                                        1,317.86 |
+| Queue-to-completion latency p95 (ms)    |                                                                             3,123.05 |                                                        2,387.75 |
+| Per-task worker event-loop lag p95 (ms) |                                                                                1.294 |                                                           1.259 |
+| Producer event-loop maximum lag (ms)    |                                                                                27.38 |                                                            1.41 |
+| Native cancellation observation         | Revoke request returned; task row still `running` at 4 s; no terminal state observed |    `Job.abort` acknowledged; task reached `aborted` in 54.55 ms |
+| Redelivery after worker kill            |                       Completed on attempt 2; 4,037 ms from worker kill to attempt 2 | Completed on attempt 2; 18,975 ms from worker kill to attempt 2 |
+| Synthetic effect rows / observations    |                                                                                1 / 2 |                                                           1 / 2 |
+| Maximum driver-container memory (bytes) |                                                                          241,487,052 |                                                     151,414,374 |
+| Maximum driver-container CPU            |                                                                              100.17% |                                                          99.41% |
+| Maximum process count                   |                                                                                   10 |                                                               4 |
 
 Latency is measured from the PostgreSQL enqueue receipt to the completion receipt.
 Throughput includes submission and waiting for all tasks to complete. Worker
@@ -140,9 +140,9 @@ start containers.
 A fresh public PyPI metadata and resolver check on 2026-11-05 changed the dependency
 picture without changing any benchmark results or installed application packages:
 
-| Candidate | Verified package constraints | Resolver outcome |
-| :--- | :--- | :--- |
-| ARQ 0.28.0 with redis-py 8.1.0 | ARQ requires `redis[hiredis]>=4.2.0,<6` | Unsatisfiable |
+| Candidate                                 | Verified package constraints                                                                                   | Resolver outcome                                               |
+| :---------------------------------------- | :------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------- |
+| ARQ 0.28.0 with redis-py 8.1.0            | ARQ requires `redis[hiredis]>=4.2.0,<6`                                                                        | Unsatisfiable                                                  |
 | Celery 5.6.3, Kombu 5.7.0, redis-py 8.1.0 | Celery permits Kombu `>=5.6.0`; Kombu 5.7.0's Redis extra requires `redis>=6.4.0,<9.0.0` and `packaging==26.3` | Resolved with current backend direct pins and LangGraph 1.2.20 |
 
 Sources are the public metadata for

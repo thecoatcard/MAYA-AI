@@ -29,6 +29,10 @@ class TaskCreateRequest(BaseModel):
         ge=0,
         description="Maximum model gateway spend allowed for this task.",
     )
+    session_id: UUID | None = Field(
+        default=None,
+        description="Optional conversation session ID this task is associated with.",
+    )
 
 
 class SubtaskResponse(BaseModel):

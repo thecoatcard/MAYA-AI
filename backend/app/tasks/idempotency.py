@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import PlanStatus, Task
+from app.db.models import ChatSession, PlanStatus, Task
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +50,48 @@ class TaskIdempotencyService:
             return existing, False
 
         # 2. Not found; attempt insertion
-        task_id = uuid4()
-        effective_session_id = session_id or str(task_id)
         effective_title = title or (
             user_instruction[:50] + "..." if len(user_instruction) > 50 else user_instruction
         )
         effective_budget = budget_usd if budget_usd is not None else Decimal("1.50")
 
+        # Resolve or auto-create parent conversation session for this task
+        resolved_session_id: UUID | None = None
+        if session_id:
+            try:
+                candidate_id = UUID(str(session_id))
+                sess_stmt = (
+                    select(ChatSession.id)
+                    .where(
+                        ChatSession.workspace_id == workspace_id,
+                        ChatSession.id == candidate_id,
+                    )
+                    .limit(1)
+                )
+                sess_res = await session.execute(sess_stmt)
+                resolved_session_id = sess_res.scalars().first()
+            except (ValueError, TypeError, Exception):
+                resolved_session_id = None
+
+        if resolved_session_id is None:
+            resolved_session_id = uuid4()
+            task_session = ChatSession(
+                id=resolved_session_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=effective_title,
+                channel="web",
+                status="active",
+            )
+            session.add(task_session)
+
+        task_id = uuid4()
         now = datetime.now(UTC)
         new_task = Task(
             id=task_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            session_id=effective_session_id,
+            session_id=resolved_session_id,
             user_instruction=user_instruction,
             instruction=user_instruction,
             title=effective_title,
@@ -85,7 +114,10 @@ class TaskIdempotencyService:
             return new_task, True
         except IntegrityError:
             # Concurrent submission inserted the same key between check and insert
-            await session.rollback()
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             retry_stmt = (
                 select(Task)
                 .where(

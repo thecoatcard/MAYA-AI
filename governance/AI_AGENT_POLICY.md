@@ -15,14 +15,14 @@ This policy governs AI coding agents that work on this repository. They are deve
 
 Every report about work uses these labels and nothing stronger than the evidence supports.
 
-| Label | Meaning |
-| :--- | :--- |
-| **Implemented** | The change exists in the working tree |
-| **Tested** | Relevant tests or checks were executed and passed; the commands are named |
-| **Partially tested** | Some checks ran; the gaps are listed |
-| **Not tested** | No check ran; the reason is stated |
-| **Blocked** | Cannot proceed; the blocker is stated |
-| **Requires human approval** | A Level 3 action is pending a human decision |
+| Label                       | Meaning                                                                   |
+| :-------------------------- | :------------------------------------------------------------------------ |
+| **Implemented**             | The change exists in the working tree                                     |
+| **Tested**                  | Relevant tests or checks were executed and passed; the commands are named |
+| **Partially tested**        | Some checks ran; the gaps are listed                                      |
+| **Not tested**              | No check ran; the reason is stated                                        |
+| **Blocked**                 | Cannot proceed; the blocker is stated                                     |
+| **Requires human approval** | A Level 3 action is pending a human decision                              |
 
 Rules: never write that something passed unless you ran it and read the result; report skipped checks as skipped; quote failing output rather than paraphrasing it away.
 
@@ -35,13 +35,13 @@ Every non-trivial change ends with a change report using `templates/change-repor
 - **Roles** (`governance/roles/`) are optional lenses: Software Architect, Backend Engineer, Frontend Engineer, UI/UX Designer, Database Engineer, Security Engineer, QA Engineer, Documentation Engineer, Code Reviewer, DevOps Engineer. Adopting a role changes your focus and output format. It **does not** change your permissions.
 - **Workflows** (`governance/workflows/`) are the canonical procedures. Follow the written steps rather than improvising. Tool wrappers invoke the same files:
 
-| Tool | How to invoke a workflow |
-| :--- | :--- |
-| Claude Code | `/gov-<workflow>` skills in `.claude/skills/`; roles as subagents in `.claude/agents/` |
-| Antigravity and Codex | skills in `.agents/skills/` (`/gov-<workflow>` in Antigravity, `$gov-<workflow>` in Codex) |
-| GitHub Copilot (VS Code) | prompt files in `.github/prompts/` (`/gov-<workflow>`) |
-| Cursor | `gov-*` rules in `.cursor/rules/` (applied when relevant, or mention the rule) |
-| Gemini CLI, Windsurf, others | read the workflow file under `governance/workflows/` directly |
+| Tool                         | How to invoke a workflow                                                                   |
+| :--------------------------- | :----------------------------------------------------------------------------------------- |
+| Claude Code                  | `/gov-<workflow>` skills in `.claude/skills/`; roles as subagents in `.claude/agents/`     |
+| Antigravity and Codex        | skills in `.agents/skills/` (`/gov-<workflow>` in Antigravity, `$gov-<workflow>` in Codex) |
+| GitHub Copilot (VS Code)     | prompt files in `.github/prompts/` (`/gov-<workflow>`)                                     |
+| Cursor                       | `gov-*` rules in `.cursor/rules/` (applied when relevant, or mention the rule)             |
+| Gemini CLI, Windsurf, others | read the workflow file under `governance/workflows/` directly                              |
 
 ## 5. Working alongside other agents and humans
 

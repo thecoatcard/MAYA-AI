@@ -102,7 +102,7 @@ async def test_a_migration_role_that_may_set_role_to_the_definer_can_migrate_and
     )
     config = alembic_config(database)
     await asyncio.to_thread(command.upgrade, config, "head")
-    assert await version(database) == "0004"
+    assert await version(database) == "0012"
 
     engine = create_async_engine(database.admin_url, poolclass=NullPool)
     try:
@@ -135,7 +135,7 @@ async def test_a_migration_role_that_may_set_role_to_the_definer_can_migrate_and
         ("auth_find_account_by_email", "maya_auth_definer"),
         ("auth_find_account_by_username", "maya_auth_definer"),
     ]
-    assert flags == 14
+    assert flags == 19
 
     await asyncio.to_thread(command.downgrade, config, "base")
     assert await version(database) is None

@@ -14,10 +14,27 @@ def main() -> None:
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--port", type=int, default=8000, choices=range(1, 65536), metavar="PORT")
     arguments = parser.parse_args()
-    if arguments.env_file is not None and not arguments.env_file.is_file():
-        parser.error("The requested environment file does not exist")
+    env_files: list[Path] = []
+    if arguments.env_file is not None:
+        if not arguments.env_file.is_file():
+            parser.error("The requested environment file does not exist")
+        env_files.append(arguments.env_file)
+        # If the requested file is an example template (.env.example),
+        # overlay private .env if present.
+        if arguments.env_file.name.endswith(".example"):
+            private_env = arguments.env_file.with_name(
+                arguments.env_file.name.removesuffix(".example")
+            )
+            if private_env.is_file() and private_env not in env_files:
+                env_files.append(private_env)
+    else:
+        for candidate in (Path(".env"), Path("../.env")):
+            if candidate.is_file():
+                env_files.append(candidate)
+                break
+
     try:
-        settings = Settings(_env_file=arguments.env_file)
+        settings = Settings(_env_file=env_files if env_files else None)
     except ValidationError:
         parser.exit(2, "Invalid MAYA configuration; check required variables and URL formats.\n")
     ensure_compatible_event_loop()

@@ -48,8 +48,12 @@ async def test_state_projection_persists_to_postgresql(
         execution_trace=[{"step": "plan"}, {"step": "dispatch"}],
     )
 
-    # 1. Project initial executing state
+    # 1. Project initial executing state and test updates within the same transaction
     async with scoped(app_engine, tenant.workspace_id) as conn:
+        await conn.execute(
+            text("DELETE FROM subtasks WHERE task_id = :task_id"),
+            {"task_id": tenant.task_id},
+        )
         task_id = await service.project_state(state, connection=conn)
         assert task_id == tenant.task_id
 
@@ -73,19 +77,18 @@ async def test_state_projection_persists_to_postgresql(
         ).scalar_one()
         assert subtasks_count == 2
 
-    # 2. Complete subtask 1 and test idempotent upsert update
-    completed_sub1 = sub1.model_copy(
-        update={"status": "completed", "output_result": {"summary": "Done"}}
-    )
-    updated_state = state.model_copy(
-        update={
-            "active_plan": [completed_sub1, sub2],
-            "completed_task_ids": ["step_1"],
-            "execution_trace": [*state.execution_trace, {"step": "complete"}],
-        }
-    )
+        # 2. Complete subtask 1 and test idempotent upsert update
+        completed_sub1 = sub1.model_copy(
+            update={"status": "completed", "output_result": {"summary": "Done"}}
+        )
+        updated_state = state.model_copy(
+            update={
+                "active_plan": [completed_sub1, sub2],
+                "completed_task_ids": ["step_1"],
+                "execution_trace": [*state.execution_trace, {"step": "complete"}],
+            }
+        )
 
-    async with scoped(app_engine, tenant.workspace_id) as conn:
         await service.project_state(updated_state, connection=conn)
 
         # Check subtask 1 is updated to completed

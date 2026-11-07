@@ -115,7 +115,7 @@ RECENT_MESSAGES = text(
     "ORDER BY m.created_at DESC, m.id DESC LIMIT :fetch"
 )
 SET_CHAT_USER_CONTEXT = text(
-    "SELECT set_config('app.user_id', :user_id, true) WHERE :workspace_id IS NOT NULL"
+    "SELECT set_config('app.user_id', :user_id, true) WHERE CAST(:workspace_id AS text) IS NOT NULL"
 )
 GET_IDEMPOTENCY = text(
     "SELECT state, request_hash, session_id, user_message_id, assistant_message_id, "
@@ -132,12 +132,13 @@ INSERT_IDEMPOTENCY = text(
     "ON CONFLICT (workspace_id, user_id, key_digest) DO NOTHING RETURNING key_digest"
 )
 SAVE_IDEMPOTENCY = text(
-    "UPDATE chat_idempotency SET state = :state, session_id = :session_id, "
+    "UPDATE chat_idempotency SET state = :state, session_id = CAST(:session_id AS UUID), "
     "finish_reason = :finish_reason, error_code = :error_code, updated_at = clock_timestamp() "
     "WHERE workspace_id = :workspace_id AND user_id = :user_id AND key_digest = :key_digest "
     "AND request_hash = :request_hash AND user_message_id = :user_message_id "
     "AND assistant_message_id = :assistant_message_id AND state = 'in_progress' "
-    "AND (session_id IS NULL OR :session_id IS NULL OR session_id = :session_id) "
+    "AND (session_id IS NULL OR CAST(:session_id AS UUID) IS NULL "
+    "OR session_id = CAST(:session_id AS UUID)) "
     "RETURNING key_digest"
 )
 

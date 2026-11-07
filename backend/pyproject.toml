@@ -11,11 +11,17 @@ dependencies = [
     "google-genai==2.34.0",
     "langgraph>=1.2.0",
     "langgraph-checkpoint-postgres>=3.2.0",
+    "lxml>=6.1.0",
+    "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2.0",
     "pydantic==2.14.2",
     "pydantic-settings==2.16.2",
+    "pypdf>=7.0.0",
     "pyjwt==2.15.1",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
     "redis==8.1.0",
+    "reportlab>=5.1.0",
     "sqlalchemy[asyncio]==2.0.57",
     "uvicorn==0.54.0",
 ]
@@ -25,10 +31,13 @@ dev = [
     "asyncpg-stubs==0.32.0",
     "httpx==0.28.1",
     "httpx2==2.16.0",
+    "lxml-stubs>=0.5.1",
     "mypy==2.4.1",
     "pytest==9.2.0",
     "pytest-asyncio==1.4.1.post1",
     "ruff==0.17.3",
+    "types-openpyxl>=3.1.5",
+    "types-reportlab>=5.1.0",
 ]
 
 [tool.uv]
@@ -65,3 +74,19 @@ plugins = ["pydantic.mypy"]
 # Host orchestration, metrics, offline CLIs and deterministic tests remain checked here.
 # arq_worker.py imports ARQ-only SDKs and is checked through the S1 spike environment.
 exclude = ['^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
+
+[[tool.mypy.overrides]]
+module = [
+    "app.automation.pptx_engine",
+    "docx",
+    "docx.*",
+    "pptx",
+    "pptx.*",
+    "reportlab",
+    "reportlab.*",
+    "openpyxl",
+    "openpyxl.*",
+]
+ignore_missing_imports = true
+disallow_untyped_calls = false
+disallow_subclassing_any = false

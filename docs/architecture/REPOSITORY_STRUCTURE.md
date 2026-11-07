@@ -37,11 +37,11 @@
 
 Never edit these by hand; change the source and run `npm run agents:sync`:
 
-| Generated | Source |
-| :--- | :--- |
-| `.claude/skills/gov-*`, `.agents/skills/gov-*`, `.github/prompts/gov-*`, `.cursor/rules/gov-*` | `governance/workflows/` |
-| `.claude/agents/role-*` | `governance/roles/` |
-| `.github/copilot-instructions.md`, `.cursor/rules/maya-governance.mdc` | the hard-rules block in `AGENTS.md` |
+| Generated                                                                                      | Source                              |
+| :--------------------------------------------------------------------------------------------- | :---------------------------------- |
+| `.claude/skills/gov-*`, `.agents/skills/gov-*`, `.github/prompts/gov-*`, `.cursor/rules/gov-*` | `governance/workflows/`             |
+| `.claude/agents/role-*`                                                                        | `governance/roles/`                 |
+| `.github/copilot-instructions.md`, `.cursor/rules/maya-governance.mdc`                         | the hard-rules block in `AGENTS.md` |
 
 ## Where new things go
 

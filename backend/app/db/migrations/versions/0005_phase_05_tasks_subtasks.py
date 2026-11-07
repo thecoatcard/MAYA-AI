@@ -88,6 +88,16 @@ DOWNGRADE_SUBTASKS = (
 )
 
 DOWNGRADE_TASKS = (
+    "UPDATE tasks SET instruction = coalesce(user_instruction, '') WHERE instruction IS NULL",
+    "ALTER TABLE tasks ALTER COLUMN instruction SET NOT NULL",
+    "UPDATE tasks SET status = 'pending' WHERE status IS NULL",
+    "ALTER TABLE tasks ALTER COLUMN status SET NOT NULL",
+    "UPDATE tasks SET dag_plan = coalesce(active_plan, '[]'::jsonb) WHERE dag_plan IS NULL",
+    "ALTER TABLE tasks ALTER COLUMN dag_plan SET NOT NULL",
+    "UPDATE tasks SET idempotency_key = gen_random_uuid()::text WHERE idempotency_key IS NULL",
+    "ALTER TABLE tasks ALTER COLUMN idempotency_key SET NOT NULL",
+    "UPDATE tasks SET title = '' WHERE title IS NULL",
+    "ALTER TABLE tasks ALTER COLUMN title SET NOT NULL",
     "ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_plan_status_check",
     "ALTER TABLE tasks DROP COLUMN IF EXISTS updated_at",
     "ALTER TABLE tasks DROP COLUMN IF EXISTS execution_trace",

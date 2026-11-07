@@ -55,10 +55,10 @@ A change is done only when all applicable items are true:
 
 ## 6. Stack conventions (apply when the code exists)
 
-| Area | Convention |
-| :--- | :--- |
-| Python | 3.12; Ruff for lint and format; mypy for types; pytest; Pydantic models at boundaries; async I/O in the API layer |
-| TypeScript / Next.js | strict TypeScript; ESLint and Prettier; component tests; no secrets in client bundles |
-| Database | migrations only (Alembic); every tenant table carries `workspace_id` with row-level security; never edit applied migrations |
-| Containers | non-root, pinned base images, no host mounts for agent-controlled code, no Docker socket exposure |
-| Tooling scripts | zero-dependency Node.js in `scripts/`; cross-platform (Windows, macOS, Linux); every script has tests |
+| Area                 | Convention                                                                                                                  |
+| :------------------- | :-------------------------------------------------------------------------------------------------------------------------- |
+| Python               | 3.12; Ruff for lint and format; mypy for types; pytest; Pydantic models at boundaries; async I/O in the API layer           |
+| TypeScript / Next.js | strict TypeScript; ESLint and Prettier; component tests; no secrets in client bundles                                       |
+| Database             | migrations only (Alembic); every tenant table carries `workspace_id` with row-level security; never edit applied migrations |
+| Containers           | non-root, pinned base images, no host mounts for agent-controlled code, no Docker socket exposure                           |
+| Tooling scripts      | zero-dependency Node.js in `scripts/`; cross-platform (Windows, macOS, Linux); every script has tests                       |

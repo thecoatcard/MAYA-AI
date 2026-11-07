@@ -54,6 +54,15 @@ export type ChatMessageState =
   | "interrupted" // reply cut short; what arrived is kept
   | "stopped"; // the user stopped the reply
 
+export interface ChatMessageToolAction {
+  readonly toolName: string;
+  readonly taskId?: string;
+  readonly status: string;
+  readonly intent?: string;
+  readonly args?: Record<string, unknown>;
+  readonly result?: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   /** Stable local key for React lists; never changes. */
   readonly key: string;
@@ -64,6 +73,10 @@ export interface ChatMessage {
   readonly state: ChatMessageState;
   readonly finishReason: string | null;
   readonly usage: ChatUsage | null;
+  /** Interaction modality (text or voice). */
+  readonly modality?: "text" | "voice";
+  /** Live tool or autonomous task execution telemetry. */
+  readonly toolAction?: ChatMessageToolAction;
 }
 
 export interface ChatError {

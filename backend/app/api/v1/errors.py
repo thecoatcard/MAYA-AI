@@ -95,8 +95,11 @@ async def _validation_error(request: Request, exc: Exception) -> JSONResponse:
 
 async def _http_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, StarletteHTTPException)
+    headers = dict(exc.headers) if exc.headers else None
+    if isinstance(exc.detail, dict):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
     code = {404: "not_found", 405: "method_not_allowed"}.get(exc.status_code, "http_error")
-    return _error(exc.status_code, code, dict(exc.headers) if exc.headers else None)
+    return _error(exc.status_code, code, headers)
 
 
 def install_error_handlers(app: FastAPI) -> None:

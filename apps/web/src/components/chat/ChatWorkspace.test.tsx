@@ -1687,4 +1687,41 @@ describe("conversation and history races", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ask again" })).toBeNull();
   });
+
+  it("toggles the conversation drawer open and closed in embedded mode", async () => {
+    vi.stubGlobal("fetch", (url: string) => {
+      if (url.startsWith("/api/v1/chat/sessions")) {
+        return Promise.resolve(
+          jsonResponse({ items: [session], next_cursor: null }),
+        );
+      }
+      throw new Error("Unexpected mocked request");
+    });
+    render(<ChatWorkspace embedded />);
+
+    const menuTrigger = await screen.findByRole("button", {
+      name: "Open conversation history",
+    });
+    expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+
+    // Open drawer
+    fireEvent.click(menuTrigger);
+    expect(menuTrigger).toHaveAttribute("aria-expanded", "true");
+
+    // Close drawer via close button
+    const closeBtn = screen.getByRole("button", {
+      name: "Close conversation drawer",
+    });
+    fireEvent.click(closeBtn);
+    expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+
+    // Re-open then click New conversation closes the drawer
+    fireEvent.click(menuTrigger);
+    expect(menuTrigger).toHaveAttribute("aria-expanded", "true");
+    const newConvBtn = screen.getByRole("button", {
+      name: /New conversation/,
+    });
+    fireEvent.click(newConvBtn);
+    expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+  });
 });

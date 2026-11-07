@@ -312,10 +312,10 @@ async def session_rows(stack: Stack, workspace_id: UUID) -> list[Any]:
 
 
 async def wait_until(condition: Callable[[], bool]) -> None:
-    for _ in range(20_000):
+    for _ in range(2_000):
         if condition():
             return
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.005)
     pytest.fail("the condition was never reached")
 
 
@@ -803,11 +803,9 @@ async def test_a_late_write_does_not_overwrite_the_request_that_took_the_key_ove
     await store.save(scope, replace(first, state="completed", finish_reason="stop"))  # a late write
     assert await store.claim(scope, _claim()) == second  # the second attempt's claim stands
 
-    await stack.redis.delete(scope.redis_key)  # nobody owns the key: the write goes through
-    await store.save(scope, replace(first, state="completed", finish_reason="stop"))
-    assert (await store.claim(scope, _claim())) == replace(
-        first, state="completed", finish_reason="stop"
-    )
+    # nobody owns the key: an expired lease cannot resurrect
+    await stack.redis.delete(scope.redis_key)
+    assert not await store.save(scope, replace(first, state="completed", finish_reason="stop"))
 
 
 async def test_releasing_deletes_only_the_callers_own_unfinished_claim(stack: Stack) -> None:

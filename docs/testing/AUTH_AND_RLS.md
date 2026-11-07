@@ -25,24 +25,24 @@ to drop anything that does not match that name. Seeding uses the administrator, 
 
 ## Results
 
-| Run | Result |
-| :--- | :--- |
-| Full backend suite with local services and `MAYA_REQUIRE_POSTGRES_TESTS=1` | **864 passed** |
-| Same suite without service configuration | 502 passed, **362 skipped** (skipped is not passed) |
-| `ruff check`, `ruff format --check`, strict `mypy` over app and tests | clean (101 source files) |
-| Disposable databases and probe roles left behind | 0 |
+| Run                                                                        | Result                                              |
+| :------------------------------------------------------------------------- | :-------------------------------------------------- |
+| Full backend suite with local services and `MAYA_REQUIRE_POSTGRES_TESTS=1` | **864 passed**                                      |
+| Same suite without service configuration                                   | 502 passed, **362 skipped** (skipped is not passed) |
+| `ruff check`, `ruff format --check`, strict `mypy` over app and tests      | clean (101 source files)                            |
+| Disposable databases and probe roles left behind                           | 0                                                   |
 
 The suite also passed when its modules were run in reverse order. No GitHub CI result has been observed yet (the repository was pushed on 2026-11-05), so none of
 this is CI-verified.
 
 ## What is covered
 
-| Area | Tests | Highlights |
-| :--- | :--- | :--- |
-| Primitives (`tests/unit`) | 378 total in the folder | Argon2id parameters/rehash/policy, OTP MAC and constant-time compare, JWT claims, algorithm and type confusion, expiry at the exact boundary, generation claim, settings validation, SMTP over mandatory TLS with generic errors and header-injection refusal, Redis limiter (fake and real), request-body guard, SQL-literal static check |
-| Flows (`tests/auth`, 90 scenarios) | each run on an in-memory store **and** the real database (180 runs) | Registration, verification, login, recovery, refresh, logout; enumeration-identical results; code expiry, five-attempt cap, single use, supersession, cross-purpose; rate limits and cooldown windows; concurrent redemption and refresh; multi-generation replay; login versus reset races |
-| HTTP (`tests/integration`) | 33 | Full lifecycle over HTTP, identical responses for every registration outcome, no echo of submitted values, error shapes, 429/503 behavior, public surface equals the documented endpoint list, log scan for credentials/codes/tokens/addresses |
-| Real PostgreSQL (`tests/postgres`) | 273 | Below |
+| Area                               | Tests                                                               | Highlights                                                                                                                                                                                                                                                                                                                                 |
+| :--------------------------------- | :------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Primitives (`tests/unit`)          | 378 total in the folder                                             | Argon2id parameters/rehash/policy, OTP MAC and constant-time compare, JWT claims, algorithm and type confusion, expiry at the exact boundary, generation claim, settings validation, SMTP over mandatory TLS with generic errors and header-injection refusal, Redis limiter (fake and real), request-body guard, SQL-literal static check |
+| Flows (`tests/auth`, 90 scenarios) | each run on an in-memory store **and** the real database (180 runs) | Registration, verification, login, recovery, refresh, logout; enumeration-identical results; code expiry, five-attempt cap, single use, supersession, cross-purpose; rate limits and cooldown windows; concurrent redemption and refresh; multi-generation replay; login versus reset races                                                |
+| HTTP (`tests/integration`)         | 33                                                                  | Full lifecycle over HTTP, identical responses for every registration outcome, no echo of submitted values, error shapes, 429/503 behavior, public surface equals the documented endpoint list, log scan for credentials/codes/tokens/addresses                                                                                             |
+| Real PostgreSQL (`tests/postgres`) | 273                                                                 | Below                                                                                                                                                                                                                                                                                                                                      |
 
 ### Real PostgreSQL
 

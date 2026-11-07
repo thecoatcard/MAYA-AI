@@ -14,6 +14,43 @@ trace_id_context: ContextVar[str | None] = ContextVar("trace_id", default=None)
 
 URL_CREDENTIALS = re.compile(r"([a-z][a-z0-9+.-]*://)[^/\s@]+@", re.IGNORECASE)
 BEARER_TOKEN = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+# ``?token=<jwt>`` on the voice WebSocket would otherwise reach the server's request log lines.
+SECRET_QUERY_VALUE = re.compile(
+    r"(?i)((?:(?:access|refresh|id)[_-]?)?token|password|passwd|secret|api[_-]?key"
+    r"|authorization)=([^&\s\"'#]+)"
+)
+REDACTED = "[redacted]"
+SERVER_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi", "websockets")
+
+
+def redact_secret_queries(text: str) -> str:
+    return SECRET_QUERY_VALUE.sub(lambda match: f"{match.group(1)}={REDACTED}", text)
+
+
+class SecretQueryFilter(logging.Filter):
+    """Redact ``token=``/``password=`` style values from any record before it is formatted."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        redacted = redact_secret_queries(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def install_secret_query_filter() -> None:
+    """Attach the filter to the server loggers and their handlers (idempotent)."""
+    for name in SERVER_LOGGERS:
+        logger = logging.getLogger(name)
+        if not any(isinstance(item, SecretQueryFilter) for item in logger.filters):
+            logger.addFilter(SecretQueryFilter())
+        for handler in logger.handlers:
+            if not any(isinstance(item, SecretQueryFilter) for item in handler.filters):
+                handler.addFilter(SecretQueryFilter())
 
 
 class JsonFormatter(logging.Formatter):
@@ -63,3 +100,4 @@ def configure_logging(settings: Settings) -> None:
     logger.handlers = [handler]
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    install_secret_query_filter()

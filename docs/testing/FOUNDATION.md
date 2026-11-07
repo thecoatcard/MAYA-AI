@@ -53,18 +53,18 @@ the application dependency versions were not downgraded.
 
 ## Initial scaffold verification (2026-11-05, before S1/S2)
 
-| Check | Result |
-| :--- | :--- |
-| Backend pytest | 33 passed; lint, format and strict mypy passed |
-| Web Vitest | 2 passed; ESLint, Prettier, TypeScript and production build passed |
-| Governance unit tests | 37 passed; the file-discovery regression failed before its fix |
-| Complete validation | 9 passed, 1 failed, 4 skipped: 599 missing future-file references in planning docs; no base branch for comparison checks |
-| Secret/sensitive-file checks | Passed; no real credential files were read |
-| Web production dependency audit | 0 vulnerabilities; full audit still reports 6 moderate development-tool findings in the TypeScript ESLint/minimatch chain |
-| Python dependency consistency | All 40 installed packages compatible; this is not a Python vulnerability audit |
-| Fresh PostgreSQL bootstrap | Temporary tmpfs container created vector 0.8.7, pg_trgm 1.6 and the restricted runtime role; test container was removed |
-| Live API/data flow | Readiness 200, Redis outage 503 with generic body, liveness still 200, recovery readiness 200 |
-| Browser | Production overview rendered, three planned cards and roadmap anchor verified; final console had 0 errors/warnings and no horizontal overflow at mobile width 390 |
+| Check                           | Result                                                                                                                                                            |
+| :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend pytest                  | 33 passed; lint, format and strict mypy passed                                                                                                                    |
+| Web Vitest                      | 2 passed; ESLint, Prettier, TypeScript and production build passed                                                                                                |
+| Governance unit tests           | 37 passed; the file-discovery regression failed before its fix                                                                                                    |
+| Complete validation             | 9 passed, 1 failed, 4 skipped: 599 missing future-file references in planning docs; no base branch for comparison checks                                          |
+| Secret/sensitive-file checks    | Passed; no real credential files were read                                                                                                                        |
+| Web production dependency audit | 0 vulnerabilities; full audit still reports 6 moderate development-tool findings in the TypeScript ESLint/minimatch chain                                         |
+| Python dependency consistency   | All 40 installed packages compatible; this is not a Python vulnerability audit                                                                                    |
+| Fresh PostgreSQL bootstrap      | Temporary tmpfs container created vector 0.8.7, pg_trgm 1.6 and the restricted runtime role; test container was removed                                           |
+| Live API/data flow              | Readiness 200, Redis outage 503 with generic body, liveness still 200, recovery readiness 200                                                                     |
+| Browser                         | Production overview rendered, three planned cards and roadmap anchor verified; final console had 0 errors/warnings and no horizontal overflow at mobile width 390 |
 
 The missing future-file count increased when creating actual backend/web directories
 activated validation of existing planning references into those directories. These
@@ -73,16 +73,16 @@ fixed with separately approved regression-tested source discovery.
 
 ## S1/S2 integration verification (2026-11-05)
 
-| Check | Result |
-| :--- | :--- |
-| Backend pytest | 96 passed, including deterministic S1/S2 regressions |
-| Backend Ruff lint/format and mypy | Passed; mypy checked 26 source files |
-| Isolated S1 checks | Subagent verified 37 focused tests, strict mypy over 7 files, Ruff and Docker-layout imports |
-| Fast validation | 7 passed, 1 failed, 0 skipped |
-| Full validation | 9 passed, 1 failed, 4 skipped; 594 documentation findings for missing planned files; comparison checks had no base branch |
-| Web and governance | Web tests/build and governance tests passed through full validation |
-| Repository secrets/sensitive files | Passed through full validation |
-| Cleanup | Spike-owned disposable containers, data volumes and temporary environments removed; unrelated services untouched |
+| Check                              | Result                                                                                                                    |
+| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------ |
+| Backend pytest                     | 96 passed, including deterministic S1/S2 regressions                                                                      |
+| Backend Ruff lint/format and mypy  | Passed; mypy checked 26 source files                                                                                      |
+| Isolated S1 checks                 | Subagent verified 37 focused tests, strict mypy over 7 files, Ruff and Docker-layout imports                              |
+| Fast validation                    | 7 passed, 1 failed, 0 skipped                                                                                             |
+| Full validation                    | 9 passed, 1 failed, 4 skipped; 594 documentation findings for missing planned files; comparison checks had no base branch |
+| Web and governance                 | Web tests/build and governance tests passed through full validation                                                       |
+| Repository secrets/sensitive files | Passed through full validation                                                                                            |
+| Cleanup                            | Spike-owned disposable containers, data volumes and temporary environments removed; unrelated services untouched          |
 
 Only the isolated S1 driver and worker runtime are excluded from application mypy
 discovery; their separate environment supplies queue dependencies and strict checks.
@@ -120,14 +120,14 @@ governance tests and repository secret/sensitive-file checks passed.
 
 ## Phase 01 compatibility audit (2026-11-05)
 
-| Area | Verified evidence | What it does not prove |
-| :--- | :--- | :--- |
-| Installed backend | `uv pip check --python backend\.venv\Scripts\python.exe`: all 40 installed packages compatible | Vulnerability status or live-service readiness |
-| Infrastructure | `docker compose --env-file .env.example config --quiet` passed without loading private dotenv files | No containers were started by this audit |
-| API/database | Existing code uses a factory-mounted router, separate roles, asyncpg, pool size 20, overflow 10 and pre-ping | Tenant schema/RLS remain Phase 02 work |
-| Web | Manifest retains exact Next.js 15/React 19 pins and configured stack checks | Does not deliver authenticated chat |
-| Queue candidate | Celery 5.6.3 + Kombu 5.7.0 + redis-py 8.1.0 resolved with current backend pins and LangGraph 1.2.20 | New transport/cancellation/recovery behavior is untested |
-| ARQ | ARQ 0.28.0 + redis-py 8.1.0 failed resolution, as expected | No runtime client downgrade was attempted |
+| Area                     | Verified evidence                                                                                                 | What it does not prove                                       |
+| :----------------------- | :---------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------- |
+| Installed backend        | `uv pip check --python backend\.venv\Scripts\python.exe`: all 40 installed packages compatible                    | Vulnerability status or live-service readiness               |
+| Infrastructure           | `docker compose --env-file .env.example config --quiet` passed without loading private dotenv files               | No containers were started by this audit                     |
+| API/database             | Existing code uses a factory-mounted router, separate roles, asyncpg, pool size 20, overflow 10 and pre-ping      | Tenant schema/RLS remain Phase 02 work                       |
+| Web                      | Manifest retains exact Next.js 15/React 19 pins and configured stack checks                                       | Does not deliver authenticated chat                          |
+| Queue candidate          | Celery 5.6.3 + Kombu 5.7.0 + redis-py 8.1.0 resolved with current backend pins and LangGraph 1.2.20               | New transport/cancellation/recovery behavior is untested     |
+| ARQ                      | ARQ 0.28.0 + redis-py 8.1.0 failed resolution, as expected                                                        | No runtime client downgrade was attempted                    |
 | Planned SDK/checkpointer | Adding google-genai 2.34.0 and langgraph-checkpoint-postgres 3.2.0 to that resolver input succeeded (73 packages) | No runtime gateway/checkpointer was installed or implemented |
 
 The public metadata for google-genai 2.34.0 requires Python >=3.11 and
@@ -218,16 +218,16 @@ No validator was changed and no dummy target files were created.
 
 The orchestrator independently verified:
 
-| Command | Final result |
-| :--- | :--- |
-| `uv run --directory backend --no-sync pytest -q` | 146 passed |
-| `npm run validate:fast` with backend tools on PATH | 8 passed, 0 failed, 0 skipped |
-| `npm run validate` with backend tools on PATH | 10 passed, 0 failed, 4 skipped |
-| Documentation within validation | 134 Markdown files and all documentation rules passed |
-| Stack lint/typecheck and tests/build | Passed, including backend and web |
-| Governance unit tests | 37 passed |
-| Repository secrets/sensitive files | Passed |
-| `git diff --check` | Passed |
+| Command                                            | Final result                                          |
+| :------------------------------------------------- | :---------------------------------------------------- |
+| `uv run --directory backend --no-sync pytest -q`   | 146 passed                                            |
+| `npm run validate:fast` with backend tools on PATH | 8 passed, 0 failed, 0 skipped                         |
+| `npm run validate` with backend tools on PATH      | 10 passed, 0 failed, 4 skipped                        |
+| Documentation within validation                    | 134 Markdown files and all documentation rules passed |
+| Stack lint/typecheck and tests/build               | Passed, including backend and web                     |
+| Governance unit tests                              | 37 passed                                             |
+| Repository secrets/sensitive files                 | Passed                                                |
+| `git diff --check`                                 | Passed                                                |
 
 The four full-validation skips require a comparison base branch and were not
 executed. GitHub CI and accepted ADR decisions are not implied. Local scope is
@@ -283,11 +283,11 @@ are approved; their lifetime/continuity evidence remains pending.
 
 Before the extended launcher changes, the orchestrator reran:
 
-| Command | Observed result |
-| :--- | :--- |
+| Command                                             | Observed result                                    |
+| :-------------------------------------------------- | :------------------------------------------------- |
 | `npm run validate` with backend environment on PATH | 10 passed, 0 failed, 4 skipped: no comparison base |
-| `uv run --directory backend --no-sync pytest -q` | 146 passed |
-| `git diff --check` | Passed |
+| `uv run --directory backend --no-sync pytest -q`    | 146 passed                                         |
+| `git diff --check`                                  | Passed                                             |
 
 This is a pre-change checkpoint, not validation of the extended launcher.
 Neither approval nor mocked tests replace user-run live evidence. A local

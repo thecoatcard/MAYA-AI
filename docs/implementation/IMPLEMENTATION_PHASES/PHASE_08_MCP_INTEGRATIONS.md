@@ -158,7 +158,7 @@
   - backend/app/mcp/client_manager.py (planned artifact)
   - backend/app/mcp/supervisor.py (planned artifact)
   - backend/app/mcp/normalizer.py (planned artifact)
-  - backend/app/mcp/servers/__init__.py (planned artifact)
+  - backend/app/mcp/servers/**init**.py (planned artifact)
   - backend/app/mcp/servers/filesystem.py (planned artifact)
   - backend/app/mcp/servers/git.py (planned artifact)
   - backend/app/mcp/servers/github.py (planned artifact)

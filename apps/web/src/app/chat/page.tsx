@@ -2,14 +2,19 @@ import type { Metadata } from "next";
 import React from "react";
 
 import { ChatWorkspace } from "../../components/chat/ChatWorkspace";
+import { AppShell } from "../../components/layout/AppShell";
 
 export const metadata: Metadata = {
-  title: "Chat | MAYA AI",
+  title: "Conversational Workspace | MAYA AI",
   description:
-    "Text chat with MAYA AI. Requires sign-in, which is not built yet.",
+    "Conversational intelligence and autonomous task execution with MAYA AI.",
 };
 
 /** Prerendered statically; the page never calls the API at build time. */
 export default function ChatPage() {
-  return <ChatWorkspace />;
+  return (
+    <AppShell title="Conversational Workspace" breadcrumb="Console">
+      <ChatWorkspace embedded />
+    </AppShell>
+  );
 }

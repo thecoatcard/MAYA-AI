@@ -12,8 +12,8 @@ Status vocabulary: Implemented, Tested, Partially tested, Not tested, Blocked, R
 
 ## Files Changed
 
-| File | Change | Status |
-| :--- | :--- | :--- |
+| File   | Change                                 | Status                        |
+| :----- | :------------------------------------- | :---------------------------- |
 | <path> | <added, modified or removed, and what> | <Implemented or other status> |
 
 ## Architecture Impact
@@ -30,8 +30,8 @@ Status vocabulary: Implemented, Tested, Partially tested, Not tested, Blocked, R
 
 ## Validation Results
 
-| Command | Result |
-| :--- | :--- |
+| Command         | Result                                                   |
+| :-------------- | :------------------------------------------------------- |
 | <exact command> | <passed, failed with the key output, or not run and why> |
 
 ## Documentation Updated

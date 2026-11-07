@@ -1,5 +1,6 @@
 import { apiErrorFromResponse, NetworkError } from "./api-client";
 import {
+  getAccessToken,
   refreshSession,
   type RefreshedSession,
   setAccessToken,
@@ -229,3 +230,29 @@ export async function completeSignup(body: {
     return tokens;
   });
 }
+
+export interface UserMe {
+  user_id: string;
+  workspace_id: string;
+  role: string;
+}
+
+export type UserPrincipal = UserMe;
+
+export async function getMe(accessToken?: string): Promise<UserMe | null> {
+  const token = accessToken ?? getAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch("/api/v1/auth/me", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as UserMe;
+  } catch {
+    return null;
+  }
+}
+
+export const getPrincipalMe = getMe;

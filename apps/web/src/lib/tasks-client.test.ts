@@ -143,4 +143,43 @@ describe("tasks-client", () => {
     expect(result.status).toBe("cancelled");
     expect(result.compensations_triggered).toBe(2);
   });
+
+  it("submits task with session_id included in body", async () => {
+    const mockResponse = {
+      task_id: "task-sess-1",
+      status: "executing",
+      idempotency_key: "key-sess-1",
+      created_at: "2026-11-06T12:00:00Z",
+      is_new: true,
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(mockResponse), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await submitTask({
+      instruction: "Analyze voice task",
+      session_id: "session-uuid-123",
+    });
+
+    const calledInit = fetchSpy.mock.calls[0][1] as RequestInit;
+    const parsedBody = JSON.parse(calledInit.body as string);
+    expect(parsedBody.session_id).toBe("session-uuid-123");
+  });
+
+  it("extracts rich detail message from API error response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "Database constraint violated" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(submitTask({ instruction: "Will fail" })).rejects.toThrow(
+      "The API answered 500 (Database constraint violated).",
+    );
+  });
 });

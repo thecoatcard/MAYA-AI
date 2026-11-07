@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import TaskOutboxEvent
@@ -51,16 +51,23 @@ class OutboxDispatcher:
         self,
         session: AsyncSession,
         batch_size: int = 50,
+        workspace_id: UUID | None = None,
     ) -> int:
         """Poll pending outbox events and relay them to Redis Pub/Sub.
 
         Uses SELECT ... FOR UPDATE SKIP LOCKED to prevent duplicate processing
         across multiple dispatcher workers.
         """
+        if workspace_id is not None:
+            await session.execute(
+                text("SELECT set_config('app.workspace_id', :ws, true)"),
+                {"ws": str(workspace_id)},
+            )
+        stmt = select(TaskOutboxEvent).where(TaskOutboxEvent.status == "pending")
+        if workspace_id is not None:
+            stmt = stmt.where(TaskOutboxEvent.workspace_id == workspace_id)
         stmt = (
-            select(TaskOutboxEvent)
-            .where(TaskOutboxEvent.status == "pending")
-            .order_by(TaskOutboxEvent.created_at.asc())
+            stmt.order_by(TaskOutboxEvent.created_at.asc())
             .limit(batch_size)
             .with_for_update(skip_locked=True)
         )
@@ -98,15 +105,21 @@ class OutboxDispatcher:
                         "Outbox event %s could not be published to Redis; keeping pending",
                         event.id,
                     )
+            except ConnectionError as conn_err:
+                logger.warning(
+                    "Connection error dispatching outbox event %s: %s; keeping pending",
+                    event.id,
+                    conn_err,
+                )
+                break
             except Exception as exc:
                 logger.error(
-                    "Error dispatching outbox event %s: %s",
+                    "Error dispatching outbox event %s: %s; transitioning to failed",
                     event.id,
                     exc,
                     exc_info=True,
                 )
-                # Keep as pending or mark failed if permanent error
-                break
+                event.status = "failed"
 
         await session.flush()
         return dispatched_count

@@ -149,7 +149,7 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/app/agents/__init__.py (planned artifact)
+  - backend/app/agents/**init**.py (planned artifact)
   - backend/app/agents/state.py (planned artifact)
   - backend/app/agents/planner.py (planned artifact)
   - backend/app/agents/checkpointer.py (planned artifact)

@@ -103,6 +103,7 @@ _UPSERT_TASK = text(
     )
     ON CONFLICT (workspace_id, id) DO UPDATE SET
         dag_plan = EXCLUDED.dag_plan,
+        instruction = EXCLUDED.instruction,
         status = EXCLUDED.status,
         tool_turns = EXCLUDED.tool_turns,
         completed_at = EXCLUDED.completed_at,

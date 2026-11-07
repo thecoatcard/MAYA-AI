@@ -12,47 +12,48 @@ When code starts reading an environment variable:
 2. Add a row to the table below.
 3. Run `npm run docs:check`. It fails if source code reads a variable that is missing from either place, or if `.env.example` lists a variable that is missing here.
 
-| Variable | Purpose | Required | Example value |
-| :--- | :--- | :--- | :--- |
-| `MAYA_DATABASE_URL` | Required asyncpg URL for the non-admin runtime login | Yes | Root example, loopback port 15432 |
-| `MAYA_REDIS_URL` | Redis connection URL without query/fragment overrides | Yes | `redis://127.0.0.1:16379/0` |
-| `MAYA_MIGRATION_DATABASE_URL` | Separate migration-role URL, unused by the API | No | Root example; role must differ from runtime |
-| `MAYA_PROBE_TIMEOUT_SECONDS` | Combined readiness timeout and pool/connect timeout | No; defaults to 2, greater than 0 and at most 30 | `2` |
-| `MAYA_JWT_SIGNING_KEY` | HS256 key for access and refresh tokens; at least 32 bytes, different from the OTP key | Yes | Public local example in the root example only |
-| `MAYA_OTP_HMAC_KEY` | Server-side key for one-time-code HMACs and rate-limit key hashing; at least 32 bytes | Yes | Public local example in the root example only |
-| `MAYA_ACCESS_TOKEN_TTL_SECONDS` | Access-token lifetime | No; defaults to 900, between 60 and 3600 | `900` |
-| `MAYA_REFRESH_TOKEN_TTL_SECONDS` | Sliding refresh-token lifetime | No; defaults to 604800 (7 days), between 3600 and 2592000 | `604800` |
-| `MAYA_REFRESH_ABSOLUTE_TTL_SECONDS` | Hard session lifetime from login; must not be below the refresh lifetime | No; defaults to 2592000 (30 days), at most 7776000 | `2592000` |
-| `MAYA_AUTH_COOKIE_SECURE` | Marks the browser refresh cookie `Secure`; keep true outside local plain-HTTP development | No; defaults to true | `true` |
-| `MAYA_OTP_RESEND_COOLDOWN_SECONDS` | Minimum time between one-time codes for the same account and purpose | No; defaults to 60, between 1 and 3600 | `60` |
-| `MAYA_SMTP_HOST` | SMTP server for one-time-code e-mail; unset disables e-mail and the e-mail endpoints answer 503 | No; needs the sender address | Placeholder host in the root example (commented) |
-| `MAYA_SMTP_PORT` | SMTP port | No; defaults to 587 | `587` |
-| `MAYA_SMTP_SECURITY` | `starttls` or `ssl`; plaintext SMTP is not supported | No; defaults to `starttls` | `starttls` |
-| `MAYA_SMTP_USERNAME` | SMTP login; set together with the password | No | Set privately |
-| `MAYA_SMTP_PASSWORD` | SMTP password or app password; never logged | No | Set privately |
-| `MAYA_SMTP_FROM_ADDRESS` | Sender address; set together with the host | No | Placeholder in the root example (commented) |
-| `MAYA_GEMINI_API_KEY` | Gemini API key; optional in local tests, never logged | No | Commented placeholder `example-gemini-key-not-real` |
-| `MAYA_GEMINI_MODEL_OVERRIDES` | JSON dict overriding model IDs for enabled REST aliases only | No; defaults to empty `{}` | `{}` |
-| `MAYA_GEMINI_VERIFY_MODELS_ON_STARTUP` | Whether to query models.list at startup; disabled by default and in tests | No; defaults to false | `false` |
-| `MAYA_GEMINI_REQUEST_TIMEOUT_SECONDS` | Gateway per-request timeout in seconds | No; defaults to 30.0, between 0 and 300 | `30.0` |
-| `MAYA_BUDGET_ENFORCEMENT_MODE` | Budget mode: `log_only` records usage and alerts; `enforce` stops execution | No; defaults to `log_only` | `log_only` |
-| `MAYA_GEMINI_BUDGET_TASK_USD_ALERT` | Per-task spending alert threshold (USD); a warning only, set it below the cap in `enforce` mode | No; defaults to 1.50 | `1.50` |
-| `MAYA_GEMINI_MAX_TOOL_TURNS_ALERT` | Per-task tool turns alert threshold; a warning only, set it below the cap in `enforce` mode | No; defaults to 10 | `10` |
-| `MAYA_GEMINI_BUDGET_TASK_USD_CAP` | Per-task hard budget cap (USD); required when enforcement mode is `enforce`; owner-approved value 1.50 | No; required in `enforce` mode | None |
-| `MAYA_GEMINI_MAX_TOOL_TURNS_CAP` | Per-task hard tool turn cap; required when enforcement mode is `enforce`; owner-approved value 10 | No; required in `enforce` mode | None |
-| `MAYA_CHAT_MAX_MESSAGE_CHARS` | Longest chat message accepted; owner-approved default | No; defaults to 8000, 1 to 16000 (the 64 KiB request-body limit bounds the real maximum) | `8000` |
-| `MAYA_CHAT_RATE_LIMIT_PER_MINUTE` | Chat message starts per user per minute; owner-approved default | No; defaults to 20, 1 to 10000 | `20` |
-| `MAYA_CHAT_CONTEXT_TOKEN_BUDGET` | Soft token budget for the history sent to the model; owner-approved default | No; defaults to 32000, 1000 to 1000000 | `32000` |
-| `MAYA_CHAT_MAX_CONCURRENT_STREAMS_PER_USER` | Maximum active chat replies per user | No; defaults to 2, 1 to 100 | `2` |
-| `MAYA_CHAT_REPLY_DEADLINE_SECONDS` | Wall-clock limit for one chat reply | No; defaults to 120, 1 to 900 | `120` |
-| `MAYA_CHAT_MAX_OUTPUT_TOKENS` | Maximum generated tokens in one chat reply | No; defaults to 2048, 1 to 32768 | `2048` |
-| `MAYA_API_PROXY_TARGET` | Web only: server-side API origin used by the same-origin Next.js proxy; non-loopback HTTP is rejected, and the value is never exposed in the browser bundle | No; defaults to `http://127.0.0.1:8000` | `http://127.0.0.1:8000` |
-| `POSTGRES_DB` | Compose development database | Compose | `maya` |
-| `POSTGRES_USER` | Compose bootstrap administrator, not the API login | Compose | `maya_migrator` |
-| `POSTGRES_PASSWORD` | Bootstrap password, only a non-secret local example is tracked | Compose | Set privately outside local testing |
-| `POSTGRES_APP_PASSWORD` | Runtime login password used at first initialization | Compose | Set privately outside local testing |
-| `POSTGRES_PORT` | Loopback host port for PostgreSQL | No | `15432` |
-| `REDIS_PORT` | Loopback host port for Redis | No | `16379` |
+| Variable                                    | Purpose                                                                                                                                                     | Required                                                                                 | Example value                                       |
+| :------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------- | :-------------------------------------------------- |
+| `MAYA_DATABASE_URL`                         | Required asyncpg URL for the non-admin runtime login                                                                                                        | Yes                                                                                      | Root example, loopback port 15432                   |
+| `MAYA_REDIS_URL`                            | Redis connection URL without query/fragment overrides                                                                                                       | Yes                                                                                      | `redis://127.0.0.1:16379/0`                         |
+| `MAYA_MIGRATION_DATABASE_URL`               | Separate migration-role URL, unused by the API                                                                                                              | No                                                                                       | Root example; role must differ from runtime         |
+| `MAYA_PROBE_TIMEOUT_SECONDS`                | Combined readiness timeout and pool/connect timeout                                                                                                         | No; defaults to 2, greater than 0 and at most 30                                         | `2`                                                 |
+| `MAYA_JWT_SIGNING_KEY`                      | HS256 key for access and refresh tokens; at least 32 bytes, different from the OTP key                                                                      | Yes                                                                                      | Public local example in the root example only       |
+| `MAYA_OTP_HMAC_KEY`                         | Server-side key for one-time-code HMACs and rate-limit key hashing; at least 32 bytes                                                                       | Yes                                                                                      | Public local example in the root example only       |
+| `MAYA_ACCESS_TOKEN_TTL_SECONDS`             | Access-token lifetime                                                                                                                                       | No; defaults to 900, between 60 and 3600                                                 | `900`                                               |
+| `MAYA_REFRESH_TOKEN_TTL_SECONDS`            | Sliding refresh-token lifetime                                                                                                                              | No; defaults to 604800 (7 days), between 3600 and 2592000                                | `604800`                                            |
+| `MAYA_REFRESH_ABSOLUTE_TTL_SECONDS`         | Hard session lifetime from login; must not be below the refresh lifetime                                                                                    | No; defaults to 2592000 (30 days), at most 7776000                                       | `2592000`                                           |
+| `MAYA_AUTH_COOKIE_SECURE`                   | Marks the browser refresh cookie `Secure`; keep true outside local plain-HTTP development                                                                   | No; defaults to true                                                                     | `true`                                              |
+| `MAYA_OTP_RESEND_COOLDOWN_SECONDS`          | Minimum time between one-time codes for the same account and purpose                                                                                        | No; defaults to 60, between 1 and 3600                                                   | `60`                                                |
+| `MAYA_SMTP_HOST`                            | SMTP server for one-time-code e-mail; unset disables e-mail and the e-mail endpoints answer 503                                                             | No; needs the sender address                                                             | Placeholder host in the root example (commented)    |
+| `MAYA_SMTP_PORT`                            | SMTP port                                                                                                                                                   | No; defaults to 587                                                                      | `587`                                               |
+| `MAYA_SMTP_SECURITY`                        | `starttls` or `ssl`; plaintext SMTP is not supported                                                                                                        | No; defaults to `starttls`                                                               | `starttls`                                          |
+| `MAYA_SMTP_USERNAME`                        | SMTP login; set together with the password                                                                                                                  | No                                                                                       | Set privately                                       |
+| `MAYA_SMTP_PASSWORD`                        | SMTP password or app password; never logged                                                                                                                 | No                                                                                       | Set privately                                       |
+| `MAYA_SMTP_FROM_ADDRESS`                    | Sender address; set together with the host                                                                                                                  | No                                                                                       | Placeholder in the root example (commented)         |
+| `MAYA_GEMINI_API_KEY`                       | Gemini API key; optional in local tests, never logged                                                                                                       | No                                                                                       | Commented placeholder `example-gemini-key-not-real` |
+| `MAYA_GEMINI_MODEL_OVERRIDES`               | JSON dict overriding model IDs for enabled REST aliases only                                                                                                | No; defaults to empty `{}`                                                               | `{}`                                                |
+| `MAYA_GEMINI_VERIFY_MODELS_ON_STARTUP`      | Whether to query models.list at startup; disabled by default and in tests                                                                                   | No; defaults to false                                                                    | `false`                                             |
+| `MAYA_GEMINI_REQUEST_TIMEOUT_SECONDS`       | Gateway per-request timeout in seconds                                                                                                                      | No; defaults to 30.0, between 0 and 300                                                  | `30.0`                                              |
+| `MAYA_BUDGET_ENFORCEMENT_MODE`              | Budget mode: `log_only` records usage and alerts; `enforce` stops execution                                                                                 | No; defaults to `log_only`                                                               | `log_only`                                          |
+| `MAYA_GEMINI_BUDGET_TASK_USD_ALERT`         | Per-task spending alert threshold (USD); a warning only, set it below the cap in `enforce` mode                                                             | No; defaults to 1.50                                                                     | `1.50`                                              |
+| `MAYA_GEMINI_MAX_TOOL_TURNS_ALERT`          | Per-task tool turns alert threshold; a warning only, set it below the cap in `enforce` mode                                                                 | No; defaults to 10                                                                       | `10`                                                |
+| `MAYA_GEMINI_BUDGET_TASK_USD_CAP`           | Per-task hard budget cap (USD); required when enforcement mode is `enforce`; owner-approved value 1.50                                                      | No; required in `enforce` mode                                                           | None                                                |
+| `MAYA_GEMINI_MAX_TOOL_TURNS_CAP`            | Per-task hard tool turn cap; required when enforcement mode is `enforce`; owner-approved value 10                                                           | No; required in `enforce` mode                                                           | None                                                |
+| `MAYA_CHAT_MAX_MESSAGE_CHARS`               | Longest chat message accepted; owner-approved default                                                                                                       | No; defaults to 8000, 1 to 16000 (the 64 KiB request-body limit bounds the real maximum) | `8000`                                              |
+| `MAYA_CHAT_RATE_LIMIT_PER_MINUTE`           | Chat message starts per user per minute; owner-approved default                                                                                             | No; defaults to 20, 1 to 10000                                                           | `20`                                                |
+| `MAYA_CHAT_CONTEXT_TOKEN_BUDGET`            | Soft token budget for the history sent to the model; owner-approved default                                                                                 | No; defaults to 32000, 1000 to 1000000                                                   | `32000`                                             |
+| `MAYA_CHAT_MAX_CONCURRENT_STREAMS_PER_USER` | Maximum active chat replies per user                                                                                                                        | No; defaults to 2, 1 to 100                                                              | `2`                                                 |
+| `MAYA_CHAT_REPLY_DEADLINE_SECONDS`          | Wall-clock limit for one chat reply                                                                                                                         | No; defaults to 120, 1 to 900                                                            | `120`                                               |
+| `MAYA_CHAT_MAX_OUTPUT_TOKENS`               | Maximum generated tokens in one chat reply                                                                                                                  | No; defaults to 2048, 1 to 32768                                                         | `2048`                                              |
+| `MAYA_API_PROXY_TARGET`                     | Web only: server-side API origin used by the same-origin Next.js proxy; non-loopback HTTP is rejected, and the value is never exposed in the browser bundle | No; defaults to `http://127.0.0.1:8000`                                                  | `http://127.0.0.1:8000`                             |
+| `NEXT_PUBLIC_VOICE_WS_URL`                   | Web only: optional client override for live voice WebSocket endpoint (defaults to `ws://127.0.0.1:8000/api/v1/voice/live` or current host)                 | No; defaults to `ws://127.0.0.1:8000/api/v1/voice/live`                                  | `ws://127.0.0.1:8000/api/v1/voice/live`             |
+| `POSTGRES_DB`                               | Compose development database                                                                                                                                | Compose                                                                                  | `maya`                                              |
+| `POSTGRES_USER`                             | Compose bootstrap administrator, not the API login                                                                                                          | Compose                                                                                  | `maya_migrator`                                     |
+| `POSTGRES_PASSWORD`                         | Bootstrap password, only a non-secret local example is tracked                                                                                              | Compose                                                                                  | Set privately outside local testing                 |
+| `POSTGRES_APP_PASSWORD`                     | Runtime login password used at first initialization                                                                                                         | Compose                                                                                  | Set privately outside local testing                 |
+| `POSTGRES_PORT`                             | Loopback host port for PostgreSQL                                                                                                                           | No                                                                                       | `15432`                                             |
+| `REDIS_PORT`                                | Loopback host port for Redis                                                                                                                                | No                                                                                       | `16379`                                             |
 
 Never put real secrets in `.env.example` or in this document. Real values live in an untracked `.env` file or a secret manager.
 
@@ -74,18 +75,18 @@ pattern matches them. Outside Git, directory-based scanning remains available.
 
 `governance/governance.config.json` is the machine-readable policy that the validators read. It is a guardrail file: changing it needs explicit human approval.
 
-| Section | Controls |
-| :--- | :--- |
-| `requiredFiles` | Files that must exist; `docs:check` fails if one is missing |
-| `instructionFiles` | Size limit for `AGENTS.md` (24,000 bytes, the Antigravity truncation limit) |
-| `agentWrappers` | Name prefixes and the hard-rules markers used by the agent-file generator |
-| `markdown` | Which folders are documentation, and the unfinished-work patterns that are rejected |
-| `modules` | Where module directories live; each needs a README or a page under `docs/modules/` |
-| `env` | Source globs scanned for environment variable use, and names that need no documentation |
-| `sensitive` | Files that must never be committed, and the guardrail paths that need a `Human-Approval:` trailer |
-| `commits` | Allowed Conventional Commit types and header length |
-| `changeRules` | Diff-based documentation, ADR and changelog requirements |
-| `stacks` | How application projects are detected and which lint, type, test and build commands run |
+| Section            | Controls                                                                                          |
+| :----------------- | :------------------------------------------------------------------------------------------------ |
+| `requiredFiles`    | Files that must exist; `docs:check` fails if one is missing                                       |
+| `instructionFiles` | Size limit for `AGENTS.md` (24,000 bytes, the Antigravity truncation limit)                       |
+| `agentWrappers`    | Name prefixes and the hard-rules markers used by the agent-file generator                         |
+| `markdown`         | Which folders are documentation, and the unfinished-work patterns that are rejected               |
+| `modules`          | Where module directories live; each needs a README or a page under `docs/modules/`                |
+| `env`              | Source globs scanned for environment variable use, and names that need no documentation           |
+| `sensitive`        | Files that must never be committed, and the guardrail paths that need a `Human-Approval:` trailer |
+| `commits`          | Allowed Conventional Commit types and header length                                               |
+| `changeRules`      | Diff-based documentation, ADR and changelog requirements                                          |
+| `stacks`           | How application projects are detected and which lint, type, test and build commands run           |
 
 ## Tooling and CI variables
 

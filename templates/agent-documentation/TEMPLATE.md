@@ -9,8 +9,8 @@
 
 ## Tools
 
-| Tool | Source | Permission level |
-| :--- | :--- | :--- |
+| Tool        | Source              | Permission level                             |
+| :---------- | :------------------ | :------------------------------------------- |
 | <tool name> | <server or library> | READ, WRITE, APPROVAL_REQUIRED or RESTRICTED |
 
 The agent can call only the tools listed here.

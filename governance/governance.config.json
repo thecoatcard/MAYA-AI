@@ -62,7 +62,18 @@
   },
 
   "markdown": {
-    "roots": ["README.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "CHANGELOG.md", "governance", "docs", ".github", ".claude", ".agents"],
+    "roots": [
+      "README.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      "CHANGELOG.md",
+      "governance",
+      "docs",
+      ".github",
+      ".claude",
+      ".agents"
+    ],
     "ignore": ["node_modules/**", "templates/**"],
     "placeholderPatterns": [
       { "pattern": "\\bTBD\\b" },
@@ -86,55 +97,214 @@
   "env": {
     "exampleFile": ".env.example",
     "referenceDoc": "docs/guides/CONFIGURATION.md",
-    "sourceGlobs": ["**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
-    "excludeGlobs": ["node_modules/**", "scripts/**", "templates/**", "docs/**", "**/*.test.*", "**/tests/**"],
-    "ignoredNames": ["CI", "NODE_ENV", "HOME", "PATH", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "NO_COLOR", "FORCE_COLOR"]
+    "sourceGlobs": [
+      "**/*.py",
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.mjs",
+      "**/*.cjs"
+    ],
+    "excludeGlobs": [
+      "node_modules/**",
+      "scripts/**",
+      "templates/**",
+      "docs/**",
+      "**/*.test.*",
+      "**/tests/**"
+    ],
+    "ignoredNames": [
+      "CI",
+      "NODE_ENV",
+      "HOME",
+      "PATH",
+      "USERPROFILE",
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+      "NO_COLOR",
+      "FORCE_COLOR"
+    ]
   },
 
   "sensitive": {
     "blockedFiles": [
-      ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
-      "id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", "credentials.json",
-      "service-account*.json", "*.tfstate", "*.tfstate.*", ".netrc", "secrets/**"
+      ".env",
+      ".env.*",
+      "*.pem",
+      "*.key",
+      "*.p12",
+      "*.pfx",
+      "*.jks",
+      "*.keystore",
+      "id_rsa",
+      "id_rsa.*",
+      "id_ed25519",
+      "id_ed25519.*",
+      "credentials.json",
+      "service-account*.json",
+      "*.tfstate",
+      "*.tfstate.*",
+      ".netrc",
+      "secrets/**"
     ],
     "blockedExceptions": [".env.example"],
     "approvalRequiredPaths": [
-      "AGENTS.md", "CLAUDE.md", "GEMINI.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
       ".claude/settings.json",
-      ".github/workflows/**", ".github/copilot-instructions.md", ".github/instructions/**", ".github/dependabot.yml",
+      ".github/workflows/**",
+      ".github/copilot-instructions.md",
+      ".github/instructions/**",
+      ".github/dependabot.yml",
       "governance/**",
-      "scripts/hooks/**", "scripts/validation/**", "scripts/governance/**", "scripts/lib/**",
-      "package.json", "package-lock.json",
-      "**/migrations/**", "docker/**", "Dockerfile*", "**/Dockerfile",
-      "backend/app/core/security*", "backend/app/mcp/permissions*", "backend/app/mcp/approvals*"
+      "scripts/hooks/**",
+      "scripts/validation/**",
+      "scripts/governance/**",
+      "scripts/lib/**",
+      "package.json",
+      "package-lock.json",
+      "**/migrations/**",
+      "docker/**",
+      "Dockerfile*",
+      "**/Dockerfile",
+      "backend/app/core/security*",
+      "backend/app/mcp/permissions*",
+      "backend/app/mcp/approvals*"
     ],
     "approvalTrailer": "Human-Approval"
   },
 
   "commits": {
-    "types": ["feat", "fix", "docs", "test", "refactor", "security", "chore", "perf", "build", "ci", "style", "revert"],
+    "types": [
+      "feat",
+      "fix",
+      "docs",
+      "test",
+      "refactor",
+      "security",
+      "chore",
+      "perf",
+      "build",
+      "ci",
+      "style",
+      "revert"
+    ],
     "maxHeaderLength": 100,
     "skipPrefixes": ["Merge ", "Revert \"", "fixup! ", "squash! "]
   },
 
   "changeRules": {
-    "ignoreChangedPaths": ["docs/**", "templates/**", "**/*.md", "**/tests/**", "**/*.test.*", "**/test_*.py", "**/*_test.py"],
+    "ignoreChangedPaths": [
+      "docs/**",
+      "templates/**",
+      "**/*.md",
+      "**/tests/**",
+      "**/*.test.*",
+      "**/test_*.py",
+      "**/*_test.py"
+    ],
     "exemptCommitTypes": ["style", "test", "docs"],
     "docRules": [
-      { "id": "api", "description": "API changes need API documentation", "when": ["backend/app/api/**"], "requireOneOf": ["docs/api/**"], "trailer": "Docs" },
-      { "id": "database", "description": "Database changes need schema and migration notes", "when": ["backend/app/db/**", "**/migrations/**", "**/alembic/**"], "requireOneOf": ["docs/architecture/DATA_MODEL.md", "docs/operations/**"], "trailer": "Docs" },
-      { "id": "integration", "description": "Integrations need setup, permission and failure-handling docs", "when": ["backend/app/mcp/**", "backend/mcp_servers/**"], "requireOneOf": ["docs/integrations/**"], "trailer": "Docs" },
-      { "id": "configuration", "description": "Configuration changes must update the configuration reference", "when": [".env.example", "**/config.py", "**/config.ts"], "requireOneOf": ["docs/guides/CONFIGURATION.md"], "trailer": "Docs" },
-      { "id": "security", "description": "Security changes need security documentation and threat notes", "when": ["backend/app/core/security*", "backend/app/mcp/permissions*", "backend/app/mcp/approvals*"], "requireOneOf": ["docs/security/**"], "trailer": "Docs" },
-      { "id": "agent", "description": "New or changed runtime agents need agent documentation", "when": ["backend/app/agents/**"], "requireOneOf": ["docs/modules/**"], "trailer": "Docs" },
-      { "id": "background-task", "description": "Background tasks need lifecycle, retry, timeout and cancellation docs", "when": ["backend/app/tasks/**"], "requireOneOf": ["docs/modules/**", "docs/operations/**"], "trailer": "Docs" },
-      { "id": "deployment", "description": "Deployment changes need operational documentation", "when": ["docker/**", "Dockerfile*", "**/Dockerfile", ".github/workflows/**"], "requireOneOf": ["docs/operations/**"], "trailer": "Docs" },
-      { "id": "dependencies", "description": "Dependency changes need a changelog or dependency note", "when": ["package.json", "package-lock.json", "**/pyproject.toml", "**/requirements*.txt", "**/poetry.lock", "**/uv.lock"], "requireOneOf": ["CHANGELOG.md", "docs/**"], "trailer": "Docs" }
+      {
+        "id": "api",
+        "description": "API changes need API documentation",
+        "when": ["backend/app/api/**"],
+        "requireOneOf": ["docs/api/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "database",
+        "description": "Database changes need schema and migration notes",
+        "when": ["backend/app/db/**", "**/migrations/**", "**/alembic/**"],
+        "requireOneOf": [
+          "docs/architecture/DATA_MODEL.md",
+          "docs/operations/**"
+        ],
+        "trailer": "Docs"
+      },
+      {
+        "id": "integration",
+        "description": "Integrations need setup, permission and failure-handling docs",
+        "when": ["backend/app/mcp/**", "backend/mcp_servers/**"],
+        "requireOneOf": ["docs/integrations/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "configuration",
+        "description": "Configuration changes must update the configuration reference",
+        "when": [".env.example", "**/config.py", "**/config.ts"],
+        "requireOneOf": ["docs/guides/CONFIGURATION.md"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "security",
+        "description": "Security changes need security documentation and threat notes",
+        "when": [
+          "backend/app/core/security*",
+          "backend/app/mcp/permissions*",
+          "backend/app/mcp/approvals*"
+        ],
+        "requireOneOf": ["docs/security/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "agent",
+        "description": "New or changed runtime agents need agent documentation",
+        "when": ["backend/app/agents/**"],
+        "requireOneOf": ["docs/modules/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "background-task",
+        "description": "Background tasks need lifecycle, retry, timeout and cancellation docs",
+        "when": ["backend/app/tasks/**"],
+        "requireOneOf": ["docs/modules/**", "docs/operations/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "deployment",
+        "description": "Deployment changes need operational documentation",
+        "when": [
+          "docker/**",
+          "Dockerfile*",
+          "**/Dockerfile",
+          ".github/workflows/**"
+        ],
+        "requireOneOf": ["docs/operations/**"],
+        "trailer": "Docs"
+      },
+      {
+        "id": "dependencies",
+        "description": "Dependency changes need a changelog or dependency note",
+        "when": [
+          "package.json",
+          "package-lock.json",
+          "**/pyproject.toml",
+          "**/requirements*.txt",
+          "**/poetry.lock",
+          "**/uv.lock"
+        ],
+        "requireOneOf": ["CHANGELOG.md", "docs/**"],
+        "trailer": "Docs"
+      }
     ],
     "adrRule": {
       "id": "architecture",
       "description": "Architecture-level changes need an ADR or an explicit waiver",
-      "when": ["backend/app/agents/**", "backend/app/mcp/**", "backend/app/voice/**", "backend/app/tasks/**", "backend/app/memory/**", "backend/app/db/**", "backend/app/core/**", "docker/**", "apps/desktop/**"],
+      "when": [
+        "backend/app/agents/**",
+        "backend/app/mcp/**",
+        "backend/app/voice/**",
+        "backend/app/tasks/**",
+        "backend/app/memory/**",
+        "backend/app/db/**",
+        "backend/app/core/**",
+        "docker/**",
+        "apps/desktop/**"
+      ],
       "requireOneOf": ["docs/adr/*.md"],
       "excludeFiles": ["docs/adr/README.md"],
       "commitTypes": ["feat", "refactor", "security", "perf", "build"],
@@ -152,7 +322,10 @@
       "name": "backend-python",
       "detect": "backend/pyproject.toml",
       "cwd": "backend",
-      "lint": [["ruff", "check", "."], ["ruff", "format", "--check", "."]],
+      "lint": [
+        ["ruff", "check", "."],
+        ["ruff", "format", "--check", "."]
+      ],
       "typecheck": [["mypy", "."]],
       "test": [["pytest", "-q"]],
       "build": []

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Square, TriangleAlert } from "lucide-react";
+import { ArrowUp, Mic, Square, TriangleAlert } from "lucide-react";
 import {
   useId,
   useLayoutEffect,
@@ -28,6 +28,10 @@ export interface ChatInputProps {
   /** Provisional input limit; the server is the authority. */
   maxChars?: number;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Optional real-time voice microphone controls */
+  isListening?: boolean;
+  onToggleVoice?: () => void;
+  voiceLabel?: string;
 }
 
 /** Counter turns into a warning at this share of the limit. */
@@ -42,6 +46,9 @@ export function ChatInput({
   disabled = false,
   maxChars = CHAT_MAX_MESSAGE_CHARS,
   inputRef,
+  isListening = false,
+  onToggleVoice,
+  voiceLabel,
 }: ChatInputProps) {
   const localRef = useRef<HTMLTextAreaElement>(null);
   const ref = inputRef ?? localRef;
@@ -132,6 +139,29 @@ export function ChatInput({
             composingRef.current = false;
           }}
         />
+        {onToggleVoice && (
+          <button
+            type="button"
+            className={`p-2 rounded-lg border transition-all flex items-center justify-center mr-1 ${
+              isListening
+                ? "border-teal-500/50 bg-teal-500/20 text-teal-300 animate-pulse"
+                : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+            }`}
+            aria-label={
+              isListening ? "Stop voice listening" : "Start voice listening"
+            }
+            title={
+              isListening
+                ? "Stop voice listening"
+                : voiceLabel || "Speak with Maya"
+            }
+            onClick={onToggleVoice}
+          >
+            <Mic
+              className={`w-4 h-4 ${isListening ? "text-teal-400" : "text-zinc-400"}`}
+            />
+          </button>
+        )}
         <button
           type="button"
           className="maya-composer__action"
@@ -155,7 +185,14 @@ export function ChatInput({
       </div>
       <div className="maya-composer__meta" id={metaId}>
         <p className="maya-composer__hint">
-          Enter to send. Shift+Enter for a new line.
+          {isListening ? (
+            <span className="text-teal-400 font-semibold inline-flex items-center gap-1.5 animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+              Maya is listening to your microphone... speak or type below
+            </span>
+          ) : (
+            "Enter to send. Shift+Enter for a new line."
+          )}
         </p>
         <p
           className="maya-composer__count"

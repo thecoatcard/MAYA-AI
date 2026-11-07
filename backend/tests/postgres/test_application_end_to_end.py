@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from dotenv import dotenv_values
 from fastapi.testclient import TestClient
+from sqlalchemy.engine import make_url
 
 from app.db.tenant import UnsafeDatabaseRole
 from app.main import create_app
@@ -37,8 +38,13 @@ def redis_url() -> str:
 
 def settings_for(database_url: str):  # type: ignore[no-untyped-def]
     # Fresh keys per run, so rate-limit counters left in Redis by an earlier run cannot collide.
+    url = (
+        make_url(database_url)
+        .set(drivername="postgresql+asyncpg")
+        .render_as_string(hide_password=False)
+    )
     return make_settings(
-        database_url=database_url,
+        database_url=url,
         redis_url=redis_url(),
         otp_hmac_key=secrets.token_urlsafe(48),
         jwt_signing_key=secrets.token_urlsafe(48),

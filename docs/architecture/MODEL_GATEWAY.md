@@ -10,6 +10,7 @@
 The Model Gateway provides a centralized, typed interface for all Large Language Model interactions across MAYA AI. It decouples high-level agent reasoning (Phases 04, 05, 09, 11) from specific provider SDKs and concrete model versions.
 
 Key responsibilities:
+
 - Unified execution across 6 typed operations.
 - Dynamic role alias resolution with terminating cycle-safe fallback traversal.
 - Exponential backoff with full jitter on 429/timeouts and immediate failover on 5xx.
@@ -56,14 +57,14 @@ Key responsibilities:
 
 The gateway exposes 6 primary asynchronous methods:
 
-| Operation | Method Signature | Primary Responsibilities |
-| :--- | :--- | :--- |
-| **Text Generation** | `generate_text(alias, contents, ...)` | Unified text generation with multi-model fallback and usage metering. |
-| **Streaming** | `generate_stream(alias, contents, ...)` | Async chunk streaming (an async generator). A blocked first chunk is metered from its usage metadata or an input estimate when accounting succeeds. After the first chunk, failures raise `StreamInterruptedError` with estimated partial usage; cancellation or early close attempts the same accounting and closes the provider stream. |
-| **Structured Output** | `generate_structured(alias, contents, schema, ...)` | Parses output into Pydantic models. Triggers 1 structured self-repair turn if invalid before failing closed. |
-| **Tool Calling** | `generate_with_tools(alias, contents, tools, ...)` | Emits structured function call requests. **The gateway never executes tools.** |
-| **Embeddings** | `embed_content(alias, contents, ...)` | Estimates and attempts to record usage for each received response before enforcing 768 dimensions or rejecting empty vectors. Fallback is opt-in only (`allow_fallback=False` by default). |
-| **Token Counting** | `count_tokens(alias, contents)` | Computes token counts for prompt sizing and context budgeting. |
+| Operation             | Method Signature                                    | Primary Responsibilities                                                                                                                                                                                                                                                                                                                  |
+| :-------------------- | :-------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Text Generation**   | `generate_text(alias, contents, ...)`               | Unified text generation with multi-model fallback and usage metering.                                                                                                                                                                                                                                                                     |
+| **Streaming**         | `generate_stream(alias, contents, ...)`             | Async chunk streaming (an async generator). A blocked first chunk is metered from its usage metadata or an input estimate when accounting succeeds. After the first chunk, failures raise `StreamInterruptedError` with estimated partial usage; cancellation or early close attempts the same accounting and closes the provider stream. |
+| **Structured Output** | `generate_structured(alias, contents, schema, ...)` | Parses output into Pydantic models. Triggers 1 structured self-repair turn if invalid before failing closed.                                                                                                                                                                                                                              |
+| **Tool Calling**      | `generate_with_tools(alias, contents, tools, ...)`  | Emits structured function call requests. **The gateway never executes tools.**                                                                                                                                                                                                                                                            |
+| **Embeddings**        | `embed_content(alias, contents, ...)`               | Estimates and attempts to record usage for each received response before enforcing 768 dimensions or rejecting empty vectors. Fallback is opt-in only (`allow_fallback=False` by default).                                                                                                                                                |
+| **Token Counting**    | `count_tokens(alias, contents)`                     | Computes token counts for prompt sizing and context budgeting.                                                                                                                                                                                                                                                                            |
 
 ---
 
@@ -71,19 +72,20 @@ The gateway exposes 6 primary asynchronous methods:
 
 Models are referenced by logical aliases defined in the canonical registry (`app.gateway.registry`):
 
-| Alias | Target Model ID | Transport | Input / 1M | Output / 1M | Cached / 1M | Fallback Chain |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `orchestrator` | `gemini-3.8-flash` | REST | \$0.75 | \$3.75 | \$0.075 | `orchestrator` -> `lite` |
-| `heavy` | `gemini-4-argon` | REST | \$2.00 | \$10.00 | \$0.100 | `heavy` -> `orchestrator` -> `lite` |
-| `lite` | `gemini-3.5-flash-lite` | REST | \$0.30 | \$2.50 | \$0.030 | `lite` -> `orchestrator` |
-| `embed` | `gemini-embedding-2` | REST | \$0.20 | - | - | `embed` (fallback opt-in to `embed-fallback`) |
-| `embed-fallback` | `gemini-embedding-001` | REST | Unknown | Unknown | Unknown | None (terminating) |
-| `live` | `gemini-3.8-live` | WebSocket | \$1.50 | \$9.00 | - | `live` -> `live-thinking` (Registry-only) |
-| `live-thinking` | `gemini-3.8-live-extended-thinking`| WebSocket | \$1.50 | \$9.00 | - | `live-thinking` -> `live` (Registry-only) |
-| `research` | `deep-research-preview-04-2026` | Managed | Unknown | Unknown | Unknown | None (Custom plan required) |
-| `tts` | `gemini-3.8-flash-tts` | Unsupported | Unknown | Unknown | Unknown | None (Post-MVP; disabled) |
+| Alias            | Target Model ID                     | Transport   | Input / 1M | Output / 1M | Cached / 1M | Fallback Chain                                |
+| :--------------- | :---------------------------------- | :---------- | :--------- | :---------- | :---------- | :-------------------------------------------- |
+| `orchestrator`   | `gemini-3.8-flash`                  | REST        | \$0.75     | \$3.75      | \$0.075     | `orchestrator` -> `lite`                      |
+| `heavy`          | `gemini-4-argon`                    | REST        | \$2.00     | \$10.00     | \$0.100     | `heavy` -> `orchestrator` -> `lite`           |
+| `lite`           | `gemini-3.5-flash-lite`             | REST        | \$0.30     | \$2.50      | \$0.030     | `lite` -> `orchestrator`                      |
+| `embed`          | `gemini-embedding-2`                | REST        | \$0.20     | -           | -           | `embed` (fallback opt-in to `embed-fallback`) |
+| `embed-fallback` | `gemini-embedding-001`              | REST        | Unknown    | Unknown     | Unknown     | None (terminating)                            |
+| `live`           | `gemini-3.8-live`                   | WebSocket   | \$1.50     | \$9.00      | -           | `live` -> `live-thinking` (Registry-only)     |
+| `live-thinking`  | `gemini-3.8-live-extended-thinking` | WebSocket   | \$1.50     | \$9.00      | -           | `live-thinking` -> `live` (Registry-only)     |
+| `research`       | `deep-research-preview-04-2026`     | Managed     | Unknown    | Unknown     | Unknown     | None (Custom plan required)                   |
+| `tts`            | `gemini-3.8-flash-tts`              | Unsupported | Unknown    | Unknown     | Unknown     | None (Post-MVP; disabled)                     |
 
 ### Fallback Rules
+
 - Traversals are cycle-safe and strictly terminating.
 - Enabled aliases must resolve to valid, non-disabled fallback models or startup validation fails.
 - Non-REST aliases (`live`, `research`, `tts`) raise `UnsupportedAliasTransportError` if called via REST gateway methods.
@@ -102,7 +104,7 @@ The resilience executor (`app.gateway.resilience`) manages errors according to H
    - Immediate failover to the fallback model in the traversal chain without retrying on the failing model.
 3. **4xx Client Errors (400, 401, 403) and Safety Blocks:**
    - Never retried, never fallen back; fails immediately. The SDK returns blocked prompts and responses instead of raising, so the gateway detects `prompt_feedback.block_reason` and blocking finish reasons. A first-chunk block raises `ContentBlockedError` after attempting to record its usage. A later block is reported as an interrupted stream, including its available usage.
-4. **Classification uses types and status codes only.** `google.genai.errors.APIError.code` decides 408/429 (backoff), 5xx (failover) and everything else (fail). Transport failures from httpx, httpx2 or aiohttp are recognised by exception class name (timeouts back off; connection failures fail over). Error *text* is never searched, because messages can contain identifiers that merely look like status codes. Unrecognised errors are non-retryable. `GatewayError` subclasses (budget, block, validation) are never retried.
+4. **Classification uses types and status codes only.** `google.genai.errors.APIError.code` decides 408/429 (backoff), 5xx (failover) and everything else (fail). Transport failures from httpx, httpx2 or aiohttp are recognised by exception class name (timeouts back off; connection failures fail over). Error _text_ is never searched, because messages can contain identifiers that merely look like status codes. Unrecognised errors are non-retryable. `GatewayError` subclasses (budget, block, validation) are never retried.
 5. **Tool Call Commitment Rule:**
    - `ResiliencePolicy.execute(is_tool_call_committed=True)` raises `ToolCallCommitmentError` instead of retrying or falling back. `generate_with_tools` is non-streaming: tool requests are not returned until the response's accounting step completes. The flag exists for a future streaming-with-tools operation. An accounting error can still cause an additional provider attempt before any requests are returned; see section 5.
 6. **Streaming Resilience:**
@@ -116,6 +118,7 @@ The resilience executor (`app.gateway.resilience`) manages errors according to H
 ## 5. Token Metering, Pricing, and Redis Budgeting
 
 Calculated costs use `Decimal` arithmetic; their accuracy still depends on the usage and rates supplied:
+
 - **Cost Formulation (per 1M-token rates):**
   - input tokens = (`prompt_token_count` - `cached_content_token_count`) + `tool_use_prompt_token_count`, at the input rate;
   - cached tokens at the cached rate;
@@ -147,6 +150,7 @@ Calculated costs use `Decimal` arithmetic; their accuracy still depends on the u
 ## 6. Workspace Context Cache References (partially implemented)
 
 `ContextCacheManager` stores the provider-assigned cache name for a workspace in Redis:
+
 - **Key Schema:** `maya:cache:{workspace_id}:{model_id}:{content_hash}`
 - **Mandatory Tenant Scope:** `workspace_id` is required; calls without one raise `ValueError`, so a reference can never be shared across workspaces.
 - **404 handler:** `handle_provider_cache_404` purges a reference the provider no longer knows.

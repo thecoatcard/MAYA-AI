@@ -61,11 +61,11 @@ async def test_env_file_option_upgrades_and_downgrades(
     )
     option = ["-x", f"env_file={env_file}"]
     assert alembic([*option, "upgrade", "head"], clean_environment) == 0
-    assert await table_count(fresh_database) == 14
+    assert await table_count(fresh_database) == 19
     assert alembic([*option, "downgrade", "base"], clean_environment) == 0
     assert await table_count(fresh_database) == 0
     assert alembic([*option, "upgrade", "head"], clean_environment) == 0
-    assert await table_count(fresh_database) == 14
+    assert await table_count(fresh_database) == 19
 
 
 async def test_process_environment_variable_is_also_accepted(
@@ -77,7 +77,7 @@ async def test_process_environment_variable_is_also_accepted(
         )
     }
     assert alembic(["upgrade", "head"], environment) == 0
-    assert await table_count(fresh_database) == 14
+    assert await table_count(fresh_database) == 19
 
 
 def test_a_missing_or_invalid_url_fails_without_touching_anything(

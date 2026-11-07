@@ -31,6 +31,7 @@ Centralized model gateway abstracting AI operations behind stable role aliases (
 ## Configuration
 
 Settings are documented in the [configuration reference](../../../docs/guides/CONFIGURATION.md):
+
 - `MAYA_GEMINI_API_KEY`: API key (optional in local tests; never logged).
 - `MAYA_GEMINI_MODEL_OVERRIDES`: JSON object overriding model IDs for REST aliases.
 - `MAYA_GEMINI_VERIFY_MODELS_ON_STARTUP`: startup discovery switch (defaults to false).

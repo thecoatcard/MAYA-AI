@@ -41,11 +41,12 @@ bounded Docker/database operations and removes only its own container and volume
   combined workspace-and-user selectivity ranges from 0.42% to 13.33%.
 
 | Workspace rows | Workspace selectivity | Queried user rows (small / large) | Combined selectivity (small / large) |
-| ---: | ---: | ---: | ---: |
-| 3,000 | 10% | 125 / 1,000 | 0.417% / 3.333% |
-| 6,000 | 20% | 250 / 2,000 | 0.833% / 6.667% |
-| 9,000 | 30% | 375 / 3,000 | 1.250% / 10.000% |
-| 12,000 | 40% | 500 / 4,000 | 1.667% / 13.333% |
+| -------------: | --------------------: | --------------------------------: | -----------------------------------: |
+|          3,000 |                   10% |                       125 / 1,000 |                      0.417% / 3.333% |
+|          6,000 |                   20% |                       250 / 2,000 |                      0.833% / 6.667% |
+|          9,000 |                   30% |                       375 / 3,000 |                     1.250% / 10.000% |
+|         12,000 |                   40% |                       500 / 4,000 |                     1.667% / 13.333% |
+
 - Every query filters on **both** `workspace_id` and `user_id`. Returned rows are
   checked against both values. This verifies query-predicate confinement only; the
   temporary database has no RLS policy, and this result is not evidence of RLS.
@@ -108,12 +109,12 @@ uv run --directory backend --no-sync mypy --explicit-package-bases tests/spikes/
 Results: 25 focused tests and 93 backend tests passed; Ruff, formatting, and focused
 mypy passed.
 
-| Strategy | Mean recall@10 | Underfilled timed results | Client p50 / p95 (ms) |
-| :--- | ---: | ---: | ---: |
-| HNSW, iterative scan off | 0.056 | 80 / 80 | 6.53 / 8.00 |
-| HNSW, strict order | 0.200 | 0 / 80 | 37.71 / 53.81 |
-| HNSW, relaxed order | 0.544 | 0 / 80 | 21.67 / 49.44 |
-| Exact filtered sequential scan | — | 0 / 80 | 9.20 / 24.48 |
+| Strategy                       | Mean recall@10 | Underfilled timed results | Client p50 / p95 (ms) |
+| :----------------------------- | -------------: | ------------------------: | --------------------: |
+| HNSW, iterative scan off       |          0.056 |                   80 / 80 |           6.53 / 8.00 |
+| HNSW, strict order             |          0.200 |                    0 / 80 |         37.71 / 53.81 |
+| HNSW, relaxed order            |          0.544 |                    0 / 80 |         21.67 / 49.44 |
+| Exact filtered sequential scan |              — |                    0 / 80 |          9.20 / 24.48 |
 
 These are descriptive observations, not target results. In off mode, the HNSW scan
 stops at its initial `ef_search=40` candidates, then both predicates reject the

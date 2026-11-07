@@ -133,7 +133,7 @@
 ## E. File and Folder Changes
 
 - **Files to Create:**
-  - backend/app/memory/__init__.py (planned artifact)
+  - backend/app/memory/**init**.py (planned artifact)
   - backend/app/memory/scrubber.py (planned artifact)
   - backend/app/memory/ingestion.py (planned artifact)
   - backend/app/memory/rag_engine.py (planned artifact)

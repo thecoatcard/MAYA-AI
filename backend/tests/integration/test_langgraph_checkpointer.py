@@ -70,9 +70,7 @@ async def test_postgres_checkpointer_isolates_workspace_and_user_owners(
     db = migrated_database
     assert isinstance(db, TestDatabase)
 
-    pg_url = db.app_url.render_as_string(hide_password=False).replace(
-        "postgresql+asyncpg://", "postgresql://"
-    )
+    pg_url = db.app_url.render_as_string(hide_password=False)
 
     settings = Settings(
         database_url=SecretStr(pg_url),

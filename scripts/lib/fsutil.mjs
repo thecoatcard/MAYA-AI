@@ -1,18 +1,22 @@
 // File-system helpers shared by the governance scripts. Zero dependencies.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Repository root, derived from this file's location (scripts/lib -> repo root). */
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+);
 
-const SKIP_DIRS = new Set(['.git', 'node_modules']);
+const SKIP_DIRS = new Set([".git", "node_modules"]);
 
-export const toPosix = (p) => p.split(path.sep).join('/');
-export const normalizeEol = (s) => s.replace(/\r\n/g, '\n');
+export const toPosix = (p) => p.split(path.sep).join("/");
+export const normalizeEol = (s) => s.replace(/\r\n/g, "\n");
 
 /** Recursively list files under `startRel` as sorted POSIX-style relative paths. Symlinks are skipped. */
-export function walk(root, startRel = '', skip = SKIP_DIRS) {
+export function walk(root, startRel = "", skip = SKIP_DIRS) {
   const out = [];
   const stack = [startRel];
   while (stack.length > 0) {
@@ -46,13 +50,14 @@ export function isDirectory(root, rel) {
   }
 }
 
-export const readText = (root, rel) => fs.readFileSync(path.join(root, rel), 'utf8');
+export const readText = (root, rel) =>
+  fs.readFileSync(path.join(root, rel), "utf8");
 export const readJson = (root, rel) => JSON.parse(readText(root, rel));
 
 export function writeText(root, rel, content) {
   const abs = path.join(root, rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, content, 'utf8');
+  fs.writeFileSync(abs, content, "utf8");
 }
 
 /** Heuristic binary check: a NUL byte in the first 8000 bytes. */
@@ -78,7 +83,10 @@ export const EXIT = { PASS: 0, FAIL: 1, SKIPPED: 3 };
 export function isMain(metaUrl) {
   if (!process.argv[1]) return false;
   try {
-    return fs.realpathSync.native(path.resolve(process.argv[1])) === fs.realpathSync.native(fileURLToPath(metaUrl));
+    return (
+      fs.realpathSync.native(path.resolve(process.argv[1])) ===
+      fs.realpathSync.native(fileURLToPath(metaUrl))
+    );
   } catch {
     return false;
   }

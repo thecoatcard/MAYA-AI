@@ -140,7 +140,7 @@
   - backend/app/db/alembic/script.py.mako (planned artifact)
   - backend/app/db/alembic/versions/0001_initial_schema.py (planned artifact)
   - backend/app/db/alembic/versions/0002_rls_policies.py (planned artifact)
-  - backend/app/db/models/__init__.py (planned artifact)
+  - backend/app/db/models/**init**.py (planned artifact)
   - backend/app/db/models/workspace.py (planned artifact)
   - backend/app/db/models/user.py (planned artifact)
   - backend/app/db/models/session.py (planned artifact)

@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from google.genai import types
@@ -701,47 +701,58 @@ class ModelGateway:
         (``response_schema``) is not used, so output is always parsed and validated here.
         """
         self._validate_scope(task_id, workspace_id)
-
-        # Attempt 1: Standard generation
-        response = await self.generate_text(
-            alias=alias,
-            contents=contents,
-            system_instruction=system_instruction,
-            task_id=task_id,
-            workspace_id=workspace_id,
-            allow_fallback=allow_fallback,
+        candidate_aliases = (
+            self._registry.resolve_fallback_chain(alias) if allow_fallback else [alias]
         )
+        last_error: str | None = None
 
-        model, error = parse_and_validate_json(response.text, response_schema)
-        if model is not None:
-            return model
+        for current_alias in candidate_aliases:
+            # Attempt 1: Standard generation
+            response = await self.generate_text(
+                alias=current_alias,
+                contents=contents,
+                system_instruction=system_instruction,
+                task_id=task_id,
+                workspace_id=workspace_id,
+                allow_fallback=False,
+            )
 
-        # Attempt 2: Exactly ONE self-repair turn using structured repair prompt.
-        # The validation detail is deliberately not logged: it describes model output.
-        logger.warning("structured_output_validation_failed_attempting_repair alias=%s", alias)
-        repair_prompt = format_repair_prompt(
-            response.text, error or "Schema mismatch", response_schema
-        )
-        repair_contents = [*contents, repair_prompt]
+            model, error = parse_and_validate_json(response.text, response_schema)
+            if model is not None:
+                return model
 
-        repair_response = await self.generate_text(
-            alias=alias,
-            contents=repair_contents,
-            system_instruction=system_instruction,
-            task_id=task_id,
-            workspace_id=workspace_id,
-            allow_fallback=allow_fallback,
-        )
+            # Attempt 2: Exactly ONE self-repair turn using structured repair prompt.
+            # The validation detail is deliberately not logged: it describes model output.
+            logger.warning(
+                "structured_output_validation_failed_attempting_repair alias=%s", current_alias
+            )
+            repair_prompt = format_repair_prompt(
+                response.text, error or "Schema mismatch", response_schema
+            )
+            repair_contents = [*contents, repair_prompt]
 
-        repaired_model, second_error = parse_and_validate_json(
-            repair_response.text, response_schema
-        )
-        if repaired_model is not None:
-            return repaired_model
+            repair_response = await self.generate_text(
+                alias=current_alias,
+                contents=repair_contents,
+                system_instruction=system_instruction,
+                task_id=task_id,
+                workspace_id=workspace_id,
+                allow_fallback=False,
+            )
+
+            repaired_model, second_error = parse_and_validate_json(
+                repair_response.text, response_schema
+            )
+            if repaired_model is not None:
+                return repaired_model
+
+            last_error = second_error
+            logger.warning(
+                "structured_output_repair_failed alias=%s error=%s", current_alias, second_error
+            )
 
         raise StructuredOutputError(
-            "Structured output schema validation failed after 1 self-repair attempt: "
-            f"{second_error}"
+            f"Structured output schema validation failed after 1 self-repair attempt: {last_error}"
         )
 
     async def generate_with_tools(
@@ -799,7 +810,7 @@ class ModelGateway:
                     system_instruction=(
                         sanitize_text(system_instruction) if system_instruction else None
                     ),
-                    tools=sdk_tools,
+                    tools=cast(list[Any] | None, sdk_tools),
                 )
                 response = await client.aio.models.generate_content(
                     model=attempt_spec.model_id,

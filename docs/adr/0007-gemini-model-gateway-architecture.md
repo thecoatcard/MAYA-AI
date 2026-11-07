@@ -10,6 +10,7 @@
 MAYA AI requires an abstraction over LLM providers to decouple agent application logic from upstream SDKs and model IDs. Master plan §7 and Decision D13 establish Google Gemini as the core model family across 4 role aliases: `orchestrator` (`gemini-3.8-flash`), `heavy` (`gemini-4-argon`), `lite` (`gemini-3.5-flash-lite`), and `embed` (`gemini-embedding-2`).
 
 Key requirements and challenges identified during Phase 03 planning:
+
 1. **Fallback Traversal:** Need cycle-safe, terminating resolution paths so failed requests smoothly degrade without infinite loops or unbounded latency.
 2. **Resilience Policy:** API rate limits (429) and timeouts require exponential backoff with full jitter before model failover; 5xx errors require immediate failover; 4xx and safety blocks must never retry or fall back.
 3. **Tool Call Commitment:** Once a model turn emits tool calls, non-idempotent side effects may be triggered; therefore, retries or fallbacks after tool calls have started must be strictly forbidden (`ToolCallCommitmentError`).
@@ -57,6 +58,7 @@ Key requirements and challenges identified during Phase 03 planning:
 ## Consequences
 
 ### Positive
+
 - Unified, typed interface for all LLM interactions across all agent phases.
 - Zero floating-point rounding drift in token metering and billing.
 - Complete isolation across tenants for context caching and task budgets.
@@ -64,6 +66,7 @@ Key requirements and challenges identified during Phase 03 planning:
 - Automated tests run 100% offline, deterministic, and fast without external dependencies.
 
 ### Negative / Trade-offs
+
 - Redis is required for atomic multi-turn task budgeting and context cache tracking (mocked in unit tests; verified via test containers).
 - Secondary embedding fallback produces a non-comparable vector space, necessitating `allow_fallback=False` by default.
 - The gateway has never been run against the real provider; offline doubles are pinned to the SDK's calling convention by contract tests, but provider behavior is unverified until the owner runs the smoke tool.

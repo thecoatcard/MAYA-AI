@@ -62,7 +62,11 @@ export function SignInForm() {
       const tokens = await signIn(username.trim(), password);
       setAccessToken(tokens.accessToken, tokens.expiresIn);
       setPassword("");
-      router.replace("/chat");
+      const redirectTarget =
+        (typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("redirect")
+          : null) || "/chat";
+      router.replace(redirectTarget);
     } catch (error) {
       setErrorMessage(signInMessage(error));
     } finally {
@@ -124,6 +128,27 @@ export function SignInForm() {
                 disabled={submitting}
               />
             </label>
+            <div className="p-3 my-2 rounded border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400 text-left">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-zinc-300">
+                  Local Dev Account
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsername("admin");
+                    setPassword("AdminPassword123!");
+                  }}
+                  className="text-[11px] font-mono text-teal-400 hover:text-teal-300 underline"
+                >
+                  Fill Admin
+                </button>
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-zinc-400">
+                User: <span className="text-zinc-200">admin</span> • Pass:{" "}
+                <span className="text-zinc-200">AdminPassword123!</span>
+              </p>
+            </div>
             {errorMessage !== null ? (
               <p className="maya-signin__error" role="alert">
                 {errorMessage}

@@ -43,7 +43,7 @@ CROSS_REFERENCES = {
     ),
     "subtasks": (
         "INSERT INTO subtasks (workspace_id, task_id, assigned_agent, description) "
-        "VALUES (:ws, :other_task, 'a', 'd')",
+        "VALUES (:ws, :other_task, 'research', 'd')",
         "task",
     ),
     "approval_requests (subtask)": (

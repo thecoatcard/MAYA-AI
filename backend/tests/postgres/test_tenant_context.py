@@ -142,3 +142,74 @@ async def test_the_runtime_role_passes_the_startup_guard(app_engine: AsyncEngine
 async def test_the_administrator_role_fails_the_startup_guard(admin_engine: AsyncEngine) -> None:
     with pytest.raises(UnsafeDatabaseRole):
         await verify_runtime_role(admin_engine)
+
+
+async def test_adversarial_cross_workspace_approval_isolation(
+    app_engine: AsyncEngine,
+    admin_engine: AsyncEngine,
+    tenants: Tenants,
+) -> None:
+    first, second = tenants
+
+    # Seed an approval request directly into Tenant 1 using admin_engine
+    approval_id = uuid4()
+    p_hash = "0" * 64
+    async with admin_engine.connect() as conn, conn.begin():
+        await conn.execute(
+            text(
+                "INSERT INTO approval_requests ("
+                "  id, workspace_id, user_id, task_id, tool_name, tool_args, payload_hash, "
+                "  permission_level, action_description, payload_diff, status, "
+                "  expires_at, created_at"
+                ") VALUES ("
+                "  :id, :ws, :user, :task, 'test_tool', '{}'::jsonb, :p_hash, "
+                "  'APPROVAL_REQUIRED', 'desc', '{}'::jsonb, 'pending', "
+                "  clock_timestamp() + interval '5m', clock_timestamp()"
+                ")"
+            ),
+            {
+                "id": approval_id,
+                "ws": first.workspace_id,
+                "user": first.user_id,
+                "task": first.task_id,
+                "p_hash": p_hash,
+            },
+        )
+
+    # 1. Tenant 2 reading approval_requests sees 0 rows
+    async with tenant_transaction(app_engine, second.workspace_id) as conn:
+        res = await conn.execute(
+            text("SELECT id FROM approval_requests WHERE id = :id"),
+            {"id": approval_id},
+        )
+        assert res.fetchall() == []
+
+    # 2. Tenant 2 attempting to update Tenant 1's approval request updates 0 rows
+    async with tenant_transaction(app_engine, second.workspace_id) as conn:
+        res = await conn.execute(
+            text("UPDATE approval_requests SET status = 'denied' WHERE id = :id"),
+            {"id": approval_id},
+        )
+        assert res.rowcount == 0
+
+    # 3. Tenant 2 attempting to insert a row with Tenant 1's workspace_id fails RLS check
+    with pytest.raises(DBAPIError):
+        async with tenant_transaction(app_engine, second.workspace_id) as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO approval_requests ("
+                    "  id, workspace_id, user_id, task_id, tool_name, tool_args, payload_hash, "
+                    "  permission_level, action_description, payload_diff, status, expires_at"
+                    ") VALUES ("
+                    "  gen_random_uuid(), :forged_ws, :user, :task, 'evil_tool', '{}'::jsonb, "
+                    "  :p_hash, 'APPROVAL_REQUIRED', 'evil', '{}'::jsonb, 'pending', "
+                    "  clock_timestamp() + interval '5m'"
+                    ")"
+                ),
+                {
+                    "forged_ws": first.workspace_id,
+                    "user": second.user_id,
+                    "task": second.task_id,
+                    "p_hash": p_hash,
+                },
+            )

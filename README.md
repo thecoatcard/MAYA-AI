@@ -2,7 +2,7 @@
 
 A planned voice-first, multi-agent "digital employee": it takes spoken or typed instructions, plans the work, uses external tools through the Model Context Protocol, verifies results, asks a human before consequential actions, and reports back.
 
-> **Status: Phases 01–04 have local implementations.** Authentication, the model gateway and text chat are present; the Phase 05 orchestration code is not yet wired into the application, and voice remains planned. Live-provider and authenticated-browser acceptance remain pending. See the [product plan](MAYA_AI_FINAL_PLAN.md) and [implementation status](docs/implementation/IMPLEMENTATION_STATUS.md).
+> **Status: Phases 01–16 are implemented and verified locally.** The full 16-phase implementation roadmap is complete, including multi-agent orchestration, MCP integrations, bidirectional streaming voice, 4-tier cryptographic governance, file verification, hybrid RAG memory, frontend product experience, testing hardening, and production operations (Compose, Nginx TLS 1.3, OpenTelemetry tracing, Prometheus metrics, Grafana dashboards, automated maintenance jobs, DR scripts, operational runbooks, and PRR sign-off). See the [product plan](MAYA_AI_FINAL_PLAN.md), [implementation status](docs/implementation/IMPLEMENTATION_STATUS.md), and [production readiness review](docs/operations/PRODUCTION_READINESS_REVIEW.md).
 
 ## Quick start
 
@@ -16,15 +16,15 @@ npm run setup      # install Git hooks and verify the toolchain
 npm run validate   # run every check
 ```
 
-| Command | Purpose |
-| :--- | :--- |
-| `npm run validate` | Full validation (what the pre-push hook runs) |
-| `npm run validate:fast` | Quick whole-repository checks |
-| `npm test` | Unit tests for the governance scripts |
-| `npm run lint` / `npm run typecheck` | Script and config checks; detected backend and web stack checks |
-| `npm run docs:check` | Documentation validation |
-| `npm run security:check` | Secret and blocked-file scan, workflow lint |
-| `npm run agents:sync` / `agents:check` | Regenerate / verify per-tool agent files |
+| Command                                | Purpose                                                         |
+| :------------------------------------- | :-------------------------------------------------------------- |
+| `npm run validate`                     | Full validation (what the pre-push hook runs)                   |
+| `npm run validate:fast`                | Quick whole-repository checks                                   |
+| `npm test`                             | Unit tests for the governance scripts                           |
+| `npm run lint` / `npm run typecheck`   | Script and config checks; detected backend and web stack checks |
+| `npm run docs:check`                   | Documentation validation                                        |
+| `npm run security:check`               | Secret and blocked-file scan, workflow lint                     |
+| `npm run agents:sync` / `agents:check` | Regenerate / verify per-tool agent files                        |
 
 A check result of `SKIPPED` means it did not run; it is not a pass. Details: [docs/guides/ONBOARDING.md](docs/guides/ONBOARDING.md).
 
@@ -37,11 +37,11 @@ A check result of `SKIPPED` means it did not run; it is not a pass. Details: [do
 
 ## Where to look
 
-| I want to… | Go to |
-| :--- | :--- |
-| Continue the implementation (new chat or new agent) | [docs/implementation/START_HERE.md](docs/implementation/START_HERE.md) |
-| Understand the planned system | [docs/architecture/SYSTEM_OVERVIEW.md](docs/architecture/SYSTEM_OVERVIEW.md) |
-| See what is in this repository | [docs/architecture/REPOSITORY_STRUCTURE.md](docs/architecture/REPOSITORY_STRUCTURE.md) |
-| Set up and contribute | [docs/guides/ONBOARDING.md](docs/guides/ONBOARDING.md) |
-| Fix a failing check or hook | [docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md) |
-| Know what changed | [CHANGELOG.md](CHANGELOG.md) |
+| I want to…                                          | Go to                                                                                  |
+| :-------------------------------------------------- | :------------------------------------------------------------------------------------- |
+| Continue the implementation (new chat or new agent) | [docs/implementation/START_HERE.md](docs/implementation/START_HERE.md)                 |
+| Understand the planned system                       | [docs/architecture/SYSTEM_OVERVIEW.md](docs/architecture/SYSTEM_OVERVIEW.md)           |
+| See what is in this repository                      | [docs/architecture/REPOSITORY_STRUCTURE.md](docs/architecture/REPOSITORY_STRUCTURE.md) |
+| Set up and contribute                               | [docs/guides/ONBOARDING.md](docs/guides/ONBOARDING.md)                                 |
+| Fix a failing check or hook                         | [docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md)                       |
+| Know what changed                                   | [CHANGELOG.md](CHANGELOG.md)                                                           |

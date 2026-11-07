@@ -3,10 +3,10 @@
 The local API exposes the following health probes. Neither probe requires
 authentication. They must not be used to expose infrastructure diagnostics.
 
-| Route | Success | Failure |
-| :--- | :--- | :--- |
-| `GET /api/v1/healthz` | 200, `{"status":"alive"}` | Process/network failure if API is unavailable |
-| `GET /api/v1/readyz` | 200, `{"status":"ready"}` | 503, `{"status":"unavailable"}` if either dependency probe fails |
+| Route                 | Success                   | Failure                                                          |
+| :-------------------- | :------------------------ | :--------------------------------------------------------------- |
+| `GET /api/v1/healthz` | 200, `{"status":"alive"}` | Process/network failure if API is unavailable                    |
+| `GET /api/v1/readyz`  | 200, `{"status":"ready"}` | 503, `{"status":"unavailable"}` if either dependency probe fails |
 
 Readiness performs PostgreSQL `SELECT 1` followed by Redis `PING` within one
 bounded timeout. Known connection, database, Redis and timeout failures emit a

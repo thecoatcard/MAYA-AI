@@ -23,17 +23,17 @@ The repository exists on GitHub (`thecoatcard/MAYA-AI`, private). GitHub's notic
 
 Configure under Settings, then Rules (or Branches).
 
-| Setting | Value |
-| :--- | :--- |
-| Require a pull request before merging | On, with at least 1 approving review |
-| Dismiss stale approvals when new commits are pushed | On |
-| Require review from Code Owners | On (see below) |
-| Require status checks to pass | On; require **Governance / validate**, **Security / secrets**, **Security / dependency-review** |
-| Require branches to be up to date before merging | On |
-| Require conversation resolution | On |
-| Block force pushes and deletion | On |
-| Do not allow bypassing the above settings | On, including administrators where available |
-| Merge method | Squash only, with the pull request title as a Conventional Commit |
+| Setting                                             | Value                                                                                           |
+| :-------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| Require a pull request before merging               | On, with at least 1 approving review                                                            |
+| Dismiss stale approvals when new commits are pushed | On                                                                                              |
+| Require review from Code Owners                     | On (see below)                                                                                  |
+| Require status checks to pass                       | On; require **Governance / validate**, **Security / secrets**, **Security / dependency-review** |
+| Require branches to be up to date before merging    | On                                                                                              |
+| Require conversation resolution                     | On                                                                                              |
+| Block force pushes and deletion                     | On                                                                                              |
+| Do not allow bypassing the above settings           | On, including administrators where available                                                    |
+| Merge method                                        | Squash only, with the pull request title as a Conventional Commit                               |
 
 ## CODEOWNERS
 

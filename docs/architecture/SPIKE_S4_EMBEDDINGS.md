@@ -12,11 +12,11 @@ The completed [S3/S4 smoke evidence](SPIKE_S3_GEMINI_LIVE.md#user-run-live-smoke
 used google-genai 2.34.0 and `gemini-embedding-2`, with three separate requests
 configured for 768 dimensions and no retries or fallback:
 
-| Vector | Dimensions | Raw L2 norm | Maximum local float32 roundoff |
-| :--- | ---: | ---: | ---: |
-| First synthetic text | 768 | 0.9999999348112885 | 4.978828432866678e-09 |
-| Related synthetic text | 768 | 1.0000001695196645 | 3.675746915177136e-09 |
-| Unrelated synthetic text | 768 | 0.999999852816136 | 3.6323738045185294e-09 |
+| Vector                   | Dimensions |        Raw L2 norm | Maximum local float32 roundoff |
+| :----------------------- | ---------: | -----------------: | -----------------------------: |
+| First synthetic text     |        768 | 0.9999999348112885 |          4.978828432866678e-09 |
+| Related synthetic text   |        768 | 1.0000001695196645 |          3.675746915177136e-09 |
+| Unrelated synthetic text |        768 |  0.999999852816136 |         3.6323738045185294e-09 |
 
 Related-pair cosine: 0.626323217770136; unrelated-pair cosine:
 0.24086029776836865. Local normalization produced norms 1.0.

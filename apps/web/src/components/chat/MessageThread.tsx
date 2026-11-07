@@ -22,6 +22,8 @@ export interface MessageThreadProps {
    * Leave it out when another control already offers Ask again.
    */
   onAskAgain?: () => void;
+  onViewDeliverables?: () => void;
+  onOpenTaskDetails?: (taskId: string) => void;
 }
 
 /** Within this distance of the end, the thread keeps following new text. */
@@ -63,6 +65,8 @@ export function MessageThread({
   retrying = null,
   empty = null,
   onAskAgain,
+  onViewDeliverables,
+  onOpenTaskDetails,
 }: MessageThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
@@ -149,6 +153,8 @@ export function MessageThread({
               onAskAgain={
                 index === messages.length - 1 ? onAskAgain : undefined
               }
+              onViewDeliverables={onViewDeliverables}
+              onOpenTaskDetails={onOpenTaskDetails}
             />
           ))}
           {showPending ? (

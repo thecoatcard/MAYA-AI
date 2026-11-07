@@ -135,7 +135,7 @@
 - **Files to Create:**
   - apps/web/public/audio-processor.js (planned artifact)
   - apps/web/src/hooks/useLiveVoice.ts (planned artifact)
-  - backend/app/voice/__init__.py (planned artifact)
+  - backend/app/voice/**init**.py (planned artifact)
   - backend/app/voice/live_session.py (planned artifact)
   - backend/app/voice/session_manager.py (planned artifact)
   - backend/app/voice/audio_converter.py (planned artifact)

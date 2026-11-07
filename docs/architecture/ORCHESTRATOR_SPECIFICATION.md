@@ -3,6 +3,7 @@
 ## 1. Overview & Architectural Goals
 
 The central Orchestrator is the hierarchical coordinator of MAYA AI's multi-agent system. As established in `MAYA_AI_FINAL_PLAN.md` §8 and Architectural Decision D6:
+
 - A LangGraph PostgreSQL checkpointer (`AsyncPostgresSaver`) is provided for the intended authoritative runtime state.
 - The planner can decompose compound instructions into Directed Acyclic Graphs (DAGs) of typed subtasks.
 - Dependency graphs are validated with Kahn's algorithm; circular dependencies are deterministically rejected with one self-repair retry turn.
@@ -115,6 +116,7 @@ Location: `backend/app/agents/orchestrator.py`
 ```
 
 ### 4.1 Orchestrator Tools
+
 - `create_plan_dag`: Invokes planner decomposition.
 - `dispatch_subtask`: Transitions subtask status from `pending` to `in_progress`.
 - `request_human_approval`: Sets `pending_approval` payload; never resolves or approves it autonomously.

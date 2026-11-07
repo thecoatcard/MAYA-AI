@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  - job_name: "maya-backend"
+    metrics_path: "/metrics"
+    scheme: "http"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          environment: "production"
+          service: "maya-backend"
+
+  - job_name: "maya-postgres"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["postgres:5432"]
+        labels:
+          environment: "production"
+          service: "maya-database"
+
+  - job_name: "maya-redis"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["redis:6379"]
+        labels:
+          environment: "production"
+          service: "maya-cache"

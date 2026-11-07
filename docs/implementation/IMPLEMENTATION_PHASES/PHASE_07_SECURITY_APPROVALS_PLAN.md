@@ -10,6 +10,7 @@
 MAYA AI is a digital employee endowed with autonomous tool execution. To ensure safety, reliability, and human accountability, no mutating or external-facing action may ever be executed based on LLM intent alone.
 
 Phase 07 constructs the **Cryptographic Permission Gate and Human Approval Protocol**:
+
 1. **Four-Tier Permission Classification (Decision D4):** Strict categorization (`READ`, `WRITE`, `APPROVAL_REQUIRED`, `RESTRICTED`) with deny-by-default behavior.
 2. **Canonical Payload Hashing (Decision D5):** Deterministic SHA-256 digest calculated over `{tool, args, workspace_id, user_id, idempotency_key}`.
 3. **Signed Single-Use Approval Tokens:** Cryptographically bound JWTs with an expiration window of $\le 5$ minutes, consumed atomically in PostgreSQL via `UPDATE ... RETURNING` to eliminate Time-of-Check to Time-of-Use (TOCTOU) race conditions.
@@ -21,14 +22,15 @@ Phase 07 constructs the **Cryptographic Permission Gate and Human Approval Proto
 
 ## 2. Four-Tier Permission Architecture (Decision D4)
 
-| Tier | Autonomy | Scope & Boundaries | Example Tools |
-| :--- | :--- | :--- | :--- |
-| 🟢 **READ** | Autonomous | Read-only operations that extract information without mutating state or environment. | File read in workspace, `git status/log`, SQL `SELECT`, web search, read emails/calendar. |
-| 🔵 **WRITE** | Autonomous | Reversible, sandboxed mutations strictly confined to `/artifacts` or staging areas. | Writing artifact files, local git commit/branch, drafting email (without sending), document generation. |
-| 🟡 **APPROVAL_REQUIRED** | Human Approval | External-facing side effects, irreversible changes, or user file mutations outside sandbox. | `gmail_send`, push commits to remote, open pull request, delete files outside `/artifacts`. |
-| 🔴 **RESTRICTED** | UI Approval + Step-Up Auth | High-risk, destructive, or privileged infrastructure modifications. | Database DDL (`DROP/ALTER`), bulk deletion, remote force-push, payment execution, API token creation. |
+| Tier                     | Autonomy                   | Scope & Boundaries                                                                          | Example Tools                                                                                           |
+| :----------------------- | :------------------------- | :------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------ |
+| 🟢 **READ**              | Autonomous                 | Read-only operations that extract information without mutating state or environment.        | File read in workspace, `git status/log`, SQL `SELECT`, web search, read emails/calendar.               |
+| 🔵 **WRITE**             | Autonomous                 | Reversible, sandboxed mutations strictly confined to `/artifacts` or staging areas.         | Writing artifact files, local git commit/branch, drafting email (without sending), document generation. |
+| 🟡 **APPROVAL_REQUIRED** | Human Approval             | External-facing side effects, irreversible changes, or user file mutations outside sandbox. | `gmail_send`, push commits to remote, open pull request, delete files outside `/artifacts`.             |
+| 🔴 **RESTRICTED**        | UI Approval + Step-Up Auth | High-risk, destructive, or privileged infrastructure modifications.                         | Database DDL (`DROP/ALTER`), bulk deletion, remote force-push, payment execution, API token creation.   |
 
 ### Architectural Rules
+
 - **Deny-by-Default:** Any tool not explicitly registered in the `ToolPermissionRegistry` is marked `DISABLED` and blocked from execution.
 - **Server Hints Policy:** MCP server hints (`readOnlyHint`, `destructiveHint`) can only **elevate** a tool's permission tier; they can **never lower** a tier assigned by the system registry.
 
@@ -49,6 +51,7 @@ $$\text{payload\_hash} = \text{SHA-256}\Big(\text{CanonicalJSON}\big(\{\text{too
 ### 3.2 Single-Use Signed Approval Tokens
 
 Upon user approval in the Web UI:
+
 1. The server verifies the user's workspace authorization.
 2. If the tool is in the `RESTRICTED` tier, the server verifies a 6-digit TOTP code.
 3. The server generates a cryptographically signed JWT containing:
