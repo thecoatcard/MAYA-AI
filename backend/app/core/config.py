@@ -115,14 +115,14 @@ class Settings(BaseSettings):
     gemini_budget_task_usd_cap: Decimal | None = Field(default=None, gt=0)
     gemini_max_tool_turns_cap: int | None = Field(default=None, ge=1)
 
-    # Chat (Phase 04). The owner approved the input, rate and context defaults on 2026-11-06.
-    # The upper bound keeps a worst-case JSON body inside the 64 KiB request limit.
+    # Chat: User-approved output limit (65536 tokens matching Gemini maximum output capacity),
+    # extended reply deadline (600s), and context token budget (1M tokens).
     chat_max_message_chars: int = Field(default=8000, ge=1, le=16_000)
     chat_rate_limit_per_minute: int = Field(default=20, ge=1, le=10_000)
-    chat_context_token_budget: int = Field(default=32_000, ge=1_000, le=1_000_000)
+    chat_context_token_budget: int = Field(default=1_000_000, ge=1_000, le=2_000_000)
     chat_max_concurrent_streams_per_user: int = Field(default=2, ge=1, le=100)
-    chat_reply_deadline_seconds: int = Field(default=120, ge=1, le=900)
-    chat_max_output_tokens: int = Field(default=2048, ge=1, le=32_768)
+    chat_reply_deadline_seconds: int = Field(default=600, ge=1, le=1800)
+    chat_max_output_tokens: int = Field(default=65_536, ge=1, le=128_000)
 
     @field_validator("jwt_signing_key", "otp_hmac_key")
     @classmethod

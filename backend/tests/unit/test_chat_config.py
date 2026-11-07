@@ -10,10 +10,10 @@ def test_chat_defaults_are_the_documented_owner_approved_values() -> None:
     settings = make_settings()
     assert settings.chat_max_message_chars == 8000
     assert settings.chat_rate_limit_per_minute == 20
-    assert settings.chat_context_token_budget == 32_000
+    assert settings.chat_context_token_budget == 1_000_000
     assert settings.chat_max_concurrent_streams_per_user == 2
-    assert settings.chat_reply_deadline_seconds == 120
-    assert settings.chat_max_output_tokens == 2048
+    assert settings.chat_reply_deadline_seconds == 600
+    assert settings.chat_max_output_tokens == 65_536
 
 
 def test_chat_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,9 +38,12 @@ def test_chat_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
         ("chat_max_message_chars", 16_001),
         ("chat_rate_limit_per_minute", 0),
         ("chat_context_token_budget", 999),
+        ("chat_context_token_budget", 2_000_001),
         ("chat_max_concurrent_streams_per_user", 0),
         ("chat_reply_deadline_seconds", 0),
+        ("chat_reply_deadline_seconds", 1801),
         ("chat_max_output_tokens", 0),
+        ("chat_max_output_tokens", 128_001),
     ],
 )
 def test_chat_settings_reject_out_of_range_values(name: str, value: int) -> None:

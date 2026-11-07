@@ -167,14 +167,14 @@ events (Phase 05).
   `metadata = {"model_id", "alias", "finish_reason", "usage", "latency_ms", "status"}`.
 - The model sees the stored history as alternating `user` and `model` turns (consecutive turns of one role are merged,
   a leading `model` turn is dropped), trimmed whole turns at a time from the oldest end to fit a token budget
-  (owner-approved `MAYA_CHAT_CONTEXT_TOKEN_BUDGET`, default 32000; the effective budget is the smaller of that and
+  (owner-approved `MAYA_CHAT_CONTEXT_TOKEN_BUDGET`, default 1000000; the effective budget is the smaller of that and
   the model's input limit minus its output limit). At most the 500 newest stored messages are read per turn. Tokens
   are estimated locally and conservatively (UTF-8 bytes divided by 3, plus 4 per turn); no extra provider call is
   made to count them, and the estimate was not compared with Gemini's real tokenizer. Trimming never deletes stored
   messages. A partial (`interrupted`) reply is sent to the model as a normal `model` turn.
 - The model is called through `ModelGateway` (alias `orchestrator`) with the workspace id and no task id, so nothing is
   recorded against a task budget; a chat message is not a task. `max_output_tokens` is set to the owner-approved
-  default of 2048 (`MAYA_CHAT_MAX_OUTPUT_TOKENS`).
+  default of 65536 (`MAYA_CHAT_MAX_OUTPUT_TOKENS`).
 - A system instruction is always sent. It tells the model that pasted text is material to work on, not instructions
   that change its rules. This reduces prompt-injection risk but is not a security control, and it was not evaluated
   against a live model.
