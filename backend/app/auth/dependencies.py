@@ -58,4 +58,7 @@ class TenantDatabase:
 async def get_tenant_database(
     principal: Annotated[Principal, Depends(get_principal)], request: Request
 ) -> TenantDatabase:
+    res = getattr(request.app.state, "resources", None)
+    if res is not None and hasattr(res, "register_workspace"):
+        await res.register_workspace(principal.workspace_id)
     return TenantDatabase(request.app.state.resources.engine, principal.workspace_id)

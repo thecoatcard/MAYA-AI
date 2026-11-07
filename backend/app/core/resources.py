@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from uuid import UUID
 
 from asyncpg import PostgresError
 from redis.exceptions import RedisError
@@ -40,6 +41,34 @@ class Resources:
         self.subtask_queue = SubtaskQueue()
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.event_publisher = TaskEventPublisher(self.redis)
+        self.active_workspaces: set[UUID] = set()
+
+    async def register_workspace(self, workspace_id: UUID) -> None:
+        """Register active workspace for background task processing and reconciliation."""
+        if not workspace_id:
+            return
+        self.active_workspaces.add(workspace_id)
+        if self.redis is not None:
+            try:
+                await self.redis.sadd("maya:active_workspaces", str(workspace_id))
+            except Exception:
+                pass
+
+    async def get_active_workspaces(self) -> set[UUID]:
+        """Fetch all known active workspaces from memory and Redis."""
+        from uuid import UUID
+
+        workspaces = set(self.active_workspaces)
+        if self.redis is not None:
+            try:
+                cached = await self.redis.smembers("maya:active_workspaces")
+                for item in cached:
+                    val = item.decode("utf-8") if isinstance(item, bytes) else str(item)
+                    workspaces.add(UUID(val))
+            except Exception:
+                pass
+        self.active_workspaces.update(workspaces)
+        return workspaces
 
     async def check(self) -> None:
         try:

@@ -87,6 +87,9 @@ class GeminiLiveBridge:
                 else None
             )
 
+            live_tools = [types.Tool(function_declarations=declarations)]
+            live_tools.append(types.Tool(google_search=types.GoogleSearch()))
+
             config = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
                 speech_config=types.SpeechConfig(
@@ -96,7 +99,7 @@ class GeminiLiveBridge:
                 ),
                 thinking_config=thinking_config,
                 system_instruction=types.Content(parts=[types.Part(text=self._system_instruction)]),
-                tools=[types.Tool(function_declarations=declarations)],
+                tools=live_tools,
                 input_audio_transcription=types.AudioTranscriptionConfig(mode="smart"),
                 output_audio_transcription=types.AudioTranscriptionConfig(),
             )

@@ -369,6 +369,7 @@ class ModelGateway:
         task_id: UUID | None = None,
         workspace_id: UUID | None = None,
         allow_fallback: bool = True,
+        enable_google_search: bool = False,
     ) -> GatewayResponse:
         """Generate text from a model role alias with fallback resilience and cost metering."""
         self._validate_scope(task_id, workspace_id)
@@ -391,12 +392,17 @@ class ModelGateway:
             )
             accounting_attempted = False
             try:
+                tools_list: list[Any] = []
+                if enable_google_search:
+                    tools_list.append(types.Tool(google_search=types.GoogleSearch()))
+
                 config = types.GenerateContentConfig(
                     temperature=temperature,
                     max_output_tokens=output_limit,
                     system_instruction=(
                         sanitize_text(system_instruction) if system_instruction else None
                     ),
+                    tools=tools_list if tools_list else None,
                 )
                 response = await client.aio.models.generate_content(
                     model=attempt_spec.model_id,
@@ -404,6 +410,23 @@ class ModelGateway:
                     config=config,
                 )
                 text = response.text or ""
+                citations: list[dict[str, str]] = []
+                candidates = getattr(response, "candidates", None) or []
+                if candidates:
+                    cand = candidates[0]
+                    gm = getattr(cand, "grounding_metadata", None)
+                    if gm is not None:
+                        chunks = getattr(gm, "grounding_chunks", None) or []
+                        for ch in chunks:
+                            web = getattr(ch, "web", None)
+                            if web is not None:
+                                uri = str(getattr(web, "uri", "") or "").strip()
+                                title = str(getattr(web, "title", "") or "").strip()
+                                if uri:
+                                    citations.append(
+                                        {"title": title or uri, "url": uri, "snippet": ""}
+                                    )
+
                 usage = self._extract_usage(
                     response.usage_metadata,
                     attempt_spec,
@@ -428,6 +451,7 @@ class ModelGateway:
                     alias_used=attempt_spec.alias,
                     was_fallback=was_fallback,
                     usage=usage,
+                    citations=citations,
                 )
             except BaseException:
                 if token is not None and not accounting_attempted:

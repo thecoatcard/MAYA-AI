@@ -60,6 +60,7 @@ class GatewayResponse(BaseModel):
     cached_tokens: int = 0
     estimated_cost_usd: Decimal | None = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
+    citations: list[dict[str, str]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _sync_usage(self) -> Self:

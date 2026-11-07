@@ -48,3 +48,26 @@ async def test_execute_subtask_generates_verified_pdf_deliverable() -> None:
         assert proof["size_bytes"] > 0
         assert len(proof["sha256"]) == 64
         assert Path(proof["storage_uri"]).is_file()  # noqa: ASYNC240
+
+
+@pytest.mark.asyncio
+async def test_execute_subtask_research_with_google_search_citations() -> None:
+    job = SubtaskJob(
+        workspace_id=uuid4(),
+        user_id=uuid4(),
+        task_id=uuid4(),
+        subtask_id=uuid4(),
+        assigned_agent="research",
+    )
+    input_data = {
+        "description": "Gather and research Java 21 concurrency features",
+    }
+    res = await execute_subtask_with_agent(job, input_data)
+
+    assert "result" in res
+    assert "proof" in res
+    assert res["result"]["agent"] == "research"
+    assert "citations" in res["result"]
+    assert len(res["result"]["citations"]) >= 1
+    assert res["proof"]["search_engine"] == "google_search"
+    assert res["proof"]["citations_count"] >= 1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from app.agents.base import BaseSpecialistAgent
 from app.agents.schemas import SpecialistAgentRole
@@ -15,6 +16,7 @@ from app.agents.specialized.research import ResearchAgent
 from app.mcp.client_manager import MCPClientManager
 from app.mcp.connectors.brave import BraveSearchConnector
 from app.mcp.connectors.github import GitHubConnector
+from app.mcp.connectors.google_search import GoogleSearchConnector
 from app.mcp.connectors.notion import NotionConnector
 from app.mcp.permissions import ToolPermissionRegistry
 from app.sandbox.runner import SandboxRunner
@@ -71,15 +73,24 @@ def create_default_fleet(
     github_token: str | None = None,
     notion_token: str | None = None,
     google_access_token: str | None = None,
+    google_search_connector: GoogleSearchConnector | None = None,
+    model_gateway: Any | None = None,
 ) -> AgentFleetRegistry:
     """Factory creating fully wired agent fleet with all 5 specialist agents."""
     fleet = AgentFleetRegistry()
     registry = permission_registry or ToolPermissionRegistry()
 
-    # 1. ResearchAgent
+    # 1. ResearchAgent - prefer Google Search / Gemini Live grounding over Brave
+    g_search = google_search_connector
+    if g_search is None and model_gateway is not None:
+        client = getattr(model_gateway, "client", None)
+        g_search = GoogleSearchConnector(client=client)
+
     brave_connector = BraveSearchConnector(api_key=brave_api_key) if brave_api_key else None
     research_agent = ResearchAgent(
+        google_search_connector=g_search,
         brave_connector=brave_connector,
+        model_gateway=model_gateway,
         permission_registry=registry,
         client_manager=client_manager,
     )

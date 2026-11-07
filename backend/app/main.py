@@ -37,6 +37,7 @@ def create_app(
         service: AuthService | None = None
         outbox_task: asyncio.Task[None] | None = None
         worker_task: asyncio.Task[None] | None = None
+        reconciler_task: asyncio.Task[None] | None = None
         try:
             await resources.check()
             await resources.verify_runtime_role()
@@ -51,6 +52,7 @@ def create_app(
             await service.warm_up()
 
             if hasattr(resources, "session_factory") and hasattr(resources, "event_publisher"):
+                from app.db.tenant import tenant_session
                 from app.tasks.outbox import OutboxDispatcher
 
                 async def _poll_outbox() -> None:
@@ -58,9 +60,13 @@ def create_app(
                     while True:
                         try:
                             await asyncio.sleep(0.5)
-                            async with resources.session_factory() as session:
-                                await dispatcher.dispatch_pending_events(session)
-                                await session.commit()
+                            workspaces = await resources.get_active_workspaces()
+                            for ws_id in workspaces:
+                                async with tenant_session(resources.engine, ws_id) as session:
+                                    await dispatcher.dispatch_pending_events(
+                                        session, workspace_id=ws_id
+                                    )
+                                    await session.commit()
                         except asyncio.CancelledError:
                             break
                         except Exception as poll_err:
@@ -70,10 +76,13 @@ def create_app(
                 outbox_task = asyncio.create_task(_poll_outbox())
 
             if hasattr(resources, "session_factory") and hasattr(resources, "subtask_queue"):
+                from datetime import UTC, datetime
+
                 from sqlalchemy import select
 
-                from app.agents.state import SubTask
-                from app.db.models import PlanStatus, Subtask, SubtaskAgent, SubtaskStatus, Task
+                from app.agents.registry import create_default_fleet
+                from app.db.models import PlanStatus, Subtask, SubtaskStatus, Task
+                from app.db.tenant import tenant_session
                 from app.services.projection_service import resolve_subtask_uuid
                 from app.tasks.events import TaskEventType
                 from app.tasks.executor import execute_subtask_with_agent
@@ -81,145 +90,138 @@ def create_app(
                 from app.tasks.queue import SubtaskJob
                 from app.tasks.worker import SubtaskWorker
 
-                async def _reconcile_and_run_worker() -> None:
-                    worker = SubtaskWorker(
-                        queue=resources.subtask_queue,
-                        permission_registry=None,
-                        fleet_registry=None,
-                    )
+                gw = getattr(resources, "model_gateway", None)
+                fleet = create_default_fleet(
+                    model_gateway=gw,
+                    brave_api_key=getattr(configuration, "brave_api_key", None),
+                )
+                worker = SubtaskWorker(
+                    queue=resources.subtask_queue,
+                    permission_registry=None,
+                    fleet_registry=fleet,
+                )
 
-                    async def _agent_handler(
-                        job: SubtaskJob, input_data: dict[str, Any]
-                    ) -> dict[str, Any]:
-                        gw = getattr(resources, "model_gateway", None)
-                        return await execute_subtask_with_agent(job, input_data, gateway=gw)
+                async def _agent_handler(
+                    job: SubtaskJob, input_data: dict[str, Any]
+                ) -> dict[str, Any]:
+                    return await execute_subtask_with_agent(job, input_data, gateway=gw)
 
-                    # Startup reconciliation: rescue tasks stuck in planning/pending
-                    # or with unblocked subtasks ready for dispatch
-                    try:
-                        async with resources.session_factory() as session:
-                            stmt = select(Task).where(
-                                Task.status.in_(["planning", "pending", "executing"])
-                            )
-                            res = await session.execute(stmt)
-                            tasks = list(res.scalars().all())
-                            for t in tasks:
-                                st_stmt = select(Subtask).where(Subtask.task_id == t.id)
-                                st_res = await session.execute(st_stmt)
-                                subtasks = list(st_res.scalars().all())
-
-                                if not subtasks:
-                                    instr = t.user_instruction or t.title or "Comprehensive notes"
-                                    st1_uuid = resolve_subtask_uuid(t.id, "step_1")
-                                    st2_uuid = resolve_subtask_uuid(t.id, "step_2")
-                                    plan_nodes = [
-                                        SubTask(
-                                            id="step_1",
-                                            assigned_agent="research",
-                                            description=(
-                                                f"Research technical concepts for: {instr[:60]}"
-                                            ),
-                                            dependencies=[],
-                                            status="pending",
-                                            input_data={"instruction": instr},
-                                        ),
-                                        SubTask(
-                                            id="step_2",
-                                            assigned_agent="document",
-                                            description=(
-                                                f"Generate verified deliverable for: {instr[:60]}"
-                                            ),
-                                            dependencies=["step_1"],
-                                            status="pending",
-                                            input_data={"instruction": instr},
-                                        ),
-                                    ]
-                                    t.active_plan = [node.model_dump() for node in plan_nodes]
-                                    t.status = "executing"
-                                    t.plan_status = PlanStatus.EXECUTING
-
-                                    st1 = Subtask(
-                                        id=st1_uuid,
-                                        task_id=t.id,
-                                        workspace_id=t.workspace_id,
-                                        assigned_agent=SubtaskAgent.RESEARCH,
-                                        description=plan_nodes[0].description,
-                                        dependencies=[],
-                                        status=SubtaskStatus.PENDING,
-                                        input_data=plan_nodes[0].input_data,
-                                    )
-                                    st2 = Subtask(
-                                        id=st2_uuid,
-                                        task_id=t.id,
-                                        workspace_id=t.workspace_id,
-                                        assigned_agent=SubtaskAgent.DOCUMENT,
-                                        description=plan_nodes[1].description,
-                                        dependencies=[str(st1_uuid)],
-                                        status=SubtaskStatus.PENDING,
-                                        input_data=plan_nodes[1].input_data,
-                                    )
-                                    session.add(st1)
-                                    session.add(st2)
-                                    await write_outbox_event(
-                                        session=session,
-                                        workspace_id=t.workspace_id,
-                                        task_id=t.id,
-                                        event_type=TaskEventType.TASK_PLAN_CREATED,
-                                        payload={
-                                            "task_id": str(t.id),
-                                            "instruction": instr,
-                                            "subtasks_count": 2,
-                                        },
-                                    )
-                                    await session.commit()
-                                    await resources.subtask_queue.enqueue(
-                                        SubtaskJob(
-                                            workspace_id=t.workspace_id,
-                                            user_id=t.user_id,
-                                            task_id=t.id,
-                                            subtask_id=st1_uuid,
-                                            assigned_agent="research",
+                # Continuous reconciler loop: monitors active tasks and unblocks ready subtasks
+                async def _reconciler_loop() -> None:
+                    while True:
+                        try:
+                            await asyncio.sleep(2.0)
+                            workspaces = await resources.get_active_workspaces()
+                            for ws_id in workspaces:
+                                try:
+                                    async with tenant_session(resources.engine, ws_id) as session:
+                                        stmt = select(Task).where(
+                                            Task.status.in_(["planning", "pending", "executing"]),
+                                            Task.workspace_id == ws_id,
                                         )
-                                    )
-                                else:
-                                    completed_ids = {
-                                        str(s.id)
-                                        for s in subtasks
-                                        if s.status == SubtaskStatus.COMPLETED
-                                    }
-                                    for s in subtasks:
-                                        if s.status == SubtaskStatus.PENDING:
-                                            deps = s.dependencies or []
-                                            if all(str(d) in completed_ids for d in deps):
-                                                agent_str = getattr(
-                                                    s.assigned_agent,
-                                                    "value",
-                                                    str(s.assigned_agent),
-                                                )
-                                                await resources.subtask_queue.enqueue(
-                                                    SubtaskJob(
-                                                        workspace_id=t.workspace_id,
-                                                        user_id=t.user_id,
-                                                        task_id=t.id,
-                                                        subtask_id=s.id,
-                                                        assigned_agent=agent_str,
-                                                    )
-                                                )
-                    except Exception as recon_err:
-                        logger.warning("task_reconciler_error: %s", recon_err)
+                                        res = await session.execute(stmt)
+                                        tasks = list(res.scalars().all())
+                                        for t in tasks:
+                                            st_stmt = select(Subtask).where(
+                                                Subtask.task_id == t.id,
+                                                Subtask.workspace_id == ws_id,
+                                            )
+                                            st_res = await session.execute(st_stmt)
+                                            subtasks = list(st_res.scalars().all())
+                                            if not subtasks:
+                                                continue
 
-                    # Subtask queue consumer loop
+                                            completed_ids = {
+                                                str(s.id)
+                                                for s in subtasks
+                                                if s.status == SubtaskStatus.COMPLETED
+                                            }
+                                            all_done = len(completed_ids) == len(subtasks)
+                                            if all_done:
+                                                if t.status != "completed":
+                                                    t.status = "completed"
+                                                    t.plan_status = PlanStatus.COMPLETED
+                                                    t.completed_at = datetime.now(UTC)
+                                                    await write_outbox_event(
+                                                        session=session,
+                                                        workspace_id=ws_id,
+                                                        task_id=t.id,
+                                                        event_type=TaskEventType.TASK_COMPLETED,
+                                                        payload={
+                                                            "task_id": str(t.id),
+                                                            "status": "completed",
+                                                        },
+                                                    )
+                                                continue
+
+                                            for s in subtasks:
+                                                if s.status == SubtaskStatus.PENDING:
+                                                    deps = s.dependencies or []
+                                                    deps_satisfied = True
+                                                    for d in deps:
+                                                        d_str = str(d)
+                                                        if d_str not in completed_ids:
+                                                            resolved_d = str(
+                                                                resolve_subtask_uuid(t.id, d_str)
+                                                            )
+                                                            if resolved_d not in completed_ids:
+                                                                deps_satisfied = False
+                                                                break
+                                                    if deps_satisfied:
+                                                        agent_str = getattr(
+                                                            s.assigned_agent,
+                                                            "value",
+                                                            str(s.assigned_agent),
+                                                        )
+                                                        await resources.subtask_queue.enqueue(
+                                                            SubtaskJob(
+                                                                workspace_id=t.workspace_id,
+                                                                user_id=t.user_id,
+                                                                task_id=t.id,
+                                                                subtask_id=s.id,
+                                                                assigned_agent=agent_str,
+                                                            )
+                                                        )
+                                        if hasattr(resources, "event_publisher"):
+                                            from app.tasks.outbox import OutboxDispatcher
+
+                                            dispatcher = OutboxDispatcher(resources.event_publisher)
+                                            await dispatcher.dispatch_pending_events(
+                                                session, workspace_id=ws_id
+                                            )
+                                        await session.commit()
+                                except Exception as ws_err:
+                                    logger.debug(
+                                        "reconciler_workspace_error ws=%s: %s", ws_id, ws_err
+                                    )
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as loop_err:
+                            logger.error("reconciler_loop_error: %s", loop_err, exc_info=True)
+                            await asyncio.sleep(2.0)
+
+                # Subtask queue consumer loop
+                async def _worker_consumer_loop() -> None:
                     while True:
                         try:
                             job = await resources.subtask_queue.dequeue(timeout_seconds=1.0)
                             if job is None:
                                 continue
-                            async with resources.session_factory() as session:
+                            async with tenant_session(
+                                resources.engine, job.workspace_id, job.user_id
+                            ) as session:
                                 await worker.execute_job(
                                     session=session,
                                     job=job,
                                     agent_handler=_agent_handler,
                                 )
+                                if hasattr(resources, "event_publisher"):
+                                    from app.tasks.outbox import OutboxDispatcher
+
+                                    dispatcher = OutboxDispatcher(resources.event_publisher)
+                                    await dispatcher.dispatch_pending_events(
+                                        session, workspace_id=job.workspace_id
+                                    )
                                 await session.commit()
                             resources.subtask_queue.task_done()
                         except asyncio.CancelledError:
@@ -228,11 +230,18 @@ def create_app(
                             logger.error("subtask_worker_loop_error: %s", w_err, exc_info=True)
                             await asyncio.sleep(1.0)
 
-                worker_task = asyncio.create_task(_reconcile_and_run_worker())
+                worker_task = asyncio.create_task(_worker_consumer_loop())
+                reconciler_task = asyncio.create_task(_reconciler_loop())
 
             logger.info("application_started")
             yield
         finally:
+            if reconciler_task is not None:
+                reconciler_task.cancel()
+                try:
+                    await reconciler_task
+                except asyncio.CancelledError:
+                    pass
             if worker_task is not None:
                 worker_task.cancel()
                 try:

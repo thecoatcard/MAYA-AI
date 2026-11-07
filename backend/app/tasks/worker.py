@@ -521,13 +521,27 @@ class SubtaskWorker:
             all_res = await session.execute(all_stmt)
             task_subtasks = list(all_res.scalars().all())
             all_done = all(st.status == SubtaskStatus.COMPLETED for st in task_subtasks)
+            task_stmt = select(Task).where(
+                Task.id == job.task_id,
+                Task.workspace_id == job.workspace_id,
+            )
+            t_res = await session.execute(task_stmt)
+            task = t_res.scalars().first()
+            if task and task.active_plan:
+                updated_plan = []
+                for node in task.active_plan:
+                    node_id = str(node.get("id"))
+                    st_uuid = resolve_subtask_uuid(task.id, node_id)
+                    if st_uuid == job.subtask_id or node_id == str(job.subtask_id):
+                        node_copy = dict(node)
+                        node_copy["status"] = SubtaskStatus.COMPLETED.value
+                        node_copy["output_result"] = subtask.output_result
+                        updated_plan.append(node_copy)
+                    else:
+                        updated_plan.append(node)
+                task.active_plan = updated_plan
+
             if all_done:
-                task_stmt = select(Task).where(
-                    Task.id == job.task_id,
-                    Task.workspace_id == job.workspace_id,
-                )
-                t_res = await session.execute(task_stmt)
-                task = t_res.scalars().first()
                 if task:
                     task.status = "completed"
                     task.plan_status = PlanStatus.COMPLETED
