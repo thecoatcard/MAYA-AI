@@ -81,6 +81,12 @@ class GeminiLiveBridge:
                     )
                 )
 
+            thinking_config = (
+                types.ThinkingConfig(thinking_level="low")
+                if self._model == "gemini-3.8-live-extended-thinking"
+                else None
+            )
+
             config = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
                 speech_config=types.SpeechConfig(
@@ -88,6 +94,7 @@ class GeminiLiveBridge:
                         prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
                     )
                 ),
+                thinking_config=thinking_config,
                 system_instruction=types.Content(parts=[types.Part(text=self._system_instruction)]),
                 tools=[types.Tool(function_declarations=declarations)],
                 input_audio_transcription=types.AudioTranscriptionConfig(mode="smart"),
@@ -237,6 +244,11 @@ class GeminiLiveBridge:
             async for message in self._session.receive():
                 if self._closed:
                     break
+
+                # 0. Asynchronous reasoning interaction status
+                interaction_status = getattr(message, "interaction_status", None)
+                if interaction_status:
+                    yield {"type": "INTERACTION_STATUS", "status": str(interaction_status)}
 
                 # 1. Server interrupted event (Sub-150 ms barge-in protocol)
                 if getattr(message, "server_content", None) and getattr(

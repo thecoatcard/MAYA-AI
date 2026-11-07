@@ -36,6 +36,7 @@ export interface UseLiveVoiceOptions {
   readonly wsUrl?: string;
   readonly sessionId?: string | null;
   readonly onToolExecuted?: (action: LiveActionInfo) => void;
+  readonly model?: string;
 }
 
 export interface UseLiveVoiceResult {
@@ -43,6 +44,7 @@ export interface UseLiveVoiceResult {
   readonly isSpeaking: boolean;
   readonly isListening: boolean;
   readonly isInterrupted: boolean;
+  readonly interactionStatus: "IN_PROGRESS" | "IDLE" | null;
   readonly transcripts: readonly TranscriptItem[];
   readonly activeTask: ActiveTaskInfo | null;
   readonly activeAction: LiveActionInfo | null;
@@ -110,12 +112,16 @@ export function useLiveVoice(
     wsUrl,
     sessionId,
     onToolExecuted,
+    model = "gemini-3.8-live",
   } = options;
 
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [isInterrupted, setIsInterrupted] = useState<boolean>(false);
+  const [interactionStatus, setInteractionStatus] = useState<
+    "IN_PROGRESS" | "IDLE" | null
+  >(null);
   const [transcripts, setTranscripts] = useState<readonly TranscriptItem[]>([]);
   const [activeTask, setActiveTask] = useState<ActiveTaskInfo | null>(null);
   const [activeAction, setActiveAction] = useState<LiveActionInfo | null>(null);
@@ -264,6 +270,7 @@ export function useLiveVoice(
     setIsListening(false);
     setIsSpeaking(false);
     setIsInterrupted(false);
+    setInteractionStatus(null);
   }, [flushAudioPlaybackQueue]);
 
   const startSession = useCallback(async () => {
@@ -292,7 +299,8 @@ export function useLiveVoice(
         const sessionQuery = sessionId
           ? `&session_id=${encodeURIComponent(sessionId)}`
           : "";
-        targetWsUrl = `${wsProto}//${host}:${port}/api/v1/voice/live?token=${token || ""}${sessionQuery}`;
+        const modelQuery = `&model=${encodeURIComponent(model || "gemini-3.8-live")}`;
+        targetWsUrl = `${wsProto}//${host}:${port}/api/v1/voice/live?token=${token || ""}${sessionQuery}${modelQuery}`;
       }
 
       const socket = new WebSocket(targetWsUrl);
@@ -375,6 +383,12 @@ export function useLiveVoice(
                 intent:
                   data.intent || (data.args?.intent as string) || undefined,
               });
+            } else if (data.type === "INTERACTION_STATUS") {
+              setInteractionStatus(
+                data.status === "IN_PROGRESS" || data.status === "IDLE"
+                  ? data.status
+                  : null,
+              );
             }
           } catch {
             // Ignore non-json control message
@@ -484,6 +498,7 @@ export function useLiveVoice(
   }, [
     flushAudioPlaybackQueue,
     interruptPlayback,
+    model,
     onError,
     onToolExecuted,
     onTranscript,
@@ -504,6 +519,7 @@ export function useLiveVoice(
     isSpeaking,
     isListening,
     isInterrupted,
+    interactionStatus,
     transcripts,
     activeTask,
     activeAction,

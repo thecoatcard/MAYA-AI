@@ -328,6 +328,10 @@ export function SettingsView(): React.JSX.Element {
                   <option value="gemini-3.8-live">
                     gemini-3.8-live (Native WebSocket Real-time Voice)
                   </option>
+                  <option value="gemini-3.8-live-extended-thinking">
+                    gemini-3.8-live-extended-thinking (Background Reasoning
+                    Voice)
+                  </option>
                 </select>
                 <span className="text-[10px] text-zinc-500 font-mono">
                   Powers the voice orb with continuous sub-300ms audio

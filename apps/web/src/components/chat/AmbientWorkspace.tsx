@@ -26,6 +26,7 @@ export function AmbientWorkspace(): React.JSX.Element {
     isSpeaking: isVoiceSpeaking,
     isListening: isVoiceListening,
     isInterrupted: isVoiceInterrupted,
+    interactionStatus,
     transcripts,
     activeTask,
     activeAction,
@@ -43,6 +44,8 @@ export function AmbientWorkspace(): React.JSX.Element {
       setVoiceState("interrupted");
     } else if (isVoiceSpeaking) {
       setVoiceState("speaking");
+    } else if (interactionStatus === "IN_PROGRESS") {
+      setVoiceState("thinking");
     } else if (isVoiceListening) {
       setVoiceState("listening");
     } else if (isVoiceConnected) {
@@ -54,6 +57,7 @@ export function AmbientWorkspace(): React.JSX.Element {
     voiceError,
     isVoiceInterrupted,
     isVoiceSpeaking,
+    interactionStatus,
     isVoiceListening,
     isVoiceConnected,
   ]);

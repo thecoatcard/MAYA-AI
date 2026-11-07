@@ -142,12 +142,16 @@ async def voice_live_websocket(websocket: WebSocket) -> None:
         mock_mode=False,
     )
 
+    requested_model = websocket.query_params.get("model") or "gemini-3.8-live"
+    if requested_model not in ("gemini-3.8-live", "gemini-3.8-live-extended-thinking"):
+        requested_model = "gemini-3.8-live"
+
     gemini_bridge = GeminiLiveBridge(
         api_key=gemini_key,
         system_instruction=VOICE_SYSTEM_INSTRUCTION,
         tool_registry=tool_registry,
         context=context,
-        model="gemini-3.8-live",
+        model=requested_model,
         mock_mode=False,
     )
     await gemini_bridge.connect()
@@ -204,6 +208,14 @@ async def voice_live_websocket(websocket: WebSocket) -> None:
             elif ev_type == "INTERRUPTED":
                 # Decision D12: Sub-150 ms Barge-in interruption
                 await session.handle_interrupt(source="gemini_interrupted")
+
+            elif ev_type == "INTERACTION_STATUS":
+                status_val = event.get("status", "")
+                msg = OutgoingMessage(
+                    OutgoingMessageType.CONTROL,
+                    payload={"type": "INTERACTION_STATUS", "status": status_val},
+                )
+                await session._outgoing_queue.put(msg)
 
             elif ev_type == "TOOL_EXECUTED":
                 tool_res = event.get("result", {})
