@@ -20,6 +20,7 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  downloadArtifactFile,
   getArtifactDownloadUrl,
   listArtifacts,
   type ArtifactMetadata,
@@ -45,6 +46,26 @@ export function ArtifactsManagerView(): React.JSX.Element {
   const [inspectModalArtifact, setInspectModalArtifact] =
     useState<ArtifactMetadata | null>(null);
   const [copiedHashId, setCopiedHashId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = async (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    art: ArtifactMetadata,
+  ) => {
+    e.preventDefault();
+    try {
+      setDownloadingId(art.id);
+      await downloadArtifactFile(art.id, art.file_name);
+    } catch (err) {
+      console.error(
+        "Authenticated blob download failed, falling back to direct URL navigation:",
+        err,
+      );
+      window.location.href = getArtifactDownloadUrl(art.id);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const loadArtifacts = useCallback(async () => {
     setLoading(true);
@@ -324,11 +345,18 @@ export function ArtifactsManagerView(): React.JSX.Element {
                               <a
                                 href={getArtifactDownloadUrl(art.id)}
                                 download={art.file_name}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 font-medium text-xs transition-colors shadow-xs"
+                                onClick={(e) => void handleDownload(e, art)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 font-medium text-xs transition-colors shadow-xs cursor-pointer"
                                 title="Download direct artifact binary"
                               >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>Download</span>
+                                <Download
+                                  className={`w-3.5 h-3.5 ${downloadingId === art.id ? "animate-bounce" : ""}`}
+                                />
+                                <span>
+                                  {downloadingId === art.id
+                                    ? "Downloading..."
+                                    : "Download"}
+                                </span>
                               </a>
                             </div>
                           </td>
@@ -385,10 +413,17 @@ export function ArtifactsManagerView(): React.JSX.Element {
                 <a
                   href={getArtifactDownloadUrl(selectedArtifact.id)}
                   download={selectedArtifact.file_name}
+                  onClick={(e) => void handleDownload(e, selectedArtifact)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 text-xs font-medium transition-colors shadow-xs shrink-0 cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download</span>
+                  <Download
+                    className={`w-3.5 h-3.5 ${downloadingId === selectedArtifact.id ? "animate-bounce" : ""}`}
+                  />
+                  <span>
+                    {downloadingId === selectedArtifact.id
+                      ? "Downloading..."
+                      : "Download"}
+                  </span>
                 </a>
               </div>
 
@@ -454,7 +489,7 @@ export function ArtifactsManagerView(): React.JSX.Element {
                       </p>
                     </div>
                     <a
-                      href={getArtifactDownloadUrl(selectedArtifact.id)}
+                      href={getArtifactDownloadUrl(selectedArtifact.id, true)}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-xs text-zinc-200 transition-colors"
@@ -624,10 +659,17 @@ export function ArtifactsManagerView(): React.JSX.Element {
               <a
                 href={getArtifactDownloadUrl(inspectModalArtifact.id)}
                 download={inspectModalArtifact.file_name}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 font-medium text-xs transition-colors"
+                onClick={(e) => void handleDownload(e, inspectModalArtifact)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 font-medium text-xs transition-colors cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download File</span>
+                <Download
+                  className={`w-3.5 h-3.5 ${downloadingId === inspectModalArtifact.id ? "animate-bounce" : ""}`}
+                />
+                <span>
+                  {downloadingId === inspectModalArtifact.id
+                    ? "Downloading..."
+                    : "Download File"}
+                </span>
               </a>
             </div>
           </div>

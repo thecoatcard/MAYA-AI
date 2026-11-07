@@ -93,6 +93,45 @@ export async function getArtifactMetadata(
   return (await response.json()) as ArtifactMetadata;
 }
 
-export function getArtifactDownloadUrl(artifactId: string): string {
-  return `/api/v1/artifacts/${encodeURIComponent(artifactId)}`;
+export function getArtifactDownloadUrl(
+  artifactId: string,
+  inline: boolean = false,
+): string {
+  const token = getAccessToken();
+  const base = `/api/v1/artifacts/${encodeURIComponent(artifactId)}`;
+  const params = new URLSearchParams();
+  if (token) {
+    params.set("token", token);
+  }
+  if (inline) {
+    params.set("inline", "true");
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
+export async function downloadArtifactFile(
+  artifactId: string,
+  fileName: string,
+): Promise<void> {
+  const response = await authenticatedFetch(
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    {
+      method: "GET",
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(response.status, "download_failed");
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  window.URL.revokeObjectURL(url);
 }

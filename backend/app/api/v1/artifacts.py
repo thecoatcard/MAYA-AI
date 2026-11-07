@@ -100,11 +100,52 @@ async def get_artifact_metadata(
         )
 
 
+def _locate_artifact_file(
+    storage_uri: str,
+    storage_root: Path,
+    workspace_id: UUID,
+    task_id: UUID,
+    file_name: str,
+) -> Path | None:
+    """Locate an artifact file on disk across root variations and relative paths."""
+    primary = Path(storage_uri).resolve()
+    if primary.is_file():
+        return primary
+
+    candidates = [
+        Path(storage_uri),
+        Path("backend") / storage_uri,
+        storage_root / str(workspace_id) / str(task_id) / file_name,
+        Path(__file__).resolve().parents[3]
+        / "backend"
+        / "storage"
+        / "artifacts"
+        / str(workspace_id)
+        / str(task_id)
+        / file_name,
+        Path(__file__).resolve().parents[2]
+        / "storage"
+        / "artifacts"
+        / str(workspace_id)
+        / str(task_id)
+        / file_name,
+    ]
+    for cand in candidates:
+        resolved = cand.resolve()
+        if resolved.is_file():
+            return resolved
+    return None
+
+
 @router.get("/{artifact_id}")
 async def download_artifact(
     artifact_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: Annotated[TenantDatabase, Depends(get_tenant_database)],
+    inline: Annotated[
+        bool,
+        Query(description="Open file inline rather than forcing attachment download"),
+    ] = False,
 ) -> FileResponse:
     """Download an artifact file with tenant RLS isolation and verification checksums."""
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
@@ -115,9 +156,15 @@ async def download_artifact(
                 detail={"error": "artifact_not_found"},
             )
 
-        file_path = await asyncio.to_thread(lambda: Path(artifact.storage_uri).resolve())
-        is_file = await asyncio.to_thread(file_path.is_file)
-        if not is_file:
+        file_path = await asyncio.to_thread(
+            _locate_artifact_file,
+            artifact.storage_uri,
+            artifact_service.storage_root,
+            artifact.workspace_id,
+            artifact.task_id,
+            artifact.file_name,
+        )
+        if file_path is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "artifact_file_missing_from_storage"},
@@ -129,6 +176,7 @@ async def download_artifact(
             path=str(file_path),
             media_type=mime,
             filename=artifact.file_name,
+            content_disposition_type="inline" if inline else "attachment",
             headers={
                 "X-Artifact-Sha256": artifact.sha256,
                 "X-Verification-Status": artifact.verification_status,

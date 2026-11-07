@@ -31,13 +31,22 @@ def client_address(request: Request) -> str:
 
 
 async def get_principal(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> Principal:
     """The caller behind a valid bearer token whose session is still live."""
-    if credentials is None:
+    token: str | None = None
+    if credentials is not None:
+        token = credentials.credentials
+    elif "token" in request.query_params:
+        query_token = request.query_params.get("token", "").strip()
+        if query_token:
+            token = query_token
+
+    if not token or service is None:
         raise NotAuthenticated
-    return await service.authenticate(credentials.credentials)
+    return await service.authenticate(token)
 
 
 @dataclass(frozen=True)

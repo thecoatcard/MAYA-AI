@@ -222,10 +222,38 @@ async def test_artifacts_api_full_lifecycle(
         downloaded_bytes = res.content
         assert hashlib.sha256(downloaded_bytes).hexdigest() == art_sha_xlsx
 
+        # 5d. Download artifact using token in query param (browser direct navigation)
+        res_query = await client.get(
+            f"/api/v1/artifacts/{art_id_xlsx}?token={tokens_a.access_token}"
+        )
+        assert res_query.status_code == 200
+        assert res_query.content == downloaded_bytes
+        assert 'attachment; filename="invoice.xlsx"' in res_query.headers["content-disposition"]
+
+        # 5e. Open artifact inline in browser tab
+        res_inline = await client.get(
+            f"/api/v1/artifacts/{art_id_xlsx}?token={tokens_a.access_token}&inline=true"
+        )
+        assert res_inline.status_code == 200
+        assert 'inline; filename="invoice.xlsx"' in res_inline.headers["content-disposition"]
+
+        # 5f. Unauthorized download requests (no token or invalid token)
+        res_no_auth = await client.get(f"/api/v1/artifacts/{art_id_xlsx}")
+        assert res_no_auth.status_code == 401
+
+        res_bad_token = await client.get(f"/api/v1/artifacts/{art_id_xlsx}?token=invalid-jwt")
+        assert res_bad_token.status_code == 401
+
         # 6. Cross-Tenant Security Test (Tenant B cannot access Tenant A's artifact)
         res_cross = await client.get(f"/api/v1/artifacts/{art_id_xlsx}", headers=headers_b)
         assert res_cross.status_code == 404
         assert res_cross.json()["error"] == "artifact_not_found"
+
+        res_cross_query = await client.get(
+            f"/api/v1/artifacts/{art_id_xlsx}?token={tokens_b.access_token}"
+        )
+        assert res_cross_query.status_code == 404
+        assert res_cross_query.json()["error"] == "artifact_not_found"
 
         res_cross_meta = await client.get(
             f"/api/v1/artifacts/{art_id_xlsx}/metadata", headers=headers_b

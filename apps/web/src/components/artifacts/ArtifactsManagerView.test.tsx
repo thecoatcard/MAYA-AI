@@ -7,6 +7,7 @@ import * as artifactsClient from "../../lib/artifacts-client";
 
 vi.mock("../../lib/artifacts-client", () => ({
   listArtifacts: vi.fn(),
+  downloadArtifactFile: vi.fn(),
   getArtifactDownloadUrl: vi.fn(
     (id: string) => `/api/v1/artifacts/${encodeURIComponent(id)}`,
   ),
@@ -92,5 +93,43 @@ describe("ArtifactsManagerView", () => {
     expect(
       screen.getByText(/Verification Audit Report — audit_report\.pdf/i),
     ).toBeInTheDocument();
+  });
+
+  it("triggers authenticated download when download link is clicked", async () => {
+    const mockArtifacts: artifactsClient.ArtifactMetadata[] = [
+      {
+        id: "art-103",
+        workspace_id: "ws-1",
+        task_id: "task-003",
+        user_id: "u-1",
+        file_name: "financial_forecast.xlsx",
+        file_type: "xlsx",
+        size_bytes: 20480,
+        sha256: "aabbccddeeff00112233445566778899",
+        verification_status: "verified",
+        verification_report: null,
+        created_at: "2026-11-07T12:00:00Z",
+      },
+    ];
+
+    vi.mocked(artifactsClient.listArtifacts).mockResolvedValueOnce(
+      mockArtifacts,
+    );
+
+    render(<ArtifactsManagerView />);
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("financial_forecast.xlsx").length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    const downloadLinks = screen.getAllByRole("link", { name: /download/i });
+    fireEvent.click(downloadLinks[0]);
+
+    expect(artifactsClient.downloadArtifactFile).toHaveBeenCalledWith(
+      "art-103",
+      "financial_forecast.xlsx",
+    );
   });
 });
