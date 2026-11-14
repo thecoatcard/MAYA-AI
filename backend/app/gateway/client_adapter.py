@@ -56,9 +56,14 @@ def build_genai_client(
 
 def create_client_from_settings(settings: "Settings") -> genai.Client | None:
     """Construct client from application Settings if key is set, else return None."""
-    if settings.gemini_api_key is None:
+    effective_keys = getattr(settings, "effective_gemini_api_keys", [])
+    if effective_keys:
+        key_str = effective_keys[0].get_secret_value()
+    elif settings.gemini_api_key is not None:
+        key_str = settings.gemini_api_key.get_secret_value()
+    else:
         return None
-    key_str = settings.gemini_api_key.get_secret_value()
+
     if not key_str.strip():
         return None
     return build_genai_client(

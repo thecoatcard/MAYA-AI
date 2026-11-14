@@ -71,7 +71,7 @@ async def test_client_vad_control_messages() -> None:
     assert session.pending_audio_chunks_count == 0
 
     interrupt_msg = await session.get_next_outgoing_message()
-    assert interrupt_msg.payload == {"type": "AUDIO_INTERRUPT"}
+    assert interrupt_msg.payload == {"type": "AUDIO_INTERRUPT", "epoch": 1}
 
     # Speech stop
     await session.handle_client_control_message({"type": "VAD_SPEECH_STOP"})

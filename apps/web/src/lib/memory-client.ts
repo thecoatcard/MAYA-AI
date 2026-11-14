@@ -2,7 +2,7 @@
  * Typed client for Memory and Knowledge Retrieval REST API (Phase 11).
  */
 
-import { ApiError } from "./api-client";
+import { apiErrorFromResponse } from "./api-client";
 import { getAccessToken, refreshSession } from "./auth-session";
 
 export interface MemoryItem {
@@ -91,16 +91,7 @@ async function authenticatedFetch(
   }
 
   if (!response.ok) {
-    let errorCode = "unknown_error";
-    try {
-      const body = (await response.json()) as { error?: string };
-      if (body?.error) {
-        errorCode = body.error;
-      }
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(response.status, errorCode);
+    throw await apiErrorFromResponse(response);
   }
 
   return response;

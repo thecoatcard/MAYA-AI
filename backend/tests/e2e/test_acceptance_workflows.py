@@ -28,11 +28,12 @@ from app.automation.verifiers.pdf_verifier import verify_pdf
 from app.automation.verifiers.pptx_verifier import verify_pptx
 from app.automation.verifiers.xlsx_verifier import verify_xlsx
 from app.db.models import Subtask, SubtaskStatus, Task
-from app.mcp.connectors.brave import BraveSearchResult
+from app.mcp.connectors.google_search import GoogleSearchResult
 from app.mcp.sanitizer import SanitizationResult
 from app.sandbox.runner import SandboxRunner
 from app.tasks.queue import SubtaskJob
 from app.tasks.worker import SubtaskWorker
+from tests.support.approval import TEST_JWT_KEY, approve_paused_subtask
 
 
 @pytest.mark.asyncio
@@ -74,11 +75,12 @@ async def test_workflow_1_daily_briefing_e2e() -> None:
     pm_agent = PMAgent(
         calendar_service=calendar_service,
         notion_connector=notion_connector,
+        notion_database_id="tasks-db",
     )
     fleet = AgentFleetRegistry()
     fleet.register_agent(SpecialistAgentRole.PM, pm_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
     workspace_id = uuid4()
     task_id = uuid4()
     subtask_id = uuid4()
@@ -165,7 +167,7 @@ async def test_workflow_3_github_issue_sandbox_fix_gated_pr_e2e(tmp_path: Path) 
     fleet = AgentFleetRegistry()
     fleet.register_agent(SpecialistAgentRole.CODING, coding_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
     workspace_id = uuid4()
     task_id = uuid4()
     subtask_id = uuid4()
@@ -228,7 +230,8 @@ async def test_workflow_3_github_issue_sandbox_fix_gated_pr_e2e(tmp_path: Path) 
     assert subtask.verification_proof["retest_passed"] is True
 
     # 2. Approved execution -> completes and returns PR URL
-    subtask.input_data["has_valid_approval_token"] = True
+    # A real signed approval token is verified and claimed; a bare input flag no longer works.
+    approve_paused_subtask(session, subtask, task)
     status_approved = await worker.execute_job(session=session, job=job)
     assert status_approved == SubtaskStatus.COMPLETED
     assert str(subtask.status) == str(SubtaskStatus.COMPLETED)
@@ -240,9 +243,11 @@ async def test_workflow_3_github_issue_sandbox_fix_gated_pr_e2e(tmp_path: Path) 
 async def test_workflow_5_competitive_research_to_verified_pdf_e2e(tmp_path: Path) -> None:
     """Workflow 5: Competitive Research -> Verified PDF Report with text layer."""
     # 1. ResearchAgent executes web search
-    mock_brave = MagicMock()
-    mock_brave.search = AsyncMock(
-        return_value=BraveSearchResult(
+    mock_search = MagicMock()
+    mock_search.search = AsyncMock(
+        return_value=GoogleSearchResult(
+            query="Enterprise AI agent market differentiators 2026",
+            text="Enterprise AI market is adopting deterministic verifiers rapidly.",
             citations=[
                 {
                     "title": "Enterprise AI Report 2026",
@@ -264,14 +269,14 @@ async def test_workflow_5_competitive_research_to_verified_pdf_e2e(tmp_path: Pat
         )
     )
 
-    research_agent = ResearchAgent(brave_connector=mock_brave)
+    research_agent = ResearchAgent(google_search_connector=mock_search)
     document_agent = DocumentAgent(artifacts_base_dir=tmp_path)
 
     fleet = AgentFleetRegistry()
     fleet.register_agent(SpecialistAgentRole.RESEARCH, research_agent)
     fleet.register_agent(SpecialistAgentRole.DOCUMENT, document_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
     workspace_id = uuid4()
     task_id = uuid4()
 
@@ -408,7 +413,7 @@ async def test_workflow_6_pdf_invoices_to_formula_verified_xlsx_e2e(tmp_path: Pa
     fleet = AgentFleetRegistry()
     fleet.register_agent(SpecialistAgentRole.DOCUMENT, document_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
     workspace_id = uuid4()
     task_id = uuid4()
     subtask_id = uuid4()
@@ -504,7 +509,7 @@ async def test_workflow_7_executive_brief_to_8_slide_pptx_e2e(tmp_path: Path) ->
     fleet = AgentFleetRegistry()
     fleet.register_agent(SpecialistAgentRole.DOCUMENT, document_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
     workspace_id = uuid4()
     task_id = uuid4()
     subtask_id = uuid4()
@@ -543,7 +548,7 @@ async def test_workflow_7_executive_brief_to_8_slide_pptx_e2e(tmp_path: Path) ->
             "layout": "bullets",
             "title": "Multi-Agent Specialist Fleet",
             "bullets": [
-                "ResearchAgent for verified web discovery with Brave citations",
+                "ResearchAgent for verified web discovery with Google-grounded citations",
                 "CodingAgent operating in non-root Docker sandboxes",
                 "DocumentAgent generating validated office deliverables",
                 "PMAgent synthesizing calendars and task boards",

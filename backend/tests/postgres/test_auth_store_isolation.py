@@ -269,3 +269,16 @@ async def test_an_account_cannot_be_created_inside_someone_elses_workspace(
                 now=CLOCK.now(),
             )
     assert sqlstate(caught.value) == "42501"
+
+
+async def test_a_profile_is_only_visible_inside_its_own_workspace(
+    app_engine: AsyncEngine, tenants: Tenants
+) -> None:
+    store = PostgresAuthStore(app_engine)
+    first, second = tenants
+    async with store.transaction(first.workspace_id) as tx:
+        own = await tx.get_profile(first.user_id)
+    assert own is not None and own[0] == first.email
+    for context in (second.workspace_id, None):
+        async with store.transaction(context) as tx:
+            assert await tx.get_profile(first.user_id) is None

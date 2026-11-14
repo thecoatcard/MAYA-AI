@@ -28,7 +28,7 @@ PLAN_TABLES = {
 AUTH_TABLES = {"auth_otp_challenges", "auth_sessions"}
 CHECKPOINT_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes"}
 DURABLE_CHAT_TABLES = {"chat_idempotency"}
-OUTBOX_TABLES = {"task_outbox_events"}
+OUTBOX_TABLES = {"task_outbox_events", "user_settings"}
 ALL_TABLES = PLAN_TABLES | AUTH_TABLES | CHECKPOINT_TABLES | DURABLE_CHAT_TABLES | OUTBOX_TABLES
 
 SNAPSHOT_QUERIES = {

@@ -1,31 +1,41 @@
 "use client";
 
 import {
-  Activity,
-  ArrowRight,
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
   Clock,
   Copy,
   Download,
   Eye,
-  Layers,
+  Hourglass,
   Link as LinkIcon,
-  Lock,
+  RefreshCw,
   Search,
-  Shield,
+  ShieldAlert,
   ShieldCheck,
-  User,
-  Zap,
+  ShieldQuestion,
+  Square,
+  Timer,
+  XCircle,
+  type LucideIcon,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import { getPrincipalMe, type UserPrincipal } from "../../lib/system-client";
 import { listAuditEvents } from "../../lib/audit-client";
 import {
-  GlassBadge,
-  GlassButton,
-  GlassCard,
+  Badge,
+  Button,
+  CodeBlockShell,
+  EmptyState,
+  ErrorState,
   GlassInput,
   GlassModal,
+  Pane,
+  Skeleton,
+  Truncate,
+  WrapText,
+  type Tone,
 } from "../ui";
 
 export interface AuditEvent {
@@ -35,7 +45,7 @@ export interface AuditEvent {
   readonly category: "auth" | "task" | "tool" | "approval" | "security";
   readonly actor: string;
   readonly details: string;
-  readonly status: "success" | "pending" | "rejected" | "warning";
+  readonly status: AuditStatus | (string & {});
   readonly taskId?: string;
   readonly subtaskId?: string;
   readonly toolName?: string;
@@ -47,211 +57,124 @@ export interface AuditEvent {
   readonly outputPayload?: Record<string, unknown>;
 }
 
-const SAMPLE_AUDIT_TRAIL: readonly AuditEvent[] = [
-  {
-    id: "evt-001",
-    timestamp: "2026-11-07T10:45:12Z",
-    eventType: "task.created",
-    category: "task",
-    actor: "user:current",
-    details:
-      "Orchestrator created autonomous DAG task: 'Enterprise Competitive Pricing Analysis' with 4 planned subtasks.",
-    status: "success",
-    taskId: "task-8eb3262",
-    permissionLevel: "WRITE",
-    durationMs: 42,
-    prevHash:
-      "0000000000000000000000000000000000000000000000000000000000000000",
-    rowHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    inputPayload: {
-      prompt:
-        "Research and generate competitive matrix with verified WeasyPrint PDF and XLSX",
-      budget_usd: 2.5,
-    },
-    outputPayload: {
-      task_id: "task-8eb3262",
-      dag_nodes: [
-        "research",
-        "pricing_model",
-        "weasyprint_pdf",
-        "verification",
-      ],
-    },
-  },
-  {
-    id: "evt-002",
-    timestamp: "2026-11-07T10:45:15Z",
-    eventType: "tool.invoked",
-    category: "tool",
-    actor: "agent:research",
-    details:
-      "Invoked Brave Search connector for query 'enterprise AI pricing models'. Captured 4 structured citations.",
-    status: "success",
-    toolName: "brave_web_search",
-    permissionLevel: "READ",
-    durationMs: 310,
-    prevHash:
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    rowHash: "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
-    inputPayload: {
-      query: "enterprise AI pricing models",
-      count: 4,
-    },
-    outputPayload: {
-      results_count: 4,
-      sanitized: true,
-    },
-  },
-  {
-    id: "evt-003",
-    timestamp: "2026-11-07T10:46:02Z",
-    eventType: "approval.required",
-    category: "approval",
-    actor: "agent:coding",
-    details:
-      "Halted on RESTRICTED tool: 'github_create_pull_request'. Issued single-use RFC 8785 payload token.",
-    status: "pending",
-    toolName: "github_create_pull_request",
-    permissionLevel: "RESTRICTED",
-    durationMs: 18,
-    prevHash:
-      "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
-    rowHash: "3a52e22c9e7a46c65b534ab20845a9956d400263f350ec7dfaa0425a17688226",
-    inputPayload: {
-      repo: "maya-ai",
-      title: "fix: race condition in approval token invalidation",
-      branch: "fix/approval-race-condition",
-    },
-    outputPayload: {
-      approval_id: "appr-98213",
-      token_bound: "payload_sha256",
-    },
-  },
-  {
-    id: "evt-004",
-    timestamp: "2026-11-07T10:47:30Z",
-    eventType: "approval.decided",
-    category: "approval",
-    actor: "user:current",
-    details:
-      "Operator authorized action 'Create Pull Request' via Authenticated Web UI with TOTP verification.",
-    status: "success",
-    toolName: "github_create_pull_request",
-    permissionLevel: "RESTRICTED",
-    durationMs: 120,
-    prevHash:
-      "3a52e22c9e7a46c65b534ab20845a9956d400263f350ec7dfaa0425a17688226",
-    rowHash: "c51a0293db2e8faee46aa67f2b1d0e123611cd5be415f36eecb3917ec77e90ff",
-    inputPayload: {
-      decision: "approved",
-      totp_verified: true,
-    },
-    outputPayload: {
-      pr_url: "https://github.com/maya-ai/maya-ai/pull/48",
-      token_consumed: true,
-    },
-  },
-  {
-    id: "evt-005",
-    timestamp: "2026-11-07T10:48:10Z",
-    eventType: "artifact.verified",
-    category: "task",
-    actor: "agent:document",
-    details:
-      "Produced cryptographically verified XLSX deliverable. SHA-256 and row count passed anti-tamper verifier.",
-    status: "success",
-    taskId: "task-8eb3262",
-    permissionLevel: "WRITE",
-    durationMs: 480,
-    prevHash:
-      "c51a0293db2e8faee46aa67f2b1d0e123611cd5be415f36eecb3917ec77e90ff",
-    rowHash: "7b8a1c9e4210d7a64e15a9950d8794f31c9a632b450fe1cf8a62f8319d3810ec",
-    inputPayload: {
-      file_name: "competitor_matrix_model.xlsx",
-      engine: "openpyxl",
-    },
-    outputPayload: {
-      artifact_id: "art-sample-xlsx",
-      sha256:
-        "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
-      checksum_status: "verified",
-    },
-  },
-  {
-    id: "evt-006",
-    timestamp: "2026-11-07T11:02:14Z",
-    eventType: "security.ratelimit",
-    category: "security",
-    actor: "system:limiter",
-    details:
-      "Brave Search token bucket refilled. Leaky bucket rate limiter healthy with 0 dropped calls.",
-    status: "success",
-    toolName: "brave_web_search",
-    permissionLevel: "READ",
-    durationMs: 2,
-    prevHash:
-      "7b8a1c9e4210d7a64e15a9950d8794f31c9a632b450fe1cf8a62f8319d3810ec",
-    rowHash: "4a00bc9837f132e04da88c91a0c776de34190c128509b4317f229a1b029381ea",
-    inputPayload: {
-      capacity: 60,
-      available_tokens: 58,
-    },
-    outputPayload: {
-      status: "allow",
-    },
-  },
-  {
-    id: "evt-007",
-    timestamp: "2026-11-07T11:15:00Z",
-    eventType: "auth.session_refreshed",
-    category: "auth",
-    actor: "user:current",
-    details:
-      "Rotated JWT session with secure httpOnly refresh cookie. Sliding expiration extended.",
-    status: "success",
-    permissionLevel: "READ",
-    durationMs: 15,
-    prevHash:
-      "4a00bc9837f132e04da88c91a0c776de34190c128509b4317f229a1b029381ea",
-    rowHash: "5ef34b1298c56d012e88a3194519fbc702a11b659c03211a7c00e5a932b1f810",
-    inputPayload: {
-      grant_type: "refresh_token",
-    },
-    outputPayload: {
-      access_token_expires_in: 900,
-    },
-  },
+export type AuditStatus =
+  | "success"
+  | "failed"
+  | "denied"
+  | "pending"
+  | "rejected"
+  | "warning"
+  | "aborted"
+  | "timeout"
+  | "expired";
+
+type ChainState =
+  | { readonly kind: "unknown" }
+  | { readonly kind: "valid"; readonly length: number }
+  | { readonly kind: "broken"; readonly firstBadId?: string };
+
+/** Rows per request (server maximum is 100). */
+const PAGE_SIZE = 50;
+
+/**
+ * The whole status vocabulary, each with its own icon and word. Failed and denied differ in icon
+ * and wording, and no status relies on colour alone.
+ */
+const STATUS: Readonly<
+  Record<
+    AuditStatus,
+    { readonly text: string; readonly tone: Tone; readonly icon: LucideIcon }
+  >
+> = {
+  success: { text: "SUCCESS", tone: "success", icon: CheckCircle2 },
+  failed: { text: "FAILED", tone: "danger", icon: XCircle },
+  denied: { text: "DENIED", tone: "danger", icon: Ban },
+  rejected: { text: "REJECTED", tone: "warning", icon: ShieldAlert },
+  warning: { text: "WARNING", tone: "warning", icon: AlertTriangle },
+  pending: { text: "PENDING", tone: "neutral", icon: Hourglass },
+  aborted: { text: "ABORTED", tone: "neutral", icon: Square },
+  timeout: { text: "TIMEOUT", tone: "warning", icon: Timer },
+  expired: { text: "EXPIRED", tone: "neutral", icon: Clock },
+};
+
+function StatusBadge({ status }: { readonly status: string }) {
+  const known = (STATUS as Record<string, (typeof STATUS)[AuditStatus]>)[
+    status
+  ];
+  const spec = known ?? {
+    text: status.toUpperCase(),
+    tone: "neutral" as Tone,
+    icon: ShieldQuestion,
+  };
+  return (
+    <Badge tone={spec.tone} icon={spec.icon} data-status={status}>
+      {spec.text}
+    </Badge>
+  );
+}
+
+const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "approval", label: "Approvals" },
+  { id: "task", label: "Tasks" },
+  { id: "tool", label: "Tools" },
+  { id: "auth", label: "Sign-in" },
+  { id: "security", label: "Security" },
 ];
+
+const CATEGORY_LABEL: Readonly<Record<string, string>> = {
+  approval: "Approval",
+  task: "Task",
+  tool: "Tool",
+  auth: "Sign-in",
+  security: "Security",
+};
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+const LABEL = "text-maya-caption font-medium text-maya-muted";
 
 export function ActivityView(): React.JSX.Element {
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
-  const [principal, setPrincipal] = useState<UserPrincipal | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
-  const [events, setEvents] =
-    useState<readonly AuditEvent[]>(SAMPLE_AUDIT_TRAIL);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [chainValid, setChainValid] = useState<boolean>(true);
+  const [events, setEvents] = useState<readonly AuditEvent[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [chain, setChain] = useState<ChainState>({ kind: "unknown" });
 
-  useEffect(() => {
-    getPrincipalMe()
-      .then(setPrincipal)
-      .catch(() => {});
-  }, []);
-
-  const loadAuditLogs = React.useCallback(async () => {
+  const loadAuditLogs = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
+    setMoreError(null);
     try {
       const res = await listAuditEvents({
         category: filterCategory !== "all" ? filterCategory : undefined,
+        limit: PAGE_SIZE,
+        offset: 0,
       });
-      if (res.items.length > 0) {
-        setEvents(res.items);
-      }
-      setChainValid(res.chain_valid);
+      setEvents(res.items);
+      setTotal(res.total ?? res.items.length);
+      setChain(
+        res.chain_valid
+          ? { kind: "valid", length: res.chain_length ?? 0 }
+          : {
+              kind: "broken",
+              firstBadId: res.chain_first_bad_id ?? undefined,
+            },
+      );
     } catch {
-      // Offline fallback: keep existing
+      setEvents([]);
+      setTotal(0);
+      setChain({ kind: "unknown" });
+      setLoadError("Unable to load the audit ledger from the MAYA backend.");
     } finally {
       setLoading(false);
     }
@@ -261,28 +184,48 @@ export function ActivityView(): React.JSX.Element {
     void loadAuditLogs();
   }, [loadAuditLogs]);
 
+  const loadMore = async (): Promise<void> => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    setMoreError(null);
+    try {
+      const res = await listAuditEvents({
+        category: filterCategory !== "all" ? filterCategory : undefined,
+        limit: PAGE_SIZE,
+        offset: events.length,
+      });
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...res.items.filter((e) => !seen.has(e.id))];
+      });
+      setTotal(res.total ?? total);
+    } catch {
+      setMoreError("Could not load more rows. Try again.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   const copyToClipboard = (hash: string, id: string) => {
-    navigator.clipboard?.writeText(hash);
+    void navigator.clipboard?.writeText(hash);
     setCopiedHash(id);
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
   const filteredEvents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return events.filter((evt) => {
       if (filterCategory !== "all" && evt.category !== filterCategory) {
         return false;
       }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          evt.eventType.toLowerCase().includes(q) ||
-          evt.details.toLowerCase().includes(q) ||
-          (evt.toolName && evt.toolName.toLowerCase().includes(q)) ||
-          (evt.taskId && evt.taskId.toLowerCase().includes(q)) ||
-          evt.rowHash.toLowerCase().includes(q)
-        );
-      }
-      return true;
+      if (q === "") return true;
+      return (
+        evt.eventType.toLowerCase().includes(q) ||
+        evt.details.toLowerCase().includes(q) ||
+        (evt.toolName?.toLowerCase().includes(q) ?? false) ||
+        (evt.taskId?.toLowerCase().includes(q) ?? false) ||
+        evt.rowHash.toLowerCase().includes(q)
+      );
     });
   }, [events, filterCategory, searchQuery]);
 
@@ -301,381 +244,334 @@ export function ActivityView(): React.JSX.Element {
     downloadAnchor.remove();
   };
 
-  const getCategoryIcon = (category: AuditEvent["category"]) => {
-    switch (category) {
-      case "approval":
-        return <Shield className="w-4 h-4 text-amber-400" />;
-      case "task":
-        return <Layers className="w-4 h-4 text-blue-400" />;
-      case "tool":
-        return <Zap className="w-4 h-4 text-teal-400" />;
-      case "security":
-        return <Lock className="w-4 h-4 text-purple-400" />;
-      case "auth":
-      default:
-        return <User className="w-4 h-4 text-emerald-400" />;
+  const chainBadge = (() => {
+    if (loading) {
+      return (
+        <Badge tone="neutral" icon={ShieldQuestion}>
+          Chain: verifying
+        </Badge>
+      );
     }
-  };
+    if (chain.kind === "valid") {
+      return (
+        <Badge tone="success" icon={ShieldCheck}>
+          Chain verified
+        </Badge>
+      );
+    }
+    if (chain.kind === "broken") {
+      return (
+        <Badge tone="danger" icon={ShieldAlert}>
+          {chain.firstBadId
+            ? `Chain broken at row ${chain.firstBadId}`
+            : "Chain broken"}
+        </Badge>
+      );
+    }
+    return (
+      <Badge tone="warning" icon={ShieldQuestion}>
+        Chain status unknown
+      </Badge>
+    );
+  })();
 
-  const getCategoryBadge = (category: AuditEvent["category"]) => {
-    switch (category) {
-      case "approval":
-        return (
-          <GlassBadge variant="amber" size="sm" mono>
-            APPROVAL
-          </GlassBadge>
-        );
-      case "task":
-        return (
-          <GlassBadge variant="blue" size="sm" mono>
-            TASK
-          </GlassBadge>
-        );
-      case "tool":
-        return (
-          <GlassBadge variant="teal" size="sm" mono>
-            TOOL
-          </GlassBadge>
-        );
-      case "security":
-        return (
-          <GlassBadge variant="purple" size="sm" mono>
-            SECURITY
-          </GlassBadge>
-        );
-      case "auth":
-      default:
-        return (
-          <GlassBadge variant="emerald" size="sm" mono>
-            AUTH
-          </GlassBadge>
-        );
-    }
-  };
+  const loaded = events.length;
+  const countText = loading
+    ? "Loading…"
+    : `${loaded} of ${Math.max(total, loaded)} rows loaded`;
+
+  const header = (
+    <div className="grid min-w-0 gap-3 py-1">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="m-0 text-maya-heading font-medium">Activity</h1>
+          {chainBadge}
+          <span
+            className="text-maya-caption text-maya-muted"
+            aria-live="polite"
+          >
+            {countText}
+            {!loading && chain.kind === "valid" && chain.length > 0
+              ? `, ${chain.length} verified`
+              : ""}
+          </span>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={exportLedgerJson}
+          disabled={filteredEvents.length === 0}
+          leftIcon={<Download size={14} />}
+        >
+          Export Ledger
+        </Button>
+      </div>
+
+      <div
+        role="group"
+        aria-label="Filter by category"
+        className="flex min-w-0 flex-wrap items-center gap-1.5"
+      >
+        {CATEGORIES.map((tab) => (
+          <Button
+            key={tab.id}
+            size="sm"
+            variant={filterCategory === tab.id ? "primary" : "secondary"}
+            aria-pressed={filterCategory === tab.id}
+            onClick={() => setFilterCategory(tab.id)}
+          >
+            {tab.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="min-w-0 max-w-xl">
+        <GlassInput
+          placeholder="Search loaded rows"
+          aria-label="Search loaded rows"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          leftIcon={<Search size={14} aria-hidden="true" />}
+          clearable
+          onClear={() => setSearchQuery("")}
+        />
+      </div>
+    </div>
+  );
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-6 max-w-7xl mx-auto w-full">
-      {/* Header Banner */}
-      <GlassCard
-        variant="teal"
-        padding="md"
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-teal-500/30"
+    <div className="h-full min-h-0 min-w-0">
+      <Pane
+        aria-label="Activity"
+        header={header}
+        bodyLabel="Audit rows"
+        bodyClassName="p-4"
       >
-        <div className="flex items-start gap-3.5">
-          <div className="p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-400 mt-0.5">
-            <Activity className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-lg md:text-xl font-bold tracking-tight text-zinc-100 font-mono">
-                Activity & Tamper-Evident Audit Ledger
-              </h2>
-              <GlassBadge
-                variant={chainValid ? "emerald" : "rose"}
-                size="sm"
-                mono
-                icon={<ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />}
-              >
-                {loading
-                  ? "Verifying..."
-                  : chainValid
-                    ? "Chain Verified"
-                    : "Chain Broken"}
-              </GlassBadge>
-            </div>
-            <p className="text-xs md:text-sm text-zinc-400 mt-1.5 max-w-3xl leading-relaxed">
-              Append-only, SHA-256 hash-chained ledger (`audit_log` table)
-              recording all security-critical human approvals, tool calls,
-              autonomous task DAG events, and authentication step-ups.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 shrink-0">
-          <GlassButton
-            variant="secondary"
-            size="sm"
-            onClick={exportLedgerJson}
-            leftIcon={<Download className="w-3.5 h-3.5" />}
-          >
-            Export Ledger
-          </GlassButton>
-        </div>
-      </GlassCard>
-
-      {/* Hash-Chain Verification Status Card */}
-      <GlassCard
-        variant="default"
-        padding="sm"
-        className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-900/40"
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-            <LinkIcon className="w-4 h-4" />
-          </div>
-          <div className="text-xs font-mono">
-            <span className="font-bold text-zinc-200">
-              Continuous Hash-Chain: prev_hash → row_hash
-            </span>
-            <p className="text-[11px] text-zinc-400">
-              Each block digests previous event SHA-256 preventing insertion,
-              modification, or truncation.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
-          <span className="text-zinc-500">Operator:</span>
-          <span className="text-teal-300 font-bold">
-            {principal?.user_id
-              ? principal.user_id.slice(0, 10)
-              : "user:current"}
-          </span>
-          <span className="text-zinc-600">•</span>
-          <span className="text-emerald-300 font-bold">7 Blocks Sealed</span>
-        </div>
-      </GlassCard>
-
-      {/* Filter and Search Bar */}
-      <GlassCard
-        variant="default"
-        padding="sm"
-        className="flex flex-col sm:flex-row items-center justify-between gap-3"
-      >
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto text-xs">
-          {[
-            { id: "all", label: "All Activities" },
-            { id: "approval", label: "Approvals" },
-            { id: "task", label: "Tasks & DAG" },
-            { id: "tool", label: "Tool Executions" },
-            { id: "auth", label: "Auth Sessions" },
-            { id: "security", label: "Security & Limits" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setFilterCategory(tab.id)}
-              className={`px-3 py-1.5 rounded-lg font-medium text-xs whitespace-nowrap transition-all duration-150 cursor-pointer ${
-                filterCategory === tab.id
-                  ? "bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-xs"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="w-full sm:w-72">
-          <GlassInput
-            placeholder="Search audit trail, tools, hashes…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            leftIcon={<Search className="w-3.5 h-3.5 text-zinc-500" />}
-            clearable
-            onClear={() => setSearchQuery("")}
-            className="py-1.5 text-xs"
-          />
-        </div>
-      </GlassCard>
-
-      {/* Audit Trail Timeline */}
-      <GlassCard variant="default" padding="none" className="overflow-hidden">
-        <div className="divide-y divide-white/5">
-          {filteredEvents.map((evt) => (
-            <div
-              key={evt.id}
-              onClick={() => setSelectedEvent(evt)}
-              className="p-4 md:p-5 hover:bg-white/[0.03] transition-colors flex flex-col md:flex-row items-start md:items-center justify-between gap-4 cursor-pointer group"
-            >
-              {/* Event Info */}
-              <div className="flex items-start gap-3.5 min-w-0">
-                <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 shrink-0 group-hover:border-teal-500/30 transition-colors">
-                  {getCategoryIcon(evt.category)}
-                </div>
-
-                <div className="flex flex-col gap-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold font-mono text-zinc-100">
-                      {evt.eventType}
-                    </span>
-                    {getCategoryBadge(evt.category)}
-                    {evt.permissionLevel && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 border border-white/10 text-zinc-400">
-                        Tier: {evt.permissionLevel}
-                      </span>
-                    )}
-                    <span className="text-[10px] font-mono text-zinc-500">
-                      by {evt.actor}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                    {evt.details}
-                  </p>
-
-                  {/* Hash-Chain Preview (prev_hash -> row_hash) */}
-                  <div className="flex items-center gap-1.5 mt-1 text-[10px] font-mono text-zinc-500">
-                    <LinkIcon className="w-3 h-3 text-teal-400/70 shrink-0" />
-                    <span
-                      title={`prev_hash: ${evt.prevHash}`}
-                      className="truncate max-w-[90px]"
-                    >
-                      {evt.prevHash.slice(0, 8)}…
-                    </span>
-                    <ArrowRight className="w-2.5 h-2.5 text-zinc-600 shrink-0" />
-                    <span
-                      title={`row_hash: ${evt.rowHash}`}
-                      className="text-teal-300/90 font-bold truncate max-w-[90px]"
-                    >
-                      {evt.rowHash.slice(0, 8)}…
-                    </span>
-                    {evt.durationMs !== undefined && (
-                      <span className="ml-2 text-zinc-500">
-                        • {evt.durationMs}ms
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Timestamp & Action Button */}
-              <div className="flex md:flex-col items-center md:items-end justify-between w-full md:w-auto shrink-0 gap-2">
-                <div className="flex items-center gap-1 text-[11px] font-mono text-zinc-400">
-                  <Clock className="w-3 h-3 text-zinc-500" />
-                  <span>{new Date(evt.timestamp).toLocaleTimeString()}</span>
-                </div>
-
-                <GlassButton
-                  variant="outline"
+        <div className="mx-auto grid min-w-0 max-w-5xl gap-3">
+          {loadError !== null && (
+            <ErrorState
+              title={loadError}
+              retry={
+                <Button
                   size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedEvent(evt);
-                  }}
-                  leftIcon={<Eye className="w-3 h-3" />}
+                  variant="secondary"
+                  leftIcon={<RefreshCw size={14} />}
+                  onClick={() => void loadAuditLogs()}
                 >
-                  Inspect Block
-                </GlassButton>
-              </div>
-            </div>
-          ))}
-        </div>
-      </GlassCard>
+                  Retry
+                </Button>
+              }
+            />
+          )}
 
-      {/* Block Inspector Modal */}
+          {loading && (
+            <div aria-busy="true" className="grid gap-3">
+              <p className="m-0 text-maya-small text-maya-muted">
+                Loading the audit ledger…
+              </p>
+              <Skeleton lines={3} />
+              <Skeleton lines={3} />
+            </div>
+          )}
+
+          {!loading && loadError === null && events.length === 0 && (
+            <EmptyState
+              title="No audit events recorded yet."
+              description="Approvals, tool calls, task events and sign-ins are recorded here as they happen."
+            />
+          )}
+
+          {!loading && events.length > 0 && filteredEvents.length === 0 && (
+            <EmptyState
+              title="No loaded rows match your search."
+              description={
+                loaded < total
+                  ? "Search only covers rows already loaded. Load more rows to search further back."
+                  : undefined
+              }
+            />
+          )}
+
+          {filteredEvents.length > 0 && (
+            <ul className="m-0 grid min-w-0 list-none gap-2 p-0">
+              {filteredEvents.map((evt) => (
+                <li
+                  key={evt.id}
+                  className="grid min-w-0 shrink-0 gap-2 rounded-maya-lg border border-maya-border bg-maya-raised p-3"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <StatusBadge status={evt.status} />
+                    <Badge tone="neutral">
+                      {CATEGORY_LABEL[evt.category] ?? evt.category}
+                    </Badge>
+                    <WrapText className="min-w-0 font-mono text-maya-mono font-medium text-maya-text">
+                      {evt.eventType}
+                    </WrapText>
+                  </div>
+
+                  <WrapText
+                    as="p"
+                    dir="auto"
+                    className="m-0 block text-maya-small text-maya-secondary"
+                  >
+                    {evt.details}
+                  </WrapText>
+
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 text-maya-caption text-maya-muted">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      <time dateTime={evt.timestamp}>
+                        {formatWhen(evt.timestamp)}
+                      </time>
+                      <Truncate className="max-w-64" title={evt.actor}>
+                        {`by ${evt.actor}`}
+                      </Truncate>
+                      {evt.permissionLevel && (
+                        <span>Tier: {evt.permissionLevel}</span>
+                      )}
+                      {evt.durationMs !== undefined && (
+                        <span>{evt.durationMs} ms</span>
+                      )}
+                      <span
+                        className="inline-flex min-w-0 items-center gap-1 font-mono"
+                        title={`prev ${evt.prevHash} to row ${evt.rowHash}`}
+                      >
+                        <LinkIcon
+                          aria-hidden="true"
+                          size={14}
+                          className="shrink-0"
+                        />
+                        {evt.prevHash.slice(0, 8)}…{evt.rowHash.slice(0, 8)}
+                      </span>
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Inspect block ${evt.eventType}`}
+                      leftIcon={<Eye size={14} />}
+                      onClick={() => setSelectedEvent(evt)}
+                    >
+                      Inspect Block
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {moreError !== null && (
+            <p role="alert" className="m-0 text-maya-small text-maya-danger">
+              {moreError}
+            </p>
+          )}
+          {!loading && loaded < total && (
+            <div className="flex justify-center">
+              <Button
+                variant="secondary"
+                loading={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </div>
+      </Pane>
+
       {selectedEvent && (
         <GlassModal
-          isOpen={Boolean(selectedEvent)}
+          isOpen
           onClose={() => setSelectedEvent(null)}
-          title={
-            <div className="flex items-center gap-2 font-mono text-zinc-100">
-              <ShieldCheck className="w-5 h-5 text-teal-400" />
-              <span>Audit Block: {selectedEvent.eventType}</span>
-            </div>
-          }
-          description="Tamper-evident cryptographically sealed record with input/output payloads."
+          title={`Audit Block: ${selectedEvent.eventType}`}
+          description="The sealed record, with its input and output as stored."
           size="lg"
         >
-          <div className="flex flex-col gap-4 text-xs font-mono">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-col gap-1">
-                <span className="text-[10px] text-zinc-500 uppercase">
-                  Actor
+          <div className="grid min-w-0 gap-4 text-maya-small">
+            <dl className="m-0 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              {[
+                [
+                  "Status",
+                  <StatusBadge key="s" status={selectedEvent.status} />,
+                ],
+                ["When", formatWhen(selectedEvent.timestamp)],
+                ["Actor", selectedEvent.actor],
+                [
+                  "Category",
+                  CATEGORY_LABEL[selectedEvent.category] ??
+                    selectedEvent.category,
+                ],
+                ["Permission", selectedEvent.permissionLevel ?? "Not recorded"],
+                [
+                  "Duration",
+                  selectedEvent.durationMs !== undefined
+                    ? `${selectedEvent.durationMs} ms`
+                    : "Not recorded",
+                ],
+              ].map(([k, v]) => (
+                <div key={String(k)} className="grid min-w-0 gap-0.5">
+                  <dt className={LABEL}>{k}</dt>
+                  <dd className="m-0 min-w-0 text-maya-text [overflow-wrap:anywhere]">
+                    {v}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+
+            <div className="grid min-w-0 gap-2 rounded-maya-md border border-maya-border bg-maya-code p-3">
+              <span className={LABEL}>Hash link</span>
+              <div className="grid min-w-0 gap-0.5">
+                <span className="text-maya-caption text-maya-muted">
+                  Previous hash
                 </span>
-                <span className="text-zinc-200 font-bold">
-                  {selectedEvent.actor}
-                </span>
+                <WrapText className="font-mono text-maya-mono text-maya-secondary">
+                  {selectedEvent.prevHash}
+                </WrapText>
               </div>
-              <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-col gap-1">
-                <span className="text-[10px] text-zinc-500 uppercase">
-                  Category
+              <div className="grid min-w-0 gap-0.5">
+                <span className="text-maya-caption text-maya-muted">
+                  Row hash
                 </span>
-                <span className="text-teal-300 font-bold uppercase">
-                  {selectedEvent.category}
-                </span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-col gap-1">
-                <span className="text-[10px] text-zinc-500 uppercase">
-                  Permission
-                </span>
-                <span className="text-amber-300 font-bold">
-                  {selectedEvent.permissionLevel ?? "STANDARD"}
-                </span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-col gap-1">
-                <span className="text-[10px] text-zinc-500 uppercase">
-                  Duration
-                </span>
-                <span className="text-zinc-200 font-bold">
-                  {selectedEvent.durationMs ?? 0} ms
+                <span className="flex min-w-0 items-start gap-2">
+                  <WrapText className="min-w-0 flex-1 font-mono text-maya-mono text-maya-text">
+                    {selectedEvent.rowHash}
+                  </WrapText>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Copy row hash"
+                    leftIcon={<Copy size={14} />}
+                    onClick={() =>
+                      copyToClipboard(selectedEvent.rowHash, selectedEvent.id)
+                    }
+                  >
+                    {copiedHash === selectedEvent.id ? "Copied" : "Copy"}
+                  </Button>
                 </span>
               </div>
             </div>
 
-            {/* Hash Chain Connection */}
-            <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 flex flex-col gap-2.5">
-              <span className="text-[10px] font-bold uppercase text-teal-400 tracking-wider">
-                Cryptographic Block Link
-              </span>
-              <div className="flex flex-col gap-1.5 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">prev_hash:</span>
-                  <span className="text-zinc-400 font-mono break-all">
-                    {selectedEvent.prevHash}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-teal-400 font-bold">row_hash:</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-teal-300 font-mono break-all font-bold">
-                      {selectedEvent.rowHash}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        copyToClipboard(selectedEvent.rowHash, selectedEvent.id)
-                      }
-                      className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
-                      title={copiedHash ? "Copied" : "Copy Hash"}
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Input & Output Payloads */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-zinc-400">
-                  Input Payload (Redacted)
-                </span>
-                <pre className="p-3 rounded-xl bg-black/50 border border-white/10 text-[11px] font-mono text-zinc-300 overflow-x-auto max-h-48">
+            <div className="grid min-w-0 gap-3 md:grid-cols-2">
+              <div className="grid min-w-0 gap-1">
+                <span className={LABEL}>Input (redacted)</span>
+                <CodeBlockShell label="Input payload">
                   {JSON.stringify(selectedEvent.inputPayload ?? {}, null, 2)}
-                </pre>
+                </CodeBlockShell>
               </div>
-
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-zinc-400">
-                  Output Payload (Redacted)
-                </span>
-                <pre className="p-3 rounded-xl bg-black/50 border border-white/10 text-[11px] font-mono text-zinc-300 overflow-x-auto max-h-48">
+              <div className="grid min-w-0 gap-1">
+                <span className={LABEL}>Output (redacted)</span>
+                <CodeBlockShell label="Output payload">
                   {JSON.stringify(selectedEvent.outputPayload ?? {}, null, 2)}
-                </pre>
+                </CodeBlockShell>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-              <GlassButton
+            <div className="flex justify-end border-t border-maya-border pt-3">
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedEvent(null)}
               >
                 Close
-              </GlassButton>
+              </Button>
             </div>
           </div>
         </GlassModal>

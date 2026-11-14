@@ -8,6 +8,8 @@ from app.auth.errors import InvalidToken
 from app.auth.models import Principal
 from app.auth.schemas import (
     AcceptedResponse,
+    BootstrapRequest,
+    BootstrapStatusResponse,
     CompleteSignupRequest,
     CookieTokenResponse,
     EmailRequest,
@@ -22,7 +24,12 @@ from app.auth.schemas import (
     VerifiedResponse,
     VerifyEmailRequest,
 )
-from app.auth.service import AuthService, CompleteSignupCommand, RegisterCommand
+from app.auth.service import (
+    AuthService,
+    BootstrapCommand,
+    CompleteSignupCommand,
+    RegisterCommand,
+)
 from app.core.config import Settings
 from app.core.email import OutboundEmail
 
@@ -46,6 +53,41 @@ def _queue(
 async def identify(body: IdentifyRequest) -> AcceptedResponse:
     """Validate the identifier's shape without checking whether the account exists."""
     return AcceptedResponse()
+
+
+@router.get("/bootstrap/status", response_model=BootstrapStatusResponse)
+async def bootstrap_status(
+    request: Request, response: Response, service: Service
+) -> BootstrapStatusResponse:
+    """Whether the first-run local-owner bootstrap can be used (ADR-0014)."""
+    _no_store(response)
+    available, reason = await service.bootstrap_status(client_address(request))
+    return BootstrapStatusResponse(available=available, reason=reason)
+
+
+@router.post("/bootstrap", response_model=None)
+async def bootstrap(
+    body: BootstrapRequest, request: Request, response: Response, service: Service
+) -> TokenResponse | CookieTokenResponse:
+    """Create the first workspace and owner on a fresh local desktop install."""
+    pair = await service.bootstrap(
+        BootstrapCommand(
+            full_name=body.full_name,
+            email=body.email,
+            password=body.password.get_secret_value(),
+        ),
+        client_address(request),
+    )
+    _no_store(response)
+    if _uses_refresh_cookie(request):
+        settings: Settings = request.app.state.settings
+        _set_refresh_cookie(response, pair.refresh_token, settings)
+        return CookieTokenResponse(access_token=pair.access_token, expires_in=pair.expires_in)
+    return TokenResponse(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        expires_in=pair.expires_in,
+    )
 
 
 @router.post("/signup/otp", status_code=202, response_model=AcceptedResponse)
@@ -297,7 +339,14 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(principal: Annotated[Principal, Depends(get_principal)]) -> MeResponse:
+async def me(
+    principal: Annotated[Principal, Depends(get_principal)], service: Service
+) -> MeResponse:
+    profile = await service.profile_of(principal)
     return MeResponse(
-        user_id=principal.user_id, workspace_id=principal.workspace_id, role=principal.role
+        user_id=principal.user_id,
+        workspace_id=principal.workspace_id,
+        role=principal.role,
+        email=None if profile is None else profile[0],
+        display_name=None if profile is None else (profile[1].strip() or None),
     )

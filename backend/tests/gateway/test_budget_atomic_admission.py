@@ -22,6 +22,7 @@ from app.gateway.registry import ModelRegistry, build_default_registry
 from app.gateway.schemas import TokenUsage
 from tests.support.fake_gemini_client import FakeGeminiClient
 from tests.support.gateway_factory import make_settings
+from tests.support.models import LITE, ORCH
 
 ENFORCE = {
     "budget_enforcement_mode": "enforce",
@@ -326,7 +327,7 @@ async def test_retry_and_fallback_attempts_release_lease_before_next_attempt() -
     tracker = _tracker(redis, cap_usd=Decimal("5.00"))
     fake = FakeGeminiClient()
     fake.aio.models.enqueue_errors(
-        "gemini-3.8-flash",
+        ORCH,
         [ClientError(429, {"error": {}}), ServerError(503, {"error": {}})],
     )
     gateway = _gateway(fake, tracker, cap_usd=Decimal("5.00"))
@@ -338,9 +339,9 @@ async def test_retry_and_fallback_attempts_release_lease_before_next_attempt() -
 
     assert response.was_fallback is True
     assert [call["model"] for call in fake.aio.models.calls] == [
-        "gemini-3.8-flash",
-        "gemini-3.8-flash",
-        "gemini-3.5-flash-lite",
+        ORCH,
+        ORCH,
+        LITE,
     ]
     assert not redis.leases
     usage = await tracker.get_usage(workspace_id, task_id)
@@ -405,7 +406,7 @@ async def test_provider_error_and_nonstream_cancellation_account_before_release(
     error_redis = _FakeRedis()
     error_tracker = _tracker(error_redis, cap_usd=Decimal("5.00"))
     error_client = FakeGeminiClient()
-    error_client.aio.models.enqueue_errors("gemini-3.8-flash", [ServerError(503, {"error": {}})])
+    error_client.aio.models.enqueue_errors(ORCH, [ServerError(503, {"error": {}})])
     error_gateway = _gateway(error_client, error_tracker, cap_usd=Decimal("5.00"))
 
     await error_gateway.generate_text(

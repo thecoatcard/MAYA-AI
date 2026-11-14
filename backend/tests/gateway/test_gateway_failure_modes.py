@@ -20,6 +20,7 @@ from app.gateway.registry import build_default_registry
 from app.gateway.schemas import ToolDefinition
 from tests.support.fake_gemini_client import FakeGeminiClient
 from tests.support.gateway_factory import make_gateway, make_tracker_mock
+from tests.support.models import ORCH
 
 
 class Scored(BaseModel):
@@ -38,7 +39,7 @@ async def test_blocked_prompt_raises_without_retry_or_fallback_and_is_still_mete
         await gateway.generate_text("orchestrator", ["Blocked request"])
 
     # One provider call only: a block is neither retried nor sent to another model.
-    assert [c["model"] for c in fake.aio.models.calls] == ["gemini-3.8-flash"]
+    assert [c["model"] for c in fake.aio.models.calls] == [ORCH]
     tracker.record_usage.assert_awaited_once()
 
 
@@ -77,7 +78,7 @@ async def test_overridden_model_cost_is_unknown_not_zero() -> None:
 @pytest.mark.asyncio
 async def test_budget_is_checked_before_every_attempt_including_retries() -> None:
     fake = FakeGeminiClient()
-    fake.aio.models.enqueue_errors("gemini-3.8-flash", [ClientError(429, {"error": {}})])
+    fake.aio.models.enqueue_errors(ORCH, [ClientError(429, {"error": {}})])
     tracker = make_tracker_mock()
     gateway = make_gateway(fake, tracker=tracker)
     workspace_id, task_id = uuid4(), uuid4()
@@ -166,7 +167,7 @@ async def test_embedding_response_without_vectors_is_an_error() -> None:
 @pytest.mark.asyncio
 async def test_count_tokens_retries_rate_limits_on_the_same_model_only() -> None:
     fake = FakeGeminiClient()
-    fake.aio.models.enqueue_errors("gemini-3.8-flash", [ClientError(429, {"error": {}})])
+    fake.aio.models.enqueue_errors(ORCH, [ClientError(429, {"error": {}})])
     sleep = AsyncMock()
     gateway = make_gateway(fake, sleep=sleep)
 
@@ -175,7 +176,7 @@ async def test_count_tokens_retries_rate_limits_on_the_same_model_only() -> None
     assert response.total_tokens == 42
     assert response.alias_used == "orchestrator"
     sleep.assert_awaited_once()
-    assert {c["model"] for c in fake.aio.models.calls} == {"gemini-3.8-flash"}
+    assert {c["model"] for c in fake.aio.models.calls} == {ORCH}
 
 
 @pytest.mark.asyncio

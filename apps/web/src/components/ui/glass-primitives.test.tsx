@@ -27,8 +27,8 @@ describe("GlassCard", () => {
     const card = screen.getByTestId("card");
     expect(card).toBeInTheDocument();
     expect(card).toHaveTextContent("Card Content");
-    expect(card.className).toContain("backdrop-blur-xl");
-    expect(card.className).toContain("border-white/10");
+    expect(card.className).not.toContain("backdrop-blur");
+    expect(card.className).toContain("border-maya-border");
   });
 
   it("supports variants: teal, raised, ghost, glow", () => {
@@ -38,7 +38,7 @@ describe("GlassCard", () => {
       </GlassCard>,
     );
     expect(screen.getByTestId("card").className).toContain(
-      "border-teal-500/25",
+      "border-maya-accent",
     );
 
     rerender(
@@ -46,14 +46,14 @@ describe("GlassCard", () => {
         Raised Card
       </GlassCard>,
     );
-    expect(screen.getByTestId("card").className).toContain("bg-zinc-800/70");
+    expect(screen.getByTestId("card").className).toContain("bg-maya-raised");
 
     rerender(
       <GlassCard data-testid="card" variant="ghost">
         Ghost Card
       </GlassCard>,
     );
-    expect(screen.getByTestId("card").className).toContain("bg-white/[0.03]");
+    expect(screen.getByTestId("card").className).toContain("bg-transparent");
 
     rerender(
       <GlassCard data-testid="card" variant="glow">
@@ -61,7 +61,7 @@ describe("GlassCard", () => {
       </GlassCard>,
     );
     expect(screen.getByTestId("card").className).toContain(
-      "border-teal-500/35",
+      "border-maya-accent",
     );
   });
 
@@ -85,8 +85,9 @@ describe("GlassCard", () => {
       </GlassCard>,
     );
     expect(screen.getByTestId("card").className).toContain(
-      "hover:-translate-y-1",
+      "hover:border-maya-border-strong",
     );
+    expect(screen.getByTestId("card").className).not.toContain("translate");
 
     rerender(
       <GlassCard data-testid="card" hoverEffect="glow">
@@ -94,7 +95,7 @@ describe("GlassCard", () => {
       </GlassCard>,
     );
     expect(screen.getByTestId("card").className).toContain(
-      "hover:border-teal-500/40",
+      "hover:border-maya-accent",
     );
 
     rerender(
@@ -103,10 +104,7 @@ describe("GlassCard", () => {
       </GlassCard>,
     );
     expect(screen.getByTestId("card").className).toContain(
-      "hover:-translate-y-1",
-    );
-    expect(screen.getByTestId("card").className).toContain(
-      "hover:border-teal-500/40",
+      "hover:border-maya-accent",
     );
   });
 
@@ -163,17 +161,17 @@ describe("GlassButton", () => {
       <GlassButton variant="primary">Primary</GlassButton>,
     );
     expect(screen.getByRole("button", { name: "Primary" }).className).toContain(
-      "bg-teal-500/20",
+      "bg-maya-accent",
     );
 
     rerender(<GlassButton variant="secondary">Secondary</GlassButton>);
     expect(
       screen.getByRole("button", { name: "Secondary" }).className,
-    ).toContain("bg-white/5");
+    ).toContain("bg-maya-raised");
 
     rerender(<GlassButton variant="outline">Outline</GlassButton>);
     expect(screen.getByRole("button", { name: "Outline" }).className).toContain(
-      "border-white/20",
+      "border-maya-control-border",
     );
 
     rerender(<GlassButton variant="ghost">Ghost</GlassButton>);
@@ -183,7 +181,7 @@ describe("GlassButton", () => {
 
     rerender(<GlassButton variant="danger">Danger</GlassButton>);
     expect(screen.getByRole("button", { name: "Danger" }).className).toContain(
-      "bg-rose-500/15",
+      "bg-maya-danger-soft",
     );
   });
 
@@ -249,6 +247,9 @@ describe("GlassButton", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(screen.getByText("Processing...")).toBeInTheDocument();
+    expect(button.querySelector("svg")?.getAttribute("class")).toContain(
+      "motion-reduce:animate-none",
+    );
     fireEvent.click(button);
     expect(handleClick).not.toHaveBeenCalled();
   });
@@ -276,28 +277,30 @@ describe("GlassButton", () => {
 describe("GlassBadge", () => {
   it("renders color variants: teal, emerald, amber, rose, blue, zinc, purple", () => {
     const { rerender } = render(<GlassBadge variant="teal">Teal</GlassBadge>);
-    expect(screen.getByText("Teal").className).toContain("text-teal-300");
+    expect(screen.getByText("Teal").className).toContain("text-maya-accent");
 
     rerender(<GlassBadge variant="emerald">Emerald</GlassBadge>);
-    expect(screen.getByText("Emerald").className).toContain("text-emerald-300");
+    expect(screen.getByText("Emerald").className).toContain(
+      "text-maya-success",
+    );
 
     rerender(<GlassBadge variant="amber">Amber</GlassBadge>);
-    expect(screen.getByText("Amber").className).toContain("text-amber-300");
+    expect(screen.getByText("Amber").className).toContain("text-maya-warning");
 
     rerender(<GlassBadge variant="rose">Rose</GlassBadge>);
-    expect(screen.getByText("Rose").className).toContain("text-rose-300");
+    expect(screen.getByText("Rose").className).toContain("text-maya-danger");
 
     rerender(<GlassBadge variant="blue">Blue</GlassBadge>);
-    expect(screen.getByText("Blue").className).toContain("text-blue-300");
+    expect(screen.getByText("Blue").className).toContain("text-maya-info");
 
     rerender(<GlassBadge variant="zinc">Zinc</GlassBadge>);
-    expect(screen.getByText("Zinc").className).toContain("text-zinc-300");
+    expect(screen.getByText("Zinc").className).toContain("text-maya-muted");
 
     rerender(<GlassBadge variant="purple">Purple</GlassBadge>);
-    expect(screen.getByText("Purple").className).toContain("text-purple-300");
+    expect(screen.getByText("Purple").className).toContain("text-maya-text");
   });
 
-  it("renders glowing dot indicator and supports pulse", () => {
+  it("renders dot indicator and supports pulse", () => {
     const { container, rerender } = render(
       <GlassBadge variant="teal" dot>
         Active
@@ -305,7 +308,7 @@ describe("GlassBadge", () => {
     );
     const dot = container.querySelector('[aria-hidden="true"]');
     expect(dot).toBeInTheDocument();
-    expect(dot?.className).toContain("bg-teal-400");
+    expect(dot?.className).toContain("bg-maya-accent");
 
     rerender(
       <GlassBadge variant="teal" dot dotPulse>
@@ -324,10 +327,10 @@ describe("GlassBadge", () => {
 
   it("renders sizes: sm, md, lg", () => {
     const { rerender } = render(<GlassBadge size="sm">Small</GlassBadge>);
-    expect(screen.getByText("Small").className).toContain("text-[10px]");
+    expect(screen.getByText("Small").className).toContain("text-maya-caption");
 
     rerender(<GlassBadge size="md">Medium</GlassBadge>);
-    expect(screen.getByText("Medium").className).toContain("text-xs");
+    expect(screen.getByText("Medium").className).toContain("text-maya-caption");
 
     rerender(<GlassBadge size="lg">Large</GlassBadge>);
     expect(screen.getByText("Large").className).toContain("md:text-sm");
@@ -468,7 +471,7 @@ describe("GlassModal", () => {
     expect(screen.getByText("Confirm Execution")).toBeInTheDocument();
     expect(screen.getByText("Verify the SHA-256 digest")).toBeInTheDocument();
     expect(screen.getByText("Modal Body")).toBeInTheDocument();
-    expect(dialog.className).toContain("backdrop-blur-xl");
+    expect(dialog.className).not.toContain("backdrop-blur");
   });
 
   it("invokes onClose when clicking close button", () => {
@@ -567,6 +570,7 @@ describe("GlassModal", () => {
 
     const firstBtn = screen.getByRole("button", { name: "First" });
     const secondBtn = screen.getByRole("button", { name: "Second" });
+    const dialog = screen.getByRole("dialog");
 
     // Focus last button and press Tab without Shift -> wraps to first
     secondBtn.focus();
@@ -577,5 +581,37 @@ describe("GlassModal", () => {
     firstBtn.focus();
     expect(document.activeElement).toBe(firstBtn);
     fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+
+    // Focus container and press Shift+Tab -> wraps to last
+    const container = dialog.querySelector<HTMLElement>(".maya-sheet")!;
+    container.focus();
+    expect(document.activeElement).toBe(container);
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(secondBtn);
+  });
+
+  it("does not steal focus if a child element is already focused", async () => {
+    function ChildFocusingModal() {
+      const cancelRef = React.useRef<HTMLButtonElement>(null);
+      React.useEffect(() => {
+        cancelRef.current?.focus();
+      }, []);
+      return (
+        <GlassModal isOpen={true} onClose={() => {}}>
+          <button type="button">First</button>
+          <button type="button" ref={cancelRef}>
+            Cancel
+          </button>
+        </GlassModal>
+      );
+    }
+
+    render(<ChildFocusingModal />);
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(cancelBtn);
+
+    // Wait for animation frame
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(document.activeElement).toBe(cancelBtn);
   });
 });

@@ -1,24 +1,65 @@
 "use client";
 
-import { KeyRound, Layers3, MailCheck, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
-import { ApiError, NetworkError } from "../../lib/api-client";
-import { completeSignup, sendSignupOtp, signIn } from "../../lib/auth-client";
-import { getAccessToken, setAccessToken } from "../../lib/auth-session";
 import {
-  ThemeToggle,
-  readStoredTheme,
-  storeTheme,
-  type ThemePreference,
-} from "../chat/ThemeToggle";
-
-import "../chat/chat.css";
+  ApiError,
+  BackendUnreachableError,
+  NetworkError,
+} from "../../lib/api-client";
+import {
+  bootstrapOwner,
+  completeSignup,
+  getBootstrapStatus,
+  safeRedirectPath,
+  sendSignupOtp,
+  signIn,
+} from "../../lib/auth-client";
+import { getAccessToken, setAccessToken } from "../../lib/auth-session";
+import { Button } from "../ui/Button";
+import { Notice } from "../ui/Feedback";
+import {
+  AUTH_FORM_CLASS,
+  AUTH_LINKS_CLASS,
+  AuthField,
+  AuthHeader,
+  FormAlert,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_TOO_SHORT_MESSAGE,
+  PasswordField,
+  errorFieldFor,
+  isRetryableAuthError,
+  useFocusFirstError,
+} from "./AuthParts";
 
 export type AuthStep =
-  "choice" | "password" | "signup_details" | "otp_verification";
+  "choice" | "password" | "signup_details" | "otp_verification" | "bootstrap";
+
+type BackendState = "checking" | "ready" | "unreachable";
+
+interface FieldError {
+  readonly field: string;
+  readonly message: string;
+}
+
+function isUnreachable(error: unknown): boolean {
+  return (
+    error instanceof BackendUnreachableError || error instanceof NetworkError
+  );
+}
+
+function redirectTarget(): string {
+  if (typeof window === "undefined") {
+    return "/chat";
+  }
+  return safeRedirectPath(
+    new URLSearchParams(window.location.search).get("redirect"),
+    "/chat",
+  );
+}
 
 function authErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -40,12 +81,15 @@ function authErrorMessage(error: unknown): string {
       case "validation_error":
         return "Please check the entered details and ensure the format is valid.";
       case "service_unavailable":
-        return "Authentication service is temporarily unavailable (outbound email is not configured for local development). Please sign in using the local admin account (admin / AdminPassword123!).";
+        return "Authentication service is temporarily unavailable. Try again shortly.";
       default:
         return "The request could not be completed. Try again.";
     }
   }
-  if (error instanceof NetworkError) {
+  if (
+    error instanceof NetworkError ||
+    error instanceof BackendUnreachableError
+  ) {
     return "MAYA could not be reached. Check the connection and try again.";
   }
   return "An unexpected error occurred. Try again.";
@@ -70,12 +114,15 @@ export function UnifiedAuthForm({
   } catch {
     // Outside App Router context (e.g. unit tests)
   }
-  const [theme, setTheme] = useState<ThemePreference>("system");
   const [step, setStep] = useState<AuthStep>(initialStep);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<FieldError | null>(null);
+  const [retryable, setRetryable] = useState(false);
+  const [errorTick, setErrorTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
 
   // Form field states
   const [identifier, setIdentifier] = useState(initialIdentifier);
@@ -84,6 +131,10 @@ export function UnifiedAuthForm({
   const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
   const [fullName, setFullName] = useState("");
+  const [backend, setBackend] = useState<BackendState>("checking");
+  const [checkNonce, setCheckNonce] = useState(0);
+
+  useFocusFirstError(formRef, errorTick);
 
   useEffect(() => {
     if (!embedded && getAccessToken() !== null) {
@@ -92,10 +143,26 @@ export function UnifiedAuthForm({
   }, [router, embedded]);
 
   useEffect(() => {
-    const stored = readStoredTheme();
-    setTheme(stored);
-    storeTheme(stored);
-  }, []);
+    let cancelled = false;
+    setBackend("checking");
+    getBootstrapStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setBackend("ready");
+        if (status.available) {
+          setStep("bootstrap");
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        // Only a clear connectivity failure blocks the form; any other error
+        // falls through to the normal sign-in flow.
+        setBackend(isUnreachable(error) ? "unreachable" : "ready");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkNonce]);
 
   useEffect(() => {
     if (cooldown <= 0) {
@@ -108,16 +175,49 @@ export function UnifiedAuthForm({
     return () => window.clearTimeout(timer);
   }, [cooldown]);
 
-  const changeTheme = (next: ThemePreference) => {
-    setTheme(next);
-    storeTheme(next);
+  const clearErrors = () => {
+    setErrorMessage(null);
+    setFieldError(null);
+    setRetryable(false);
+  };
+
+  const fail = (error: unknown) => {
+    const message = authErrorMessage(error);
+    const field = errorFieldFor(error, "password");
+    if (field === null) {
+      setErrorMessage(message);
+      setFieldError(null);
+    } else {
+      setErrorMessage(null);
+      setFieldError({ field, message });
+    }
+    setRetryable(isRetryableAuthError(error));
+    setErrorTick((tick) => tick + 1);
+  };
+
+  const failField = (field: string, message: string) => {
+    setErrorMessage(null);
+    setFieldError({ field, message });
+    setRetryable(false);
+    setErrorTick((tick) => tick + 1);
+  };
+
+  const errorFor = (field: string): string | null =>
+    fieldError !== null && fieldError.field === field
+      ? fieldError.message
+      : null;
+
+  const goToStep = (next: AuthStep) => {
+    clearErrors();
+    setNotice(null);
+    setStep(next);
   };
 
   const resetToChoice = () => {
     setStep("choice");
     setPassword("");
     setCode("");
-    setErrorMessage(null);
+    clearErrors();
     setNotice(null);
   };
 
@@ -131,7 +231,7 @@ export function UnifiedAuthForm({
     ) {
       return;
     }
-    setErrorMessage(null);
+    clearErrors();
     setNotice(null);
     setBusy(true);
 
@@ -143,7 +243,7 @@ export function UnifiedAuthForm({
       );
       setStep("otp_verification");
     } catch (error) {
-      setErrorMessage(authErrorMessage(error));
+      fail(error);
     } finally {
       setBusy(false);
     }
@@ -155,20 +255,16 @@ export function UnifiedAuthForm({
     if (busy || password === "") {
       return;
     }
-    setErrorMessage(null);
+    clearErrors();
     setBusy(true);
 
     try {
       const tokens = await signIn(identifier.trim(), password);
       setAccessToken(tokens.accessToken, tokens.expiresIn);
       setPassword("");
-      const redirectTarget =
-        (typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("redirect")
-          : null) || "/chat";
-      router?.replace(redirectTarget);
+      router?.replace(redirectTarget());
     } catch (error) {
-      setErrorMessage(authErrorMessage(error));
+      fail(error);
     } finally {
       setBusy(false);
     }
@@ -182,7 +278,11 @@ export function UnifiedAuthForm({
     if (busy || code.trim() === "" || password === "") {
       return;
     }
-    setErrorMessage(null);
+    clearErrors();
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      failField("password", PASSWORD_TOO_SHORT_MESSAGE);
+      return;
+    }
     setBusy(true);
 
     try {
@@ -198,7 +298,39 @@ export function UnifiedAuthForm({
       setCode("");
       router?.replace("/chat");
     } catch (error) {
-      setErrorMessage(authErrorMessage(error));
+      fail(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBootstrapSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (
+      busy ||
+      fullName.trim() === "" ||
+      email.trim() === "" ||
+      password === ""
+    ) {
+      return;
+    }
+    clearErrors();
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      failField("password", PASSWORD_TOO_SHORT_MESSAGE);
+      return;
+    }
+    setBusy(true);
+    try {
+      const tokens = await bootstrapOwner({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+      });
+      setAccessToken(tokens.accessToken, tokens.expiresIn);
+      setPassword("");
+      router?.replace(redirectTarget());
+    } catch (error) {
+      fail(error);
     } finally {
       setBusy(false);
     }
@@ -208,7 +340,7 @@ export function UnifiedAuthForm({
     if (busy || cooldown > 0 || email.trim() === "") {
       return;
     }
-    setErrorMessage(null);
+    clearErrors();
     setNotice(null);
     setBusy(true);
 
@@ -219,198 +351,257 @@ export function UnifiedAuthForm({
         "If a new verification code is available for this address, it will arrive shortly.",
       );
     } catch (error) {
-      setErrorMessage(authErrorMessage(error));
+      fail(error);
     } finally {
       setBusy(false);
     }
   };
 
-  const content = (
-    <section className="maya-signin" aria-labelledby="maya-auth-title">
-      <div className="maya-signedout__icon" aria-hidden="true">
-        {step === "password" ? (
-          <KeyRound size={20} />
-        ) : step === "otp_verification" ? (
-          <MailCheck size={20} />
-        ) : (
-          <UserPlus size={20} />
-        )}
-      </div>
+  /** Re-submits the current form after a connection failure. */
+  const retrySubmit = () => formRef.current?.requestSubmit();
 
-      {step === "choice" && (
+  const alert =
+    errorMessage !== null ? (
+      <FormAlert
+        message={errorMessage}
+        busy={busy}
+        onRetry={retryable ? retrySubmit : undefined}
+      />
+    ) : null;
+
+  const backLink = (
+    <nav className={AUTH_LINKS_CLASS} aria-label="Account options">
+      <Button variant="ghost" size="sm" onClick={resetToChoice} disabled={busy}>
+        Back to account choices
+      </Button>
+    </nav>
+  );
+
+  const content = (
+    <section
+      aria-labelledby="maya-auth-title"
+      className="mx-auto w-full max-w-md min-w-0"
+    >
+      {backend === "unreachable" && (
+        <div role="alert">
+          <AuthHeader
+            titleId="maya-auth-title"
+            title="Can't reach the MAYA backend"
+          >
+            <p className="m-0">
+              The service did not respond. Check that it is running, then try
+              again.
+            </p>
+          </AuthHeader>
+          <div className="mt-5">
+            <Button
+              variant="primary"
+              className="w-full"
+              onClick={() => setCheckNonce((n) => n + 1)}
+            >
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {backend !== "unreachable" && step === "bootstrap" && (
         <>
-          <h1 id="maya-auth-title" className="maya-signedout__title">
-            Welcome to MAYA
-          </h1>
-          <p className="maya-signedout__body">
-            Choose how you would like to continue.
-          </p>
-          <div className="maya-signin__form">
-            <button
-              className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+          <AuthHeader
+            titleId="maya-auth-title"
+            title="Create your local owner account"
+          >
+            <p className="m-0">
+              This MAYA install has no accounts yet. The account you create here
+              owns this local workspace.
+            </p>
+            <p className="m-0">
+              There is no email verification step: the account is created and
+              you are signed in straight away.
+            </p>
+          </AuthHeader>
+          <form
+            ref={formRef}
+            className={AUTH_FORM_CLASS}
+            onSubmit={handleBootstrapSubmit}
+          >
+            <AuthField
+              label="Full name"
+              name="full_name"
+              autoComplete="name"
+              autoFocus
               disabled={busy}
-              onClick={() => {
-                setErrorMessage(null);
-                setStep("password");
-              }}
-              type="button"
+              maxLength={1024}
+              value={fullName}
+              onChange={setFullName}
+            />
+            <AuthField
+              label="Email address"
+              name="email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              disabled={busy}
+              value={email}
+              onChange={setEmail}
+            />
+            <PasswordField
+              label="Password"
+              name="password"
+              autoComplete="new-password"
+              disabled={busy}
+              maxLength={PASSWORD_MAX_LENGTH}
+              showPolicy
+              value={password}
+              onChange={setPassword}
+              error={errorFor("password")}
+            />
+            {alert}
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full"
+              disabled={
+                busy ||
+                fullName.trim() === "" ||
+                email.trim() === "" ||
+                password === ""
+              }
+            >
+              {busy ? "Creating account..." : "Create owner account"}
+            </Button>
+          </form>
+        </>
+      )}
+
+      {backend !== "unreachable" && step === "choice" && (
+        <>
+          <AuthHeader titleId="maya-auth-title" title="Welcome to MAYA">
+            <p className="m-0">Choose how you would like to continue.</p>
+          </AuthHeader>
+          <div className={AUTH_FORM_CLASS}>
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={busy}
+              onClick={() => goToStep("password")}
             >
               Sign in
-            </button>
-            <button
-              className="maya-btn maya-btn--quiet maya-signin__submit"
+            </Button>
+            <Button
+              variant="secondary"
+              className="w-full"
               disabled={busy}
-              onClick={() => {
-                setErrorMessage(null);
-                setNotice(null);
-                setStep("signup_details");
-              }}
-              type="button"
+              onClick={() => goToStep("signup_details")}
             >
               Create account
-            </button>
+            </Button>
           </div>
         </>
       )}
 
-      {step === "password" && (
+      {backend !== "unreachable" && step === "password" && (
         <>
-          <h1 id="maya-auth-title" className="maya-signedout__title">
-            Sign in
-          </h1>
-          <form className="maya-signin__form" onSubmit={handlePasswordSubmit}>
-            <label className="maya-signin__field">
-              <span>Username or email</span>
-              <input
-                autoCapitalize="none"
-                autoComplete="username"
-                autoFocus
-                disabled={busy}
-                name="identifier"
-                placeholder="Username or email"
-                required
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-              />
-            </label>
-            <label className="maya-signin__field">
-              <span>Password</span>
-              <input
-                autoComplete="current-password"
-                disabled={busy}
-                name="password"
-                required
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
-            <div className="p-3 my-2 rounded border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-zinc-300">
-                  Local Development Account
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier("admin");
-                    setPassword("AdminPassword123!");
-                  }}
-                  className="text-[11px] font-mono text-teal-400 hover:text-teal-300 underline"
-                >
-                  Fill Admin Credentials
-                </button>
-              </div>
-              <p className="mt-1 font-mono text-[11px] text-zinc-400">
-                User: <span className="text-zinc-200">admin</span> • Pass:{" "}
-                <span className="text-zinc-200">AdminPassword123!</span>
-              </p>
-            </div>
-            {errorMessage !== null ? (
-              <p className="maya-signin__error" role="alert">
-                {errorMessage}
-              </p>
-            ) : null}
-            <button
+          <AuthHeader titleId="maya-auth-title" title="Sign in" />
+          <form
+            ref={formRef}
+            className={AUTH_FORM_CLASS}
+            onSubmit={handlePasswordSubmit}
+          >
+            <AuthField
+              label="Username or email"
+              name="identifier"
+              autoComplete="username"
+              autoFocus
+              disabled={busy}
+              value={identifier}
+              onChange={setIdentifier}
+            />
+            <PasswordField
+              label="Password"
+              name="password"
+              autoComplete="current-password"
+              disabled={busy}
+              value={password}
+              onChange={setPassword}
+            />
+            {alert}
+            <Button
               type="submit"
-              className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+              variant="primary"
+              className="w-full"
               disabled={busy || identifier.trim() === "" || password === ""}
             >
               {busy ? "Signing in..." : "Sign in"}
-            </button>
+            </Button>
           </form>
-          <nav className="maya-account__links" aria-label="Account options">
-            <button
-              type="button"
-              className="maya-btn maya-btn--quiet"
+          <nav className={AUTH_LINKS_CLASS} aria-label="Account options">
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={resetToChoice}
               disabled={busy}
             >
               Back to account choices
-            </button>
-            <Link href="/forgot-password">Forgot password?</Link>
+            </Button>
+            <Link
+              href="/forgot-password"
+              className="inline-flex min-h-8 items-center rounded-maya-sm text-maya-link underline underline-offset-4 hover:text-maya-accent-hover pointer-coarse:min-h-11"
+            >
+              Forgot password?
+            </Link>
           </nav>
         </>
       )}
 
-      {step === "signup_details" && (
+      {backend !== "unreachable" && step === "signup_details" && (
         <>
-          <h1 id="maya-auth-title" className="maya-signedout__title">
-            Create an account
-          </h1>
-          <p className="maya-signedout__body">
-            Enter your details to request an email verification code.
-          </p>
-          <form className="maya-signin__form" onSubmit={handleRequestCode}>
-            <label className="maya-signin__field">
-              <span>Email address</span>
-              <input
-                autoCapitalize="none"
-                autoComplete="email"
-                autoFocus
-                disabled={busy}
-                name="email"
-                placeholder="you@example.com"
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-            <label className="maya-signin__field">
-              <span>Full name</span>
-              <input
-                autoComplete="name"
-                disabled={busy}
-                maxLength={1024}
-                name="full_name"
-                placeholder="Your name"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-              />
-            </label>
-            <label className="maya-signin__field">
-              <span>Username</span>
-              <input
-                autoCapitalize="none"
-                autoComplete="username"
-                disabled={busy}
-                maxLength={64}
-                name="username"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </label>
-            {errorMessage !== null ? (
-              <p className="maya-signin__error" role="alert">
-                {errorMessage}
-              </p>
-            ) : null}
-            <button
+          <AuthHeader titleId="maya-auth-title" title="Create an account">
+            <p className="m-0">
+              Enter your details to request an email verification code.
+            </p>
+          </AuthHeader>
+          <form
+            ref={formRef}
+            className={AUTH_FORM_CLASS}
+            onSubmit={handleRequestCode}
+          >
+            <AuthField
+              label="Email address"
+              name="email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              autoFocus
+              disabled={busy}
+              placeholder="you@example.com"
+              value={email}
+              onChange={setEmail}
+            />
+            <AuthField
+              label="Full name"
+              name="full_name"
+              autoComplete="name"
+              disabled={busy}
+              maxLength={1024}
+              value={fullName}
+              onChange={setFullName}
+            />
+            <AuthField
+              label="Username"
+              name="username"
+              autoComplete="username"
+              disabled={busy}
+              maxLength={64}
+              hint="3 to 32 characters: letters, numbers, dot, dash or underscore."
+              value={username}
+              onChange={setUsername}
+            />
+            {alert}
+            <Button
               type="submit"
-              className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+              variant="primary"
+              className="w-full"
               disabled={
                 busy ||
                 email.trim() === "" ||
@@ -419,148 +610,84 @@ export function UnifiedAuthForm({
               }
             >
               {busy ? "Requesting code..." : "Continue"}
-            </button>
+            </Button>
           </form>
-          <nav className="maya-account__links" aria-label="Account options">
-            <button
-              type="button"
-              className="maya-btn maya-btn--quiet"
-              onClick={resetToChoice}
-              disabled={busy}
-            >
-              Back to account choices
-            </button>
-          </nav>
+          {backLink}
         </>
       )}
 
-      {step === "otp_verification" && (
+      {backend !== "unreachable" && step === "otp_verification" && (
         <>
-          <h1 id="maya-auth-title" className="maya-signedout__title">
-            Verify email and sign up
-          </h1>
-          <p className="maya-signedout__body">
-            Enter the code if you received one for <strong>{email}</strong>,
-            then finish creating your account.
-          </p>
-          {notice !== null ? (
-            <p className="maya-account__notice" role="status">
-              {notice}
+          <AuthHeader
+            titleId="maya-auth-title"
+            title="Verify email and sign up"
+          >
+            <p className="m-0 [overflow-wrap:anywhere]">
+              Enter the code if you received one for <strong>{email}</strong>,
+              then finish creating your account.
             </p>
+          </AuthHeader>
+          {notice !== null ? (
+            <div className="mt-4">
+              <Notice tone="info">{notice}</Notice>
+            </div>
           ) : null}
           <form
-            className="maya-signin__form"
+            ref={formRef}
+            className={AUTH_FORM_CLASS}
             onSubmit={handleOtpVerificationSubmit}
           >
-            <label className="maya-signin__field">
-              <span>6-digit verification code</span>
-              <input
-                autoComplete="one-time-code"
-                autoFocus
-                disabled={busy}
-                inputMode="numeric"
-                maxLength={6}
-                name="code"
-                placeholder="123456"
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-            </label>
-            <label className="maya-signin__field">
-              <span>Password</span>
-              <input
-                autoComplete="new-password"
-                disabled={busy}
-                maxLength={128}
-                name="password"
-                placeholder="At least 12 characters"
-                required
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
-            {errorMessage !== null ? (
-              <p className="maya-signin__error" role="alert">
-                {errorMessage}
-              </p>
-            ) : null}
-            <button
+            <AuthField
+              label="6-digit verification code"
+              name="code"
+              autoComplete="one-time-code"
+              autoFocus
+              disabled={busy}
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="123456"
+              value={code}
+              onChange={setCode}
+              error={errorFor("code")}
+            />
+            <PasswordField
+              label="Password"
+              name="password"
+              autoComplete="new-password"
+              disabled={busy}
+              maxLength={PASSWORD_MAX_LENGTH}
+              showPolicy
+              value={password}
+              onChange={setPassword}
+              error={errorFor("password")}
+            />
+            {alert}
+            <Button
               type="submit"
-              className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+              variant="primary"
+              className="w-full"
               disabled={busy || code.trim().length !== 6 || password === ""}
             >
               {busy ? "Completing registration..." : "Complete registration"}
-            </button>
+            </Button>
           </form>
-          <div className="maya-account__resend">
-            <button
-              type="button"
-              className="maya-btn maya-btn--quiet"
+          <div className="mt-3">
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => void handleResendCode()}
               disabled={busy || cooldown > 0}
             >
               {cooldown > 0
                 ? `Resend code in ${cooldown} seconds`
                 : "Resend code"}
-            </button>
+            </Button>
           </div>
-          <nav className="maya-account__links" aria-label="Account options">
-            <button
-              type="button"
-              className="maya-btn maya-btn--quiet"
-              onClick={resetToChoice}
-              disabled={busy}
-            >
-              Back to account choices
-            </button>
-          </nav>
+          {backLink}
         </>
       )}
-
-      <Link href="/" className="maya-signedout__link">
-        Back to overview
-      </Link>
     </section>
   );
 
-  if (embedded) {
-    return (
-      <div
-        className="maya-chat maya-auth-embedded w-full"
-        data-maya-theme={theme === "system" ? undefined : theme}
-      >
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="maya-chat"
-      data-maya-theme={theme === "system" ? undefined : theme}
-    >
-      <header className="maya-chat__header">
-        <div className="maya-chat__header-inner">
-          <Link href="/" className="maya-brand">
-            <Layers3 aria-hidden="true" size={18} />
-            MAYA AI
-          </Link>
-          <span className="maya-chat__divider" aria-hidden="true" />
-          <h1 className="maya-chat__title">
-            {step === "password"
-              ? "Sign in"
-              : step === "otp_verification" || step === "signup_details"
-                ? "Create account"
-                : "Welcome"}
-          </h1>
-          <div className="maya-chat__tools">
-            <ThemeToggle value={theme} onChange={changeTheme} />
-          </div>
-        </div>
-      </header>
-      <main className="maya-chat__main">{content}</main>
-    </div>
-  );
+  return <div className="w-full min-w-0">{content}</div>;
 }

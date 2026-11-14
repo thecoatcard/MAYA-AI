@@ -35,7 +35,7 @@ async def test_cache_key_structure() -> None:
     manager = ContextCacheManager(mock_redis)
 
     workspace_id = uuid4()
-    model_id = "gemini-3.8-flash"
+    model_id = "gemini-4-hydrogen"
     content_hash = "abc123hash"
 
     key = manager.make_cache_key(workspace_id, model_id, content_hash)
@@ -50,7 +50,7 @@ async def test_get_and_set_cached_content_name() -> None:
 
     manager = ContextCacheManager(mock_redis)
     workspace_id = uuid4()
-    model_id = "gemini-3.8-flash"
+    model_id = "gemini-4-hydrogen"
     content_hash = "abc123hash"
 
     # Set
@@ -92,7 +92,7 @@ async def test_handle_provider_cache_404_purges_local_key() -> None:
 
     manager = ContextCacheManager(mock_redis)
     workspace_id = uuid4()
-    model_id = "gemini-3.8-flash"
+    model_id = "gemini-4-hydrogen"
     content_hash = "abc123hash"
 
     await manager.handle_provider_cache_404(workspace_id, model_id, content_hash)
@@ -128,7 +128,7 @@ async def real_redis() -> AsyncIterator[Redis]:
 async def test_context_cache_against_real_redis(real_redis: Redis) -> None:
     manager = ContextCacheManager(real_redis)
     workspace_id = uuid4()
-    model_id = "gemini-3.8-flash"
+    model_id = "gemini-4-hydrogen"
     content_hash = f"test_{uuid4().hex}"
     key = manager.make_cache_key(workspace_id, model_id, content_hash)
 

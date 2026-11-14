@@ -1,9 +1,14 @@
 "use client";
 
-import { AlertTriangle, Home, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import React, { useEffect } from "react";
+import React from "react";
 
+import { Button } from "../components/ui/Button";
+
+/**
+ * Route error boundary. Plain words and a way back; the error message and stack are never shown
+ * (they can hold paths or data). The digest is an opaque id the owner can quote when reporting.
+ */
 export default function ErrorBoundary({
   error,
   reset,
@@ -11,58 +16,36 @@ export default function ErrorBoundary({
   error: Error & { digest?: string };
   reset: () => void;
 }): React.JSX.Element {
-  useEffect(() => {
-    // Log unexpected runtime client errors safely
-  }, [error]);
-
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-6 bg-zinc-950 text-zinc-100 font-sans relative overflow-hidden">
-      {/* Ambient background glows */}
-      <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="max-w-md w-full relative z-10 p-8 rounded-2xl border border-rose-500/20 bg-zinc-900/60 backdrop-blur-xl shadow-2xl text-center">
-        <div className="inline-flex p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 mb-6">
-          <AlertTriangle className="w-8 h-8" />
-        </div>
-
-        <p className="text-xs font-mono tracking-widest uppercase text-rose-400 font-semibold mb-2">
-          Runtime Exception
-        </p>
-
-        <h1 className="text-2xl font-bold tracking-tight text-white mb-3">
-          Workspace Interruption
+    <main className="flex min-h-dvh min-w-0 items-center justify-center bg-maya-bg p-4 text-maya-text sm:p-6">
+      <section
+        role="alert"
+        className="w-full max-w-md min-w-0 rounded-maya-lg border border-maya-danger bg-maya-pane p-4 sm:p-6"
+      >
+        <h1 className="m-0 text-maya-heading font-semibold">
+          Something went wrong
         </h1>
-
-        <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
-          An unexpected error interrupted current operations. Your
-          authentication session and data integrity remain secure.
+        <p className="mt-2 mb-0 text-maya-small text-maya-secondary">
+          This view stopped working. Your session and saved data are not
+          affected. Try again, or go back to the conversation.
         </p>
-
-        {error.message && (
-          <div className="mb-6 p-3 rounded-lg bg-black/40 border border-white/5 text-left text-xs font-mono text-zinc-400 overflow-x-auto max-h-24">
-            {error.message}
-          </div>
+        {error.digest !== undefined && error.digest !== "" && (
+          <p className="mt-3 mb-0 text-maya-caption text-maya-muted [overflow-wrap:anywhere]">
+            Reference: <span className="font-mono">{error.digest}</span>
+          </p>
         )}
-
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={() => reset()}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-zinc-950 font-semibold text-xs shadow-lg shadow-teal-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Attempt Recovery</span>
-          </button>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Button variant="primary" onClick={() => reset()}>
+            Try again
+          </Button>
           <Link
-            href="/workspace"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-200 text-xs font-medium transition-all"
+            href="/"
+            className="maya-button motion-interactive inline-flex min-h-9 items-center justify-center rounded-maya-md border border-maya-border-strong bg-maya-raised px-4 text-maya-small font-medium text-maya-text hover:bg-maya-hover pointer-coarse:min-h-11"
           >
-            <Home className="w-4 h-4" />
-            <span>Back to Console</span>
+            Back to the conversation
           </Link>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

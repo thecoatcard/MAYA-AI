@@ -2,17 +2,34 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import {
   ApiError,
-  CHAT_MAX_MESSAGE_CHARS,
   NetworkError,
+  type ChatProgressStep,
   createIdempotencyKey,
   streamChatMessage,
   validateChatContent,
+  readChatFileCreated,
+  readUsage,
   type ChatContentProblem,
   type ChatEvent,
+  type ChatFileCreated,
+  type ChatToolStatus,
   type StoredMessage,
   type ChatUsage,
   type StreamChatMessageParams,
+  type ChatRequestMode,
 } from "../lib/api-client";
+import {
+  answerToWire,
+  readInputAnswer,
+  readInputRequest,
+  type ChatInputAnswer,
+  type ChatInputRequest,
+} from "../lib/ask-user";
+import {
+  applyProgressStep,
+  settleProgress,
+  storedProgress,
+} from "../lib/progress-steps";
 
 /**
  * State machine for one chat conversation.
@@ -63,7 +80,62 @@ export interface ChatMessageToolAction {
   readonly result?: Record<string, unknown>;
 }
 
+/** An inline tool call that is still running in an assistant reply (progress chip). */
+export interface ChatRunningTool {
+  readonly callId: string;
+  /** The tool name from the server, for example create_file_inline. */
+  readonly name: string;
+}
+
+/**
+ * A file a reply created or edited, shown as a card. sessionId and messageId are what the
+ * authenticated download route needs; they are copied here so a card is self-contained.
+ */
+export interface ChatFileCard {
+  readonly fileId: string;
+  readonly name: string;
+  readonly fileType: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly action: "created" | "edited";
+  readonly sessionId: string;
+  readonly messageId: string;
+}
+
+/** A file attached to a user message (from the upload API). */
+export interface ChatAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: string;
+}
+
+/** A memory MAYA saved while writing a reply (`memory.saved`); Undo deletes it. */
+export interface SavedMemory {
+  readonly memoryId: string;
+  readonly text: string;
+  /** True when a near-identical memory was changed instead of a new one added. */
+  readonly updated: boolean;
+}
+
+/** A custom agent MAYA drafted in a reply (`agent.draft`); written only after Approve. */
+export interface AgentDraft {
+  readonly name: string;
+  readonly description: string;
+  readonly path: string;
+  readonly content: string;
+  readonly capabilities: readonly string[];
+  readonly instructions: string;
+}
+
 export interface ChatMessage {
+  /** The question card MAYA asked in this reply (ask_user), from the stream or stored metadata. */
+  readonly inputRequest?: ChatInputRequest;
+  /** The scheduled-report draft this reply made; the card fetches it by id (reload-safe). */
+  readonly scheduleDraftIds?: readonly string[];
+  /** On a user message: the card it answers, so the thread shows the card as answered. */
+  readonly inputAnswer?: ChatInputAnswer;
+  /** The user's rating of this reply, from stored data (additive; absent on older servers). */
+  readonly feedback?: "up" | "down" | null;
   /** Stable local key for React lists; never changes. */
   readonly key: string;
   /** Server message id once known. */
@@ -75,8 +147,24 @@ export interface ChatMessage {
   readonly usage: ChatUsage | null;
   /** Interaction modality (text or voice). */
   readonly modality?: "text" | "voice";
+  /** Voice turn id for a stored spoken message. */
+  readonly turnId?: string | null;
   /** Live tool or autonomous task execution telemetry. */
   readonly toolAction?: ChatMessageToolAction;
+  /** Memories this reply saved, from the stream or from stored metadata. */
+  readonly memoriesSaved?: readonly SavedMemory[];
+  /** Custom agents this reply drafted, from the stream or from stored metadata. */
+  readonly agentDrafts?: readonly AgentDraft[];
+  /** Files attached to this user message (just sent, or from stored metadata). */
+  readonly attachments?: readonly ChatAttachment[];
+  /** On a user message: it was sent with the Deep research toggle (shows a small badge). */
+  readonly mode?: ChatRequestMode;
+  /** Inline tool calls running now (cleared on finish, and when the reply ends). */
+  readonly runningTools?: readonly ChatRunningTool[];
+  /** Files this reply created or edited, from the stream or from stored metadata. */
+  readonly files?: readonly ChatFileCard[];
+  /** The live step list of this reply (progress events, or metadata.progress on reload). */
+  readonly progress?: readonly ChatProgressStep[];
 }
 
 export interface ChatError {
@@ -109,8 +197,16 @@ export interface UseChatStreamOptions {
   maxAttempts?: number;
   /** Backoff tuning. Defaults: 600 ms base, 8000 ms cap, Math.random. */
   backoff?: { baseMs?: number; maxMs?: number; random?: () => number };
-  /** Client-side length limit. Default `CHAT_MAX_MESSAGE_CHARS`. */
-  maxMessageChars?: number;
+  /**
+   * Called when the server started a task for the reply (task.created). promoted is true
+   * when an inline answer was moved to the background.
+   */
+  onTaskCreated?: (task: {
+    taskId: string;
+    title: string;
+    status: string;
+    promoted: boolean;
+  }) => void;
 }
 
 export interface UseChatStreamResult {
@@ -119,6 +215,17 @@ export interface UseChatStreamResult {
   readonly sessionId: string | null;
   /** Replace the current thread with an already loaded server conversation. */
   openSession: (sessionId: string, messages: readonly StoredMessage[]) => void;
+  /**
+   * Take over a session id created elsewhere (the live voice socket reports it
+   * in READY) without touching the messages already shown, so typed turns and
+   * later reloads use the same conversation.
+   */
+  adoptSession: (sessionId: string) => void;
+  /**
+   * Append server-written assistant messages (the "what the task got" result of a finished task)
+   * to the open conversation; already shown ones are skipped. Other conversations are ignored.
+   */
+  appendStored: (sessionId: string, messages: readonly StoredMessage[]) => void;
   readonly error: ChatError | null;
   /** Set while waiting to retry automatically. */
   readonly retrying: ChatRetryInfo | null;
@@ -132,8 +239,22 @@ export interface UseChatStreamResult {
    * with `finish_reason: "interrupted"` and after the error was dismissed.
    */
   readonly canAskAgain: boolean;
-  /** Send one user message. Resolves when the whole exchange has ended. */
-  send: (text: string) => Promise<void>;
+  /**
+   * Send one user message, optionally with already uploaded files (`attachments`, sent as ids).
+   * Resolves when the whole exchange has ended.
+   */
+  send: (
+    text: string,
+    options?: {
+      attachments?: readonly ChatAttachment[];
+      /** The answer to a question card; `text` is its readable rendering. */
+      answer?: ChatInputAnswer;
+      /** "deep_research": ask for the multi-source research run (sent as `mode`). */
+      mode?: ChatRequestMode;
+      /** Use THIS assistant message as the content for the request (sent as `source_message_id`). */
+      sourceMessageId?: string;
+    },
+  ) => Promise<void>;
   /** Retry the failed message with the SAME Idempotency-Key. */
   retry: () => Promise<void>;
   /**
@@ -153,6 +274,158 @@ export interface UseChatStreamResult {
   dismissError: () => string | null;
   /** Abort and start a new, empty conversation. */
   reset: () => void;
+}
+
+/**
+ * Spoken or typed, read defensively: the stored-message type does not declare
+ * a modality, but a server that sends `modality` (or `metadata.modality`) on a
+ * message is honoured so reloaded conversations keep the "spoken" marker.
+ */
+export function storedModality(
+  message: StoredMessage,
+): "text" | "voice" | undefined {
+  const raw = message as unknown as {
+    modality?: unknown;
+    metadata?: { modality?: unknown } | null;
+  };
+  const value = raw.modality ?? raw.metadata?.modality;
+  if (value === "voice" || value === "audio") return "voice";
+  if (value === "text") return "text";
+  return undefined;
+}
+
+/**
+ * The memories a stored reply saved (`metadata.memories_saved`), read
+ * defensively: anything that is not a well-formed entry is skipped.
+ */
+export function storedMemories(message: StoredMessage): SavedMemory[] {
+  const raw = message.metadata?.memories_saved;
+  if (!Array.isArray(raw)) return [];
+  const out: SavedMemory[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.memory_id !== "string" || entry.memory_id === "") continue;
+    if (typeof entry.text !== "string") continue;
+    if (out.some((m) => m.memoryId === entry.memory_id)) continue;
+    out.push({
+      memoryId: entry.memory_id,
+      text: entry.text,
+      updated: entry.updated === true,
+    });
+  }
+  return out;
+}
+
+/** The question card answer a stored user message carried, read defensively. */
+function storedAnswer(message: StoredMessage): ChatInputAnswer | null {
+  const raw = message.metadata?.answer;
+  if (typeof raw !== "object" || raw === null) return null;
+  const e = raw as Record<string, unknown>;
+  return readInputAnswer(e.ask_id, e.answers);
+}
+
+/**
+ * The scheduled-report draft ids a stored reply carried: `metadata.schedule_drafts[].id`, plus
+ * `metadata.schedule_draft.id` (the same draft, or the only one). Order kept, duplicates dropped.
+ */
+export function storedScheduleDraftIds(message: StoredMessage): string[] {
+  const out: string[] = [];
+  const add = (raw: unknown): void => {
+    if (typeof raw !== "object" || raw === null) return;
+    const id = (raw as { id?: unknown }).id;
+    if (typeof id === "string" && id !== "" && !out.includes(id)) out.push(id);
+  };
+  const list = message.metadata?.schedule_drafts;
+  if (Array.isArray(list)) (list as unknown[]).forEach(add);
+  add(message.metadata?.schedule_draft);
+  return out;
+}
+
+/** The agent drafts a stored reply carried (`metadata.agent_drafts`), read defensively. */
+export function storedAgentDrafts(message: StoredMessage): AgentDraft[] {
+  const raw = (message.metadata as Record<string, unknown> | undefined)
+    ?.agent_drafts;
+  if (!Array.isArray(raw)) return [];
+  const out: AgentDraft[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== "object" || item === null) continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.name !== "string" || e.name === "") continue;
+    if (typeof e.path !== "string" || typeof e.content !== "string") continue;
+    if (out.some((d) => d.name === e.name)) continue;
+    out.push({
+      name: e.name,
+      description: typeof e.description === "string" ? e.description : "",
+      path: e.path,
+      content: e.content,
+      capabilities: Array.isArray(e.capabilities)
+        ? e.capabilities.filter((c): c is string => typeof c === "string")
+        : [],
+      instructions: typeof e.instructions === "string" ? e.instructions : "",
+    });
+  }
+  return out;
+}
+
+/**
+ * The files a stored user message carried (`metadata.attachments`), read defensively: anything
+ * that is not a well-formed entry is skipped.
+ */
+export function storedAttachments(message: StoredMessage): ChatAttachment[] {
+  const raw = message.metadata?.attachments;
+  if (!Array.isArray(raw)) return [];
+  const out: ChatAttachment[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.id !== "string" || entry.id === "") continue;
+    if (typeof entry.name !== "string" || entry.name === "") continue;
+    if (out.some((a) => a.id === entry.id)) continue;
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      kind: typeof entry.kind === "string" ? entry.kind : "other",
+    });
+  }
+  return out;
+}
+
+/**
+ * The files a stored reply created (metadata.files_created), read defensively. The card needs
+ * the session and message ids for its download route, so they are passed in.
+ */
+export function storedFiles(
+  message: StoredMessage,
+  sessionId: string,
+): ChatFileCard[] {
+  const raw = message.metadata?.files_created;
+  if (!Array.isArray(raw)) return [];
+  const out: ChatFileCard[] = [];
+  for (const item of raw as unknown[]) {
+    const file = readChatFileCreated(item);
+    if (file === null) continue;
+    if (out.some((f) => f.fileId === file.fileId)) continue;
+    out.push(toFileCard(file, sessionId, message.id));
+  }
+  return out;
+}
+
+function toFileCard(
+  file: ChatFileCreated,
+  sessionId: string,
+  messageId: string,
+): ChatFileCard {
+  return {
+    fileId: file.fileId,
+    name: file.name,
+    fileType: file.fileType,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+    action: file.action,
+    sessionId,
+    messageId,
+  };
 }
 
 export const MAX_AUTO_ATTEMPTS = 3;
@@ -213,7 +486,10 @@ const ERROR_TEXT: Record<string, string> = {
   unexpected_response: "The server sent a response this page cannot read.",
   stream_protocol_error: "The server sent a reply this page cannot read.",
   empty: "Type a message first.",
-  too_long: "This message is longer than the limit.",
+  message_too_long:
+    "This message is too long for the model context. Shorten it or attach it as a file.",
+  payload_too_large:
+    "This message is too large to send. Shorten it or attach it as a file.",
   invalid_characters: "This message contains characters that cannot be sent.",
   client_error: "Something went wrong in this page. Reload and try again.",
 };
@@ -360,7 +636,16 @@ const initialState: State = {
 };
 
 type Action =
-  | { type: "turn_started"; userKey: string; content: string }
+  | {
+      type: "turn_started";
+      userKey: string;
+      content: string;
+      attachments: readonly ChatAttachment[];
+      answer?: ChatInputAnswer;
+      mode?: ChatRequestMode;
+    }
+  | { type: "input_requested"; assistantKey: string; request: ChatInputRequest }
+  | { type: "schedule_draft"; assistantKey: string; draftId: string }
   | { type: "run_started"; userKey: string; assistantKey: string }
   | { type: "retrying"; info: ChatRetryInfo }
   | {
@@ -373,6 +658,22 @@ type Action =
       replayed: boolean;
     }
   | { type: "delta"; assistantKey: string; text: string; replace: boolean }
+  | { type: "memory_saved"; assistantKey: string; memory: SavedMemory }
+  | { type: "agent_draft"; assistantKey: string; draft: AgentDraft }
+  | {
+      type: "tool_started";
+      assistantKey: string;
+      callId: string;
+      name: string;
+    }
+  | {
+      type: "tool_finished";
+      assistantKey: string;
+      callId: string;
+      status: ChatToolStatus;
+    }
+  | { type: "file_created"; assistantKey: string; file: ChatFileCreated }
+  | { type: "progress"; assistantKey: string; step: ChatProgressStep }
   | {
       type: "done";
       assistantKey: string;
@@ -392,6 +693,9 @@ type Action =
   | { type: "rejected"; error: ChatError }
   | { type: "dismissed"; removeUserKey: string | null }
   | { type: "history_loaded"; sessionId: string; messages: ChatMessage[] }
+  | { type: "session_adopted"; sessionId: string }
+  | { type: "append_stored"; sessionId: string; messages: ChatMessage[] }
+  | { type: "restore"; state: State }
   | { type: "reset" };
 
 function patch(
@@ -422,9 +726,44 @@ function reducer(state: State, action: Action): State {
             state: "pending",
             finishReason: null,
             usage: null,
+            ...(action.attachments.length > 0
+              ? { attachments: action.attachments }
+              : {}),
+            ...(action.answer !== undefined
+              ? { inputAnswer: action.answer }
+              : {}),
+            ...(action.mode !== undefined ? { mode: action.mode } : {}),
           },
         ],
       };
+    case "schedule_draft": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (
+        target === undefined ||
+        (target.scheduleDraftIds ?? []).includes(action.draftId)
+      ) {
+        return state; // a replayed stream sends it again
+      }
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          scheduleDraftIds: [
+            ...(target.scheduleDraftIds ?? []),
+            action.draftId,
+          ],
+        }),
+      };
+    }
+    case "input_requested": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined) return state;
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          inputRequest: action.request,
+        }),
+      };
+    }
     case "run_started": {
       let messages = state.messages;
       const user = messages.find((m) => m.key === action.userKey);
@@ -502,6 +841,114 @@ function reducer(state: State, action: Action): State {
         }),
       };
     }
+    case "memory_saved": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined) {
+        return state;
+      }
+      const existing = target.memoriesSaved ?? [];
+      if (existing.some((m) => m.memoryId === action.memory.memoryId)) {
+        return state; // a replayed stream sends it again: never show it twice
+      }
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          memoriesSaved: [...existing, action.memory],
+        }),
+      };
+    }
+    case "agent_draft": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined) {
+        return state;
+      }
+      const existing = target.agentDrafts ?? [];
+      if (existing.some((d) => d.name === action.draft.name)) {
+        return state; // a replayed stream sends it again: never show it twice
+      }
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          agentDrafts: [...existing, action.draft],
+        }),
+      };
+    }
+    case "tool_started": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined) {
+        return state;
+      }
+      const running = (target.runningTools ?? []).filter(
+        (t) => t.callId !== action.callId,
+      );
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          runningTools: [
+            ...running,
+            { callId: action.callId, name: action.name },
+          ],
+        }),
+      };
+    }
+    case "tool_finished": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined || target.runningTools === undefined) {
+        return state;
+      }
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          runningTools: target.runningTools.filter(
+            (t) => t.callId !== action.callId,
+          ),
+        }),
+      };
+    }
+    case "progress": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (target === undefined) {
+        return state;
+      }
+      // A new note replaces text already streamed as the reply body: take that text out, so the
+      // narration shows once, in its place among the steps.
+      const isNewNote =
+        action.step.kind === "note" &&
+        !(target.progress ?? []).some((s) => s.stepId === action.step.stepId);
+      const replaced = isNewNote ? (action.step.textLen ?? 0) : 0;
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          progress: applyProgressStep(target.progress ?? [], action.step),
+          ...(replaced > 0 && replaced <= target.content.length
+            ? { content: target.content.slice(0, -replaced) }
+            : {}),
+        }),
+      };
+    }
+    case "file_created": {
+      const target = state.messages.find((m) => m.key === action.assistantKey);
+      if (
+        target === undefined ||
+        target.id === null ||
+        state.sessionId === null
+      ) {
+        return state;
+      }
+      const existing = target.files ?? [];
+      if (existing.some((f) => f.fileId === action.file.fileId)) {
+        return state; // a replayed stream sends it again: never show it twice
+      }
+      return {
+        ...state,
+        messages: patch(state.messages, action.assistantKey, {
+          files: [
+            ...existing,
+            toFileCard(action.file, state.sessionId, target.id),
+          ],
+        }),
+      };
+    }
     case "done":
       return {
         ...state,
@@ -513,13 +960,21 @@ function reducer(state: State, action: Action): State {
             action.finishReason === "interrupted" ? "interrupted" : "complete",
           finishReason: action.finishReason,
           usage: action.usage,
+          runningTools: undefined,
+          progress: settleProgress(
+            state.messages.find((m) => m.key === action.assistantKey)?.progress,
+            action.finishReason === "interrupted" ? "failed" : "done",
+          ),
         }),
       };
     case "failed": {
       let messages = state.messages;
       if (action.accepted) {
+        const target = messages.find((m) => m.key === action.assistantKey);
         messages = patch(messages, action.assistantKey, {
           state: "interrupted",
+          runningTools: undefined,
+          progress: settleProgress(target?.progress, "failed"),
         });
       } else {
         messages = patch(messages, action.userKey, {
@@ -538,7 +993,11 @@ function reducer(state: State, action: Action): State {
       let messages = state.messages;
       const assistant = messages.find((m) => m.key === action.assistantKey);
       if (assistant !== undefined) {
-        messages = patch(messages, action.assistantKey, { state: "stopped" });
+        messages = patch(messages, action.assistantKey, {
+          state: "stopped",
+          runningTools: undefined,
+          progress: settleProgress(assistant.progress, "skipped"),
+        });
       } else {
         // The request was already sent and the server may have stored it.
         const user = messages.find((m) => m.key === action.userKey);
@@ -575,6 +1034,26 @@ function reducer(state: State, action: Action): State {
         error: null,
         retrying: null,
       };
+    case "session_adopted":
+      return { ...state, sessionId: action.sessionId };
+    case "append_stored": {
+      // Messages the server wrote on its own (a finished task's result): added at the end of
+      // the thread, never twice, without touching a reply that is still streaming.
+      if (state.sessionId !== action.sessionId) return state;
+      const known = new Set(
+        state.messages
+          .map((m) => m.id)
+          .filter((id): id is string => id !== null),
+      );
+      const added = action.messages.filter(
+        (m) => m.id === null || !known.has(m.id),
+      );
+      return added.length === 0
+        ? state
+        : { ...state, messages: [...state.messages, ...added] };
+    }
+    case "restore":
+      return action.state;
     case "reset":
       return initialState;
   }
@@ -589,6 +1068,14 @@ interface Turn {
   assistantKey: string;
   idempotencyKey: string;
   content: string;
+  /** Uploaded files sent with this message (the same ids on every retry). */
+  attachments: readonly ChatAttachment[];
+  /** The answer to a question card, sent with the same key on every retry. */
+  answer?: ChatInputAnswer;
+  /** Request mode, sent unchanged on every retry. */
+  mode?: ChatRequestMode;
+  /** The assistant message this request acts on, sent unchanged on every retry. */
+  sourceMessageId?: string;
   /** The session_id of the FIRST request, reused unchanged on every retry. */
   requestSessionId: string | null;
   accepted: boolean;
@@ -599,7 +1086,23 @@ interface Turn {
   unconfirmed: boolean;
 }
 
+/**
+ * A reply that keeps running while another conversation is on screen. Its events are applied to
+ * `state` (a private copy of that conversation's view) instead of the visible one; coming back
+ * restores it, so the work block and the streaming text are exactly where they were.
+ */
+interface ParkedRun {
+  key: string;
+  state: State;
+  turn: Turn | null;
+  run: ActiveRun;
+}
+
 interface ActiveRun {
+  /** Set while the reply runs in the background (another conversation is on screen). */
+  parked: ParkedRun | null;
+  /** The run ended (done, failed or stopped); a parked copy is then only history. */
+  finished: boolean;
   controller: AbortController;
   /** Apply the buffered text now (the run is still live). */
   flush: () => void;
@@ -732,17 +1235,50 @@ export function useChatStream(
   const turnRef = useRef<Turn | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const counterRef = useRef(0);
+  const stateRef = useRef<State>(state);
+  stateRef.current = state;
+  // Replies that run in the background while another conversation is open, by conversation id.
+  const parkedRef = useRef(new Map<string, ParkedRun>());
 
   useEffect(
     () => () => {
-      // Leaving the page: drop the buffered text and the pending frame, then
-      // stop the request. Nothing is applied to an unmounted component.
+      // Leaving the page (or logging out): drop the buffered text and the pending frame, then
+      // stop every request, the background ones too. Nothing is applied to an unmounted
+      // component.
       activeRef.current?.cancel();
       activeRef.current?.controller.abort();
       activeRef.current = null;
+      for (const parked of parkedRef.current.values()) {
+        parked.run.cancel();
+        parked.run.controller.abort();
+      }
+      parkedRef.current.clear();
     },
     [],
   );
+
+  /**
+   * Moves the running reply (if any) to the background instead of stopping it: from now on its
+   * events go to a private copy of this conversation's view. Opening another conversation or
+   * starting a new one must not cancel work the user asked for; only Stop and logout do.
+   */
+  const parkActive = useCallback((): void => {
+    const run = activeRef.current;
+    if (run === null) {
+      return;
+    }
+    const turn = turnRef.current;
+    const key =
+      sessionIdRef.current ??
+      stateRef.current.sessionId ??
+      `pending-${turn?.userKey ?? "turn"}`;
+    const parked: ParkedRun = { key, state: stateRef.current, turn, run };
+    run.parked = parked;
+    run.flush(); // buffered text lands in the parked copy
+    parkedRef.current.set(key, parked);
+    activeRef.current = null;
+    turnRef.current = null;
+  }, []);
 
   const execute = useCallback(async (turn: Turn): Promise<void> => {
     const opts = optionsRef.current;
@@ -754,9 +1290,17 @@ export function useChatStream(
 
     const controller = new AbortController();
     const { signal } = controller;
+    const deliver = (action: Action): void => {
+      const parked = run.parked;
+      if (parked !== null) {
+        parked.state = reducer(parked.state, action);
+      } else {
+        dispatch(action);
+      }
+    };
     const batcher = new DeltaBatcher((text, replace) => {
       if (!signal.aborted) {
-        dispatch({
+        deliver({
           type: "delta",
           assistantKey: turn.assistantKey,
           text,
@@ -765,6 +1309,8 @@ export function useChatStream(
       }
     });
     const run: ActiveRun = {
+      parked: null,
+      finished: false,
       controller,
       flush: () => batcher.flush(),
       cancel: () => batcher.cancel(),
@@ -782,7 +1328,7 @@ export function useChatStream(
         return;
       }
       batcher.flush();
-      dispatch(action);
+      deliver(action);
     };
 
     const attemptOnce = async (): Promise<void> => {
@@ -791,6 +1337,24 @@ export function useChatStream(
         sessionId: turn.requestSessionId,
         idempotencyKey: turn.idempotencyKey,
         signal,
+        ...(turn.mode !== undefined ? { mode: turn.mode } : {}),
+        ...(turn.sourceMessageId !== undefined
+          ? { sourceMessageId: turn.sourceMessageId }
+          : {}),
+        ...(turn.attachments.length > 0
+          ? { attachments: turn.attachments.map((a) => a.id) }
+          : {}),
+        ...(turn.answer !== undefined
+          ? {
+              answer: answerToWire(
+                turn.answer.askId,
+                turn.answer.answers.map((a) => ({
+                  selected: a.selected,
+                  text: a.text,
+                })),
+              ),
+            }
+          : {}),
       });
       let replaceNext = false;
       for await (const event of events) {
@@ -800,7 +1364,14 @@ export function useChatStream(
         switch (event.type) {
           case "message.accepted":
             turn.accepted = true;
-            sessionIdRef.current = event.sessionId;
+            if (run.parked === null) {
+              sessionIdRef.current = event.sessionId;
+            } else {
+              // A new conversation that was left before the server named it: file it under its id.
+              parkedRef.current.delete(run.parked.key);
+              run.parked.key = event.sessionId;
+              parkedRef.current.set(event.sessionId, run.parked);
+            }
             replaceNext = event.replayed;
             emit({
               type: "accepted",
@@ -820,6 +1391,86 @@ export function useChatStream(
               replace: replaceNext,
             });
             replaceNext = false;
+            break;
+          case "memory.saved":
+            emit({
+              type: "memory_saved",
+              assistantKey: turn.assistantKey,
+              memory: {
+                memoryId: event.memoryId,
+                text: event.text,
+                updated: event.updated,
+              },
+            });
+            break;
+          case "agent.draft":
+            emit({
+              type: "agent_draft",
+              assistantKey: turn.assistantKey,
+              draft: {
+                name: event.name,
+                description: event.description,
+                path: event.path,
+                content: event.content,
+                capabilities: event.capabilities,
+                instructions: event.instructions,
+              },
+            });
+            break;
+          case "schedule.draft":
+            emit({
+              type: "schedule_draft",
+              assistantKey: turn.assistantKey,
+              draftId: event.draftId,
+            });
+            break;
+          case "input.requested":
+            emit({
+              type: "input_requested",
+              assistantKey: turn.assistantKey,
+              request: event.request,
+            });
+            break;
+          case "task.created":
+            if (!signal.aborted && run.parked === null) {
+              // (a background reply's task card comes back from the stored message on return)
+              optionsRef.current.onTaskCreated?.({
+                taskId: event.taskId,
+                title: event.title,
+                status: event.status,
+                promoted: event.promoted,
+              });
+            }
+            break;
+          case "tool.started":
+            emit({
+              type: "tool_started",
+              assistantKey: turn.assistantKey,
+              callId: event.callId,
+              name: event.name,
+            });
+            break;
+          case "tool.finished":
+            emit({
+              type: "tool_finished",
+              assistantKey: turn.assistantKey,
+              callId: event.callId,
+              status: event.status,
+            });
+            break;
+          case "progress":
+            emit({
+              type: "progress",
+              assistantKey: turn.assistantKey,
+              step: event.step,
+            });
+            break;
+          case "file.created":
+            emit({
+              type: "file_created",
+              assistantKey: turn.assistantKey,
+              file: event.file,
+            });
             break;
           case "done":
             emit({
@@ -885,6 +1536,7 @@ export function useChatStream(
     } finally {
       // Every path that should show buffered text has already flushed it.
       batcher.cancel();
+      run.finished = true;
       if (activeRef.current === run) {
         activeRef.current = null;
       }
@@ -892,15 +1544,20 @@ export function useChatStream(
   }, []);
 
   const send = useCallback(
-    async (text: string): Promise<void> => {
+    async (
+      text: string,
+      sendOptions?: {
+        attachments?: readonly ChatAttachment[];
+        answer?: ChatInputAnswer;
+        mode?: ChatRequestMode;
+        sourceMessageId?: string;
+      },
+    ): Promise<void> => {
       if (activeRef.current !== null) {
         return;
       }
       const opts = optionsRef.current;
-      const problem = validateChatContent(
-        text,
-        opts.maxMessageChars ?? CHAT_MAX_MESSAGE_CHARS,
-      );
+      const problem = validateChatContent(text);
       if (problem !== null) {
         dispatch({ type: "rejected", error: localProblemError(problem) });
         return;
@@ -912,6 +1569,14 @@ export function useChatStream(
         assistantKey: `assistant-${n}`,
         idempotencyKey: (opts.createKey ?? createIdempotencyKey)(),
         content: text,
+        attachments: sendOptions?.attachments ?? [],
+        ...(sendOptions?.answer !== undefined
+          ? { answer: sendOptions.answer }
+          : {}),
+        ...(sendOptions?.mode !== undefined ? { mode: sendOptions.mode } : {}),
+        ...(sendOptions?.sourceMessageId !== undefined
+          ? { sourceMessageId: sendOptions.sourceMessageId }
+          : {}),
         requestSessionId: sessionIdRef.current,
         accepted: false,
         failed: false,
@@ -919,7 +1584,14 @@ export function useChatStream(
         unconfirmed: false,
       };
       turnRef.current = turn;
-      dispatch({ type: "turn_started", userKey: turn.userKey, content: text });
+      dispatch({
+        type: "turn_started",
+        userKey: turn.userKey,
+        content: text,
+        attachments: turn.attachments,
+        ...(turn.answer !== undefined ? { answer: turn.answer } : {}),
+        ...(turn.mode !== undefined ? { mode: turn.mode } : {}),
+      });
       await execute(turn);
     },
     [execute],
@@ -974,7 +1646,7 @@ export function useChatStream(
     }
     // A new user action: a new Idempotency-Key for the same text. `send` clears
     // the error notice when it starts.
-    await send(turn.content);
+    await send(turn.content, { attachments: turn.attachments });
   }, [canAskAgain, send]);
 
   const stop = useCallback((): void => {
@@ -997,20 +1669,30 @@ export function useChatStream(
   }, []);
 
   const reset = useCallback((): void => {
-    activeRef.current?.cancel();
-    activeRef.current?.controller.abort();
-    activeRef.current = null;
+    parkActive();
     turnRef.current = null;
     sessionIdRef.current = null;
     dispatch({ type: "reset" });
-  }, []);
+  }, [parkActive]);
 
   const openSession = useCallback(
     (sessionId: string, messages: readonly StoredMessage[]): void => {
-      activeRef.current?.cancel();
-      activeRef.current?.controller.abort();
-      activeRef.current = null;
+      parkActive();
       turnRef.current = null;
+      const parked = parkedRef.current.get(sessionId);
+      if (parked !== undefined) {
+        parkedRef.current.delete(sessionId);
+        if (!parked.run.finished) {
+          // The reply is still running here: show it as it is (work block, streamed text) and
+          // keep applying its events live.
+          parked.run.parked = null;
+          activeRef.current = parked.run;
+          turnRef.current = parked.turn;
+          sessionIdRef.current = sessionId;
+          dispatch({ type: "restore", state: parked.state });
+          return;
+        }
+      }
       sessionIdRef.current = sessionId;
       dispatch({
         type: "history_loaded",
@@ -1027,18 +1709,98 @@ export function useChatStream(
                 : "complete"
               : "sent",
           finishReason: message.finish_reason ?? null,
+          usage:
+            message.role === "assistant"
+              ? readUsage(message.metadata?.usage)
+              : null,
+          modality: storedModality(message),
+          turnId: message.turn_id ?? null,
+          ...(message.feedback !== undefined
+            ? { feedback: message.feedback }
+            : {}),
+          ...(message.role === "assistant" && storedMemories(message).length > 0
+            ? { memoriesSaved: storedMemories(message) }
+            : {}),
+          ...(message.role === "assistant" &&
+          storedAgentDrafts(message).length > 0
+            ? { agentDrafts: storedAgentDrafts(message) }
+            : {}),
+          ...(message.role === "assistant" &&
+          readInputRequest(message.metadata?.input_request) !== null
+            ? {
+                inputRequest: readInputRequest(
+                  message.metadata?.input_request,
+                ) as ChatInputRequest,
+              }
+            : {}),
+          ...(message.role === "assistant" &&
+          storedScheduleDraftIds(message).length > 0
+            ? { scheduleDraftIds: storedScheduleDraftIds(message) }
+            : {}),
+          ...(message.role === "user" && storedAnswer(message) !== null
+            ? { inputAnswer: storedAnswer(message) as ChatInputAnswer }
+            : {}),
+          ...(message.role === "user" && storedAttachments(message).length > 0
+            ? { attachments: storedAttachments(message) }
+            : {}),
+          ...(message.role === "user" &&
+          message.metadata?.mode === "deep_research"
+            ? { mode: "deep_research" as const }
+            : {}),
+          ...(message.role === "assistant" &&
+          storedFiles(message, sessionId).length > 0
+            ? { files: storedFiles(message, sessionId) }
+            : {}),
+          ...(message.role === "assistant" && storedProgress(message).length > 0
+            ? {
+                // The reply has ended, so a step still marked running is settled, not spun.
+                progress: settleProgress(
+                  storedProgress(message),
+                  message.finish_reason === "interrupted" ? "failed" : "done",
+                ),
+              }
+            : {}),
+        })),
+      });
+    },
+    [parkActive],
+  );
+
+  const appendStored = useCallback(
+    (sessionId: string, messages: readonly StoredMessage[]): void => {
+      dispatch({
+        type: "append_stored",
+        sessionId,
+        messages: messages.map((message) => ({
+          key: `history-${message.id}`,
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          state: "complete" as const,
+          finishReason: message.finish_reason ?? null,
           usage: null,
+          ...(message.role === "assistant" &&
+          storedFiles(message, sessionId).length > 0
+            ? { files: storedFiles(message, sessionId) }
+            : {}),
         })),
       });
     },
     [],
   );
 
+  const adoptSession = useCallback((sessionId: string): void => {
+    sessionIdRef.current = sessionId;
+    dispatch({ type: "session_adopted", sessionId });
+  }, []);
+
   return {
     messages: state.messages,
     status: state.status,
     sessionId: state.sessionId,
     openSession,
+    adoptSession,
+    appendStored,
     error: state.error,
     retrying: state.retrying,
     isBusy: state.status === "sending" || state.status === "streaming",

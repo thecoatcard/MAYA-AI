@@ -1,0 +1,37 @@
+# ADR-0033: Scheduled reports and tasks
+
+- Status: Proposed
+- Date: 2026-11-13
+
+## Context
+
+The owner asked (by voice) for a daily 8:00 report of the big tech news by mail, and MAYA answered that she could not schedule. The owner wants a scheduler: work that runs every day at a fixed time; MAYA asks for the details through cards; mail goes out through MAYA's OWN mail service (the SMTP sender that sends sign-up and password codes), not the user's saved mailbox; reports are structured and branded; a report-only schedule is spoken when the user next opens MAYA; a schedule with a named file format says the full report is in Artifacts.
+
+## Decision
+
+1. **No new table.** Schedules live in one JSON document under the per-user settings key `schedules` (`app/schedules/store.py`): schedules, run mode, verified recipients, pending recipient codes (hash only) and drafts. Writes are optimistic compare-and-set on the stored text (`UserSettingsStore.compare_and_set_text`), retried on a race. A user index (Redis set `maya:schedules:users`, plus an in-process set) tells the runner which users to look at, because row-level security forbids a cross-tenant scan; `GET /schedules` re-registers the caller after a Redis flush. At most 5 schedules per user, one run per day at most (a cadence has one time), at most 3 mail recipients per schedule.
+2. **A run is an ordinary task.** The runner (`runner.py`, started in the app lifespan, one tick every 30 s) submits it through `TaskSubmissionService` with source `scheduler` and the idempotency key `sched-<hash of schedule, occurrence, attempt>`. The instruction (`agents/prompts/scheduled_report.py`) carries today's date, the structure (title with date, Top stories with why it matters and links only for pages read, Key takeaways, Limits) and names a file format only when the user named one (`deliverable_intent`). Deep research is used when the schedule asks for it.
+3. **Unattended restrictions.** A plan filter (`safety.py`) keeps only `research` steps (and the `document` step when a file format was asked); mail, Notion, GitHub, code, browser, project-file steps and any explicit tool or approval step are removed. The worker never auto-approves a task whose key starts with `sched-` (the Notion auto-approve setting is ignored). A task that ends waiting for an approval or an answer finishes the run as `needs_attention`; the card stays for the user. Caps: 15 minutes per run (the task is cancelled), source target 1 to 20 (default 10). The model-call figure on the preview card is an estimate; the hard model-call limit comes from the deep-research engine for deep runs and is otherwise bounded by the time cap.
+4. **Catch-up and locks.** A due schedule whose time passed while MAYA was closed runs ONCE at start (all missed occurrences coalesce; the report uses today's date); a missed time older than 48 hours is recorded as `skipped`. Every step of a schedule runs under a lock (Redis `SET NX EX`, in-process fallback), so two runners never execute the same schedule. A failed run retries once after 10 minutes, then records `failed` with a plain reason; three failed days in a row pause the schedule (`paused_reason: failures`) and the user is told on next open.
+5. **Mail through MAYA's system mailer only.** `SmtpEmailSender` configured by `MAYA_SMTP_*` (the sign-up code sender); `app/mail/*` (the user's mailbox) is never called. New template `scheduled_report` in `core/email_templates.py` (brand bar, date, preheader, sections rendered from the report Markdown with escaping first, no remote content, size-capped, plain-text part, footer "Sent by MAYA AI for <account email> - a schedule you set up. Pause or delete it in Settings > Schedules"). Subject `<name> - <weekday, date>`. When the mailer is not configured the run still completes and mail status is `mail_not_configured`.
+6. **Recipient verification.** The account's own verified e-mail is pre-verified. Any other address must confirm a six-digit code (HMAC stored, never the code; valid 10 minutes; 5 wrong tries; 3 mails per address and 6 per user per hour) sent by the same mailer. A schedule may be saved with an unverified address, but no mail goes there until it is verified (recorded as `recipient_unverified`). The owner can pause or delete a schedule in Settings > Schedules.
+7. **Creating by chat or voice is propose-then-click.** `schedule_report` asks missing details as question text for the existing `ask_user` card (time, days, time zone confirmation, delivery, recipient; up to 3 per card; no invented defaults) and stores a DRAFT with a hash. The preview card (`schedule.draft` SSE event, stored as `metadata.schedule_drafts`) shows the exact configuration in words; only `POST /schedules/drafts/{id}/confirm` (a click) creates it. A typed or spoken "yes" confirms nothing; voice can only propose. `list_schedules`, `pause_schedule`, `resume_schedule`, `run_schedule_now` exist in chat and voice; `delete_schedule` is chat-only and needs an explicit `confirm`.
+8. **On open.** `GET /schedules/updates` lists unannounced finished runs (the web app shows a notice). Master voice (`voice/schedule_digest.py` + `TaskAnnouncer`) speaks the key points and, when a file was made, "The full report is in Artifacts"; a run is marked announced only after the live model finished its spoken turn. The backend never opens the microphone: with `voice_on_open` the web app starts master voice muted when updates exist.
+9. **Two run modes** (Settings): (a) while MAYA is open plus catch-up at start (default); (b) "Wake my PC to run schedules" (experimental, opt-in). Mode (b) is `electron . --run-schedules` (no window): the supervisor starts Docker data services and the backend, whose runner catches up at start; `python -m app.schedules.run_due` waits until nothing is due or running (cap 25 minutes), then the app quits. The Settings toggle calls the preload `registerScheduleWake(enabled)`, which, after a native confirm dialog and a trusted-sender check, creates or removes ONE user-level Windows Scheduled Task named `MAYA AI Scheduler` through `schtasks /XML` (triggers: at logon and every 30 minutes; interactive token, least privilege, no password, no admin).
+
+## Limits (honest)
+
+- Mode (b) needs the PC on, the user logged in and Docker Desktop running; secrets stay in the env file; if MAYA is already open the headless run exits (the open app runs schedules). It has not been run on a real PC.
+- A schedule does not run while the backend is not running (mode a: MAYA closed; mode b: PC off or logged out). Missed runs are caught up once, up to 48 hours back.
+- The user index is in Redis; after a Redis flush a user's schedules run again only after the user opens MAYA (or any schedules API call).
+- Report quality depends on search and fetch results; few sources are reported as such, never padded.
+- A mail has no delivery receipt; `sent` means the SMTP server accepted it.
+
+## Consequences
+
+- New settings `MAYA_SCHEDULES_ENABLED`, `MAYA_SCHEDULES_POLL_SECONDS`, `MAYA_SCHEDULES_RUN_MAX_MINUTES`, `MAYA_SCHEDULES_RUN_MAX_MODEL_CALLS`.
+- Small additive changes elsewhere: `TaskSubmissionService.submit(plan_filter=...)`, the worker's unattended guard, `UserSettingsStore.compare_and_set_text`, `ScheduleDraftEvent`, the voice `SCHEDULE_DRAFT` frame, `TaskAnnouncer.add_schedule_update`.
+
+## Unverified claims
+
+No live Gemini, SMTP, `schtasks`, Docker-wake or voice run has happened. Everything above is covered by offline tests with fakes only.

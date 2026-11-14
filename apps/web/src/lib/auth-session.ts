@@ -214,6 +214,27 @@ export function refreshSession(): Promise<RefreshedSession | null> {
   return inFlight;
 }
 
+/**
+ * Ensure an access token is available and fresh. If the current token is missing
+ * or near expiry (less than minRemainingSeconds remaining), trigger a session
+ * refresh using the existing Web Locks refresh flow.
+ */
+export async function ensureFreshAccessToken(
+  minRemainingSeconds = 60,
+): Promise<string | null> {
+  const currentToken = getAccessToken();
+  const remaining = getAccessTokenExpiresIn();
+  if (
+    currentToken !== null &&
+    remaining !== null &&
+    remaining > minRemainingSeconds
+  ) {
+    return currentToken;
+  }
+  const refreshed = await refreshSession();
+  return refreshed?.accessToken ?? getAccessToken();
+}
+
 /** Subscribe to token changes (shape matches `useSyncExternalStore`). */
 export function subscribeAccessToken(listener: Listener): () => void {
   listeners.add(listener);

@@ -52,7 +52,8 @@ async def state(admin: AsyncEngine) -> dict[str, Any]:
             await connection.execute(
                 text(
                     "SELECT policyname, qual, with_check FROM pg_policies "
-                    "WHERE tablename = 'task_outbox_events' ORDER BY 1"
+                    "WHERE tablename = 'task_outbox_events' "
+                    "AND policyname <> 'definer_open_work_lookup' ORDER BY 1"
                 )
             )
         ).all()

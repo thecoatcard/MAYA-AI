@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { ApiError, NetworkError } from "../../lib/api-client";
 import {
@@ -11,14 +11,22 @@ import {
   resetPassword,
   verifyEmail,
 } from "../../lib/auth-client";
+import { Button } from "../ui/Button";
+import { Notice } from "../ui/Feedback";
 import {
-  ThemeToggle,
-  readStoredTheme,
-  storeTheme,
-  type ThemePreference,
-} from "../chat/ThemeToggle";
-
-import "../chat/chat.css";
+  AUTH_FORM_CLASS,
+  AUTH_LINK_CLASS,
+  AUTH_LINKS_CLASS,
+  AuthField,
+  AuthHeader,
+  FormAlert,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_TOO_SHORT_MESSAGE,
+  PasswordField,
+  errorFieldFor,
+  isRetryableAuthError,
+  useFocusFirstError,
+} from "./AuthParts";
 
 type AccountMode = "register" | "verify" | "forgot" | "reset";
 type FieldName =
@@ -36,6 +44,7 @@ interface FieldDefinition {
   type?: string;
   required?: boolean;
   maxLength?: number;
+  hint?: string;
   autoComplete?: string;
   inputMode?: "numeric" | "email";
 }
@@ -49,6 +58,7 @@ const FIELD_SETS: Record<AccountMode, readonly FieldDefinition[]> = {
       required: true,
       maxLength: 64,
       autoComplete: "username",
+      hint: "3 to 32 characters: letters, numbers, dot, dash or underscore.",
     },
     {
       name: "email",
@@ -181,22 +191,43 @@ function errorText(error: unknown): string {
 
 export function AccountForm({
   mode,
-  embedded = false,
 }: {
   mode: AccountMode;
+  /** Accepted for the page call sites; the card is the same embedded or not. */
   embedded?: boolean;
 }) {
-  const [theme, setTheme] = useState<ThemePreference>("system");
   const [fields, setFields] = useState<Partial<Record<FieldName, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [fieldError, setFieldError] = useState<{
+    field: string;
+    message: string;
+  } | null>(null);
+  const [retryable, setRetryable] = useState(false);
+  const [errorTick, setErrorTick] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useFocusFirstError(formRef, errorTick);
+
+  const passwordFieldName = mode === "reset" ? "new_password" : "password";
+
+  const failWith = (reason: unknown) => {
+    const message = errorText(reason);
+    const field = errorFieldFor(reason, passwordFieldName);
+    if (field === null) {
+      setError(message);
+      setFieldError(null);
+    } else {
+      setError(null);
+      setFieldError({ field, message });
+    }
+    setRetryable(isRetryableAuthError(reason));
+    setErrorTick((tick) => tick + 1);
+  };
 
   useEffect(() => {
-    const stored = readStoredTheme();
-    setTheme(stored);
-    storeTheme(stored);
     const email = new URLSearchParams(window.location.search).get("email");
     if (email !== null) {
       setFields((current) => ({ ...current, email }));
@@ -214,11 +245,6 @@ export function AccountForm({
     return () => window.clearTimeout(timer);
   }, [cooldown]);
 
-  const changeTheme = (next: ThemePreference) => {
-    setTheme(next);
-    storeTheme(next);
-  };
-
   const value = (name: FieldName) => fields[name] ?? "";
   const update = (name: FieldName, next: string) => {
     setFields((current) => ({ ...current, [name]: next }));
@@ -229,9 +255,22 @@ export function AccountForm({
     if (busy) {
       return;
     }
-    setBusy(true);
     setError(null);
+    setFieldError(null);
+    setRetryable(false);
     setNotice(null);
+    if (
+      (mode === "register" || mode === "reset") &&
+      value(passwordFieldName).length < PASSWORD_MIN_LENGTH
+    ) {
+      setFieldError({
+        field: passwordFieldName,
+        message: PASSWORD_TOO_SHORT_MESSAGE,
+      });
+      setErrorTick((tick) => tick + 1);
+      return;
+    }
+    setBusy(true);
     try {
       const email = value("email").trim();
       if (mode === "register") {
@@ -268,7 +307,7 @@ export function AccountForm({
         setNotice("Your password has been updated. You can now sign in.");
       }
     } catch (reason) {
-      setError(errorText(reason));
+      failWith(reason);
       if (
         reason instanceof ApiError &&
         reason.code === "rate_limited" &&
@@ -287,6 +326,8 @@ export function AccountForm({
     }
     setBusy(true);
     setError(null);
+    setFieldError(null);
+    setRetryable(false);
     setNotice(null);
     try {
       const result = await resendVerification(value("email").trim());
@@ -295,7 +336,7 @@ export function AccountForm({
         "If this email can be used, a verification message will arrive shortly.",
       );
     } catch (reason) {
-      setError(errorText(reason));
+      failWith(reason);
       if (
         reason instanceof ApiError &&
         reason.code === "rate_limited" &&
@@ -308,131 +349,150 @@ export function AccountForm({
     }
   };
 
-  const content = (
-    <section className="maya-account" aria-labelledby="maya-account-title">
-      {embedded ? (
-        <h1 id="maya-account-title" className="maya-signedout__title">
-          {TITLES[mode]}
-        </h1>
-      ) : (
-        <h2 id="maya-account-title" className="maya-signedout__title">
-          {TITLES[mode]}
-        </h2>
-      )}
-      {mode === "verify" ? (
-        <p className="maya-account__intro">
-          Enter the 6-digit code from your email and the password chosen during
-          registration.
-        </p>
-      ) : null}
-      <form className="maya-signin__form" onSubmit={handleSubmit}>
-        {FIELD_SETS[mode].map((field) => (
-          <label className="maya-signin__field" key={field.name}>
-            <span>{field.label}</span>
-            <input
+  const retrySubmit = () => formRef.current?.requestSubmit();
+
+  const submitLabel =
+    mode === "register"
+      ? "Create account"
+      : mode === "verify"
+        ? "Verify email"
+        : mode === "forgot"
+          ? "Send instructions"
+          : "Update password";
+
+  return (
+    <section
+      aria-labelledby="maya-account-title"
+      className="mx-auto w-full max-w-md min-w-0"
+    >
+      <AuthHeader titleId="maya-account-title" title={TITLES[mode]}>
+        {mode === "verify" ? (
+          <p className="m-0">
+            Enter the 6-digit code from your email and the password chosen
+            during registration.
+          </p>
+        ) : mode === "register" ? (
+          <p className="m-0">
+            A verification code is sent to your email address. Use it on the
+            verify page to finish.
+          </p>
+        ) : mode === "forgot" ? (
+          <p className="m-0">
+            Enter your email address. If it can be used, you will get a reset
+            code.
+          </p>
+        ) : (
+          <p className="m-0">
+            Enter your email address, the 6-digit code you received and a new
+            password.
+          </p>
+        )}
+      </AuthHeader>
+      <form ref={formRef} className={AUTH_FORM_CLASS} onSubmit={handleSubmit}>
+        {FIELD_SETS[mode].map((field, index) => {
+          const fieldMessage =
+            fieldError !== null && fieldError.field === field.name
+              ? fieldError.message
+              : null;
+          if (field.type === "password") {
+            return (
+              <PasswordField
+                key={field.name}
+                label={field.label}
+                name={field.name}
+                autoComplete={field.autoComplete}
+                maxLength={field.maxLength}
+                required={field.required === true}
+                disabled={busy}
+                showPolicy={mode === "register" || mode === "reset"}
+                value={value(field.name)}
+                onChange={(next) => update(field.name, next)}
+                error={fieldMessage}
+              />
+            );
+          }
+          return (
+            <AuthField
+              key={field.name}
+              label={field.label}
+              name={field.name}
+              type={field.type ?? "text"}
               autoComplete={field.autoComplete}
               inputMode={field.inputMode}
               maxLength={field.maxLength}
-              name={field.name}
-              onChange={(event) => update(field.name, event.target.value)}
-              required={field.required}
-              type={field.type ?? "text"}
-              value={value(field.name)}
+              required={field.required === true}
+              hint={field.hint}
+              autoFocus={index === 0}
               disabled={busy}
+              value={value(field.name)}
+              onChange={(next) => update(field.name, next)}
+              error={fieldMessage}
             />
-          </label>
-        ))}
+          );
+        })}
         {error === null ? null : (
-          <p className="maya-signin__error" role="alert">
-            {error}
-          </p>
+          <FormAlert
+            message={error}
+            busy={busy}
+            onRetry={retryable ? retrySubmit : undefined}
+          />
         )}
-        {notice === null ? null : (
-          <p className="maya-account__notice" role="status">
-            {notice}
-          </p>
-        )}
-        <button
+        {notice === null ? null : <Notice tone="success">{notice}</Notice>}
+        <Button
           type="submit"
-          className="maya-btn maya-btn--primary maya-signin__submit maya-ripple"
+          variant="primary"
+          className="w-full"
           disabled={busy}
         >
-          {busy
-            ? "Submitting..."
-            : mode === "register"
-              ? "Create account"
-              : mode === "verify"
-                ? "Verify email"
-                : mode === "forgot"
-                  ? "Send instructions"
-                  : "Update password"}
-        </button>
+          {busy ? "Submitting..." : submitLabel}
+        </Button>
       </form>
       {mode === "verify" ? (
-        <div className="maya-account__resend">
-          <button
-            type="button"
-            className="maya-btn maya-btn--quiet"
+        <div className="mt-3">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void handleResend()}
             disabled={busy || cooldown > 0 || value("email").trim() === ""}
           >
             {cooldown > 0
               ? `Resend code in ${cooldown} seconds`
               : "Resend code"}
-          </button>
+          </Button>
         </div>
       ) : null}
-      <nav className="maya-account__links" aria-label="Account options">
+      <nav className={AUTH_LINKS_CLASS} aria-label="Account options">
         {mode === "register" ? (
           <>
-            <Link href={`/verify?email=${encodeURIComponent(value("email"))}`}>
+            <Link
+              className={AUTH_LINK_CLASS}
+              href={`/verify?email=${encodeURIComponent(value("email"))}`}
+            >
               Enter a verification code
             </Link>
-            <Link href="/login">Sign in</Link>
+            <Link className={AUTH_LINK_CLASS} href="/login">
+              Sign in
+            </Link>
           </>
         ) : mode === "verify" ? (
-          <Link href="/login">Sign in</Link>
+          <Link className={AUTH_LINK_CLASS} href="/login">
+            Sign in
+          </Link>
         ) : mode === "forgot" ? (
           <>
-            <Link href="/reset-password">Enter a reset code</Link>
-            <Link href="/login">Back to sign in</Link>
+            <Link className={AUTH_LINK_CLASS} href="/reset-password">
+              Enter a reset code
+            </Link>
+            <Link className={AUTH_LINK_CLASS} href="/login">
+              Back to sign in
+            </Link>
           </>
         ) : (
-          <Link href="/login">Back to sign in</Link>
+          <Link className={AUTH_LINK_CLASS} href="/login">
+            Back to sign in
+          </Link>
         )}
       </nav>
-      <Link href="/" className="maya-signedout__link">
-        Back to overview
-      </Link>
     </section>
-  );
-
-  if (embedded) {
-    return (
-      <div
-        className="maya-chat maya-auth-embedded w-full"
-        data-maya-theme={theme === "system" ? undefined : theme}
-      >
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <div className="maya-chat">
-      <header className="maya-chat__header">
-        <div className="maya-chat__header-inner">
-          <Link href="/" className="maya-brand">
-            MAYA AI
-          </Link>
-          <span className="maya-chat__divider" aria-hidden="true" />
-          <h1 className="maya-chat__title">{TITLES[mode]}</h1>
-          <div className="maya-chat__tools">
-            <ThemeToggle value={theme} onChange={changeTheme} />
-          </div>
-        </div>
-      </header>
-      <main className="maya-chat__main">{content}</main>
-    </div>
   );
 }

@@ -3,7 +3,7 @@
  */
 
 import { getAccessToken, refreshSession } from "./auth-session";
-import { ApiError } from "./api-client";
+import { apiErrorFromResponse } from "./api-client";
 
 export interface McpServer {
   id: string;
@@ -75,21 +75,7 @@ async function authenticatedFetch(
   }
 
   if (!response.ok) {
-    let errorCode = "unknown_error";
-    try {
-      const body = (await response.json()) as {
-        error?: string;
-        detail?: string;
-      };
-      if (body?.error) {
-        errorCode = body.error;
-      } else if (body?.detail) {
-        errorCode = body.detail;
-      }
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(response.status, errorCode);
+    throw await apiErrorFromResponse(response);
   }
 
   return response;

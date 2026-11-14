@@ -6,6 +6,7 @@ import ssl
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 from typing import Literal, Protocol
 
 SMTP_TIMEOUT_SECONDS = 10.0
@@ -46,6 +47,7 @@ class OutboundEmail:
     to: str
     subject: str
     body: str = field(repr=False)
+    html: str | None = field(default=None, repr=False)
 
 
 class EmailSender(Protocol):
@@ -94,7 +96,14 @@ class SmtpEmailSender:
             email["From"] = self._sender
             email["To"] = message.to
             email["Subject"] = message.subject
-            email.set_content(message.body)
+            email["Date"] = formatdate(localtime=False)
+            domain = parseaddr(self._sender)[1].rpartition("@")[2] or None
+            email["Message-ID"] = make_msgid(domain=domain)
+            email["Auto-Submitted"] = "auto-generated"
+            email["X-Auto-Response-Suppress"] = "All"
+            email.set_content(message.body, charset="utf-8")
+            if message.html is not None:  # text/plain first, richest part last (RFC 2046)
+                email.add_alternative(message.html, subtype="html", charset="utf-8")
             context = ssl.create_default_context()
             if self._security == "ssl":
                 with smtplib.SMTP_SSL(

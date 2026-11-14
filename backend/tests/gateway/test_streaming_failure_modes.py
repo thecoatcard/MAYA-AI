@@ -15,9 +15,11 @@ from app.gateway.exceptions import (
     GatewayFallbackExhaustedError,
     StreamInterruptedError,
 )
+from app.gateway.registry import build_default_registry
 from app.gateway.schemas import GatewayStreamChunk
 from tests.support.fake_gemini_client import FakeGeminiClient
 from tests.support.gateway_factory import make_gateway, make_tracker_mock
+from tests.support.models import DISTINCT_LAST_RESORT_MODEL, LAST_RESORT_OVERRIDES, LITE, ORCH
 
 TEXT = "one two three four five six"
 
@@ -30,7 +32,7 @@ async def collect(stream: AsyncIterator[GatewayStreamChunk]) -> list[GatewayStre
 async def test_status_error_while_opening_the_stream_backs_off_then_succeeds() -> None:
     fake = FakeGeminiClient()
     fake.aio.models.default_text = TEXT
-    fake.aio.models.enqueue_errors("gemini-3.8-flash", [ClientError(429, {}), ClientError(429, {})])
+    fake.aio.models.enqueue_errors(ORCH, [ClientError(429, {}), ClientError(429, {})])
     sleep = AsyncMock()
     gateway = make_gateway(fake, sleep=sleep)
 
@@ -46,7 +48,7 @@ async def test_status_error_while_opening_the_stream_backs_off_then_succeeds() -
 async def test_error_before_the_first_chunk_falls_back_to_the_next_model() -> None:
     fake = FakeGeminiClient()
     fake.aio.models.default_text = TEXT
-    fake.aio.models.stream_first_chunk_errors["gemini-3.8-flash"] = [
+    fake.aio.models.stream_first_chunk_errors[ORCH] = [
         ConnectionResetError("dropped before any data")
     ]
     gateway = make_gateway(fake)
@@ -61,9 +63,12 @@ async def test_error_before_the_first_chunk_falls_back_to_the_next_model() -> No
 @pytest.mark.asyncio
 async def test_every_model_failing_before_the_first_chunk_exhausts_the_chain() -> None:
     fake = FakeGeminiClient()
-    fake.aio.models.enqueue_errors("gemini-3.8-flash", [ServerError(503, {})])
-    fake.aio.models.enqueue_errors("gemini-3.5-flash-lite", [ServerError(500, {})])
-    gateway = make_gateway(fake)
+    fake.aio.models.enqueue_errors(ORCH, [ServerError(503, {})])
+    fake.aio.models.enqueue_errors(LITE, [ServerError(500, {})])
+    # The chain ends at the last-resort model, which fails too. Today it shares the orchestrator
+    # model id (no extra attempt), so this scenario uses a registry where it is a distinct model.
+    fake.aio.models.enqueue_errors(DISTINCT_LAST_RESORT_MODEL, [ServerError(500, {})])
+    gateway = make_gateway(fake, registry=build_default_registry(LAST_RESORT_OVERRIDES))
 
     with pytest.raises(GatewayFallbackExhaustedError, match=r"ServerError\(500\)"):
         await collect(gateway.generate_stream("orchestrator", ["Count"]))

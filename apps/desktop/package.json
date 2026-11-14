@@ -1,0 +1,24 @@
+{
+  "name": "maya-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MAYA AI desktop shell (Electron). Supervises Docker data services and the local API.",
+  "main": "src/main.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/dev.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "pack": "node scripts/build-web.mjs && electron-builder --dir",
+    "dist": "node scripts/build-web.mjs && electron-builder --win nsis",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "electron": "^44.9.3",
+    "electron-builder": "26.18.0"
+  }
+}

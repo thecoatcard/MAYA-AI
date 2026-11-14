@@ -1,0 +1,11 @@
+{
+  "servers": [
+    { "name": "playwright", "enabled": false, "version": "REPLACE_WITH_EXACT_VERSION" },
+    {
+      "name": "github",
+      "enabled": false,
+      "command": "github-mcp-server",
+      "version": "REPLACE_WITH_INSTALLED_VERSION"
+    }
+  ]
+}

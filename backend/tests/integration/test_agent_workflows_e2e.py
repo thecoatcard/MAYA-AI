@@ -16,6 +16,7 @@ from app.db.models import Subtask, SubtaskStatus, Task
 from app.sandbox.runner import SandboxRunner
 from app.tasks.queue import SubtaskJob
 from app.tasks.worker import SubtaskWorker
+from tests.support.approval import TEST_JWT_KEY, approve_paused_subtask
 
 
 @pytest.mark.asyncio
@@ -44,12 +45,13 @@ async def test_workflow_1_daily_briefing_e2e() -> None:
     pm_agent = PMAgent(
         calendar_service=calendar_service,
         notion_connector=notion_connector,
+        notion_database_id="tasks-db",
     )
 
     fleet = AgentFleetRegistry()
     fleet.register_agent("pm", pm_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
 
     workspace_id = uuid4()
     task_id = uuid4()
@@ -134,7 +136,7 @@ async def test_workflow_3_coding_bugfix_to_pr_e2e(tmp_path: Path) -> None:
     fleet = AgentFleetRegistry()
     fleet.register_agent("coding", coding_agent)
 
-    worker = SubtaskWorker(fleet_registry=fleet)
+    worker = SubtaskWorker(fleet_registry=fleet, jwt_signing_key=TEST_JWT_KEY)
 
     workspace_id = uuid4()
     task_id = uuid4()
@@ -194,7 +196,8 @@ async def test_workflow_3_coding_bugfix_to_pr_e2e(tmp_path: Path) -> None:
     assert subtask.verification_proof["retest_passed"] is True
 
     # 2. Run with valid approval token -> opens PR and COMPLETED
-    subtask.input_data["has_valid_approval_token"] = True
+    # A real signed approval token is verified and claimed; a bare input flag no longer works.
+    approve_paused_subtask(session, subtask, task)
     status_2 = await worker.execute_job(session=session, job=job)
     assert status_2 == SubtaskStatus.COMPLETED
     assert str(subtask.status) == str(SubtaskStatus.COMPLETED)

@@ -1,5 +1,7 @@
 # Phase 09 — Specialist AI Agents
 
+> Superseded: Brave Search was removed on 2026-11-09. Web search is Gemini Google Search grounding; every mention of Brave below is the original plan and not current behaviour.
+
 ## A. Phase Overview
 
 - **Phase Number:** Phase 09

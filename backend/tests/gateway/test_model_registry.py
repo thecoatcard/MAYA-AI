@@ -14,11 +14,12 @@ from app.gateway.registry import (
     build_default_registry,
     normalize_model_id,
 )
+from tests.support.models import HEAVY, LITE, ORCH, SEARCH
 
 
 def test_normalize_model_id() -> None:
-    assert normalize_model_id("models/gemini-3.8-flash") == "gemini-3.8-flash"
-    assert normalize_model_id("gemini-3.8-flash") == "gemini-3.8-flash"
+    assert normalize_model_id(f"models/{ORCH}") == ORCH
+    assert normalize_model_id(ORCH) == ORCH
     assert normalize_model_id("models/custom-model") == "custom-model"
 
 
@@ -35,16 +36,26 @@ def test_default_registry_contains_expected_aliases() -> None:
         "live",
         "live-thinking",
         "research",
+        "search",
         "tts",
+        "decision",  # added on purpose for ADR-0029 (registry-only decision model)
     }
     assert set(specs.keys()) == expected
+
+
+def test_search_alias_is_the_search_model_rest_unpriced_and_not_verified_at_startup() -> None:
+    spec = build_default_registry().get("search")
+    assert spec.model_id == SEARCH and spec.transport == "rest" and spec.enabled
+    assert spec.verify_at_startup is False
+    # No price is invented: the registry does not price this model id.
+    assert spec.price_unknown is True and spec.cost_per_1m_input is None
 
 
 def test_mvp_aliases_pricing_and_context() -> None:
     registry = build_default_registry()
 
     orch = registry.get("orchestrator")
-    assert orch.model_id == "gemini-3.8-flash"
+    assert orch.model_id == ORCH
     assert orch.fallback_alias == "lite"
     assert orch.cost_per_1m_input == Decimal("0.75")
     assert orch.cost_per_1m_output == Decimal("3.75")
@@ -55,7 +66,7 @@ def test_mvp_aliases_pricing_and_context() -> None:
     assert orch.enabled is True
 
     heavy = registry.get("heavy")
-    assert heavy.model_id == "gemini-4-argon"
+    assert heavy.model_id == HEAVY
     assert heavy.fallback_alias == "orchestrator"
     assert heavy.cost_per_1m_input == Decimal("2.00")
     assert heavy.cost_per_1m_output == Decimal("10.00")
@@ -63,7 +74,7 @@ def test_mvp_aliases_pricing_and_context() -> None:
     assert heavy.verify_at_startup is True
 
     lite = registry.get("lite")
-    assert lite.model_id == "gemini-3.5-flash-lite"
+    assert lite.model_id == LITE
     assert lite.fallback_alias == "orchestrator"
     assert lite.cost_per_1m_input == Decimal("0.30")
     assert lite.cost_per_1m_output == Decimal("2.50")
@@ -155,14 +166,14 @@ def test_model_overrides_application() -> None:
     assert registry.get("orchestrator").model_id == "gemini-3.8-flash-custom"
     assert registry.get("orchestrator").price_unknown is True
     # Unchanged
-    assert registry.get("heavy").model_id == "gemini-4-argon"
+    assert registry.get("heavy").model_id == HEAVY
     assert registry.get("heavy").price_unknown is False
 
     # Direct with_overrides call
     base = build_default_registry()
     updated = base.with_overrides({"lite": "gemini-3.5-lite-custom"})
     assert updated.get("lite").model_id == "gemini-3.5-lite-custom"
-    assert base.get("lite").model_id == "gemini-3.5-flash-lite"
+    assert base.get("lite").model_id == LITE
 
     # Reject unknown alias
     with pytest.raises(GatewayConfigurationError, match="unknown alias"):

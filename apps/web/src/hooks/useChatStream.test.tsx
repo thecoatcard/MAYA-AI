@@ -11,7 +11,6 @@ import {
 } from "../components/chat/chat-test-utils";
 import {
   ApiError,
-  CHAT_MAX_MESSAGE_CHARS,
   NetworkError,
   type ChatEvent,
   type StreamChatMessageParams,
@@ -163,6 +162,297 @@ describe("happy path", () => {
       sessionId: null,
       idempotencyKey: "key-0001",
     });
+  });
+
+  it("reports task.created to the callback without touching the text", async () => {
+    const onTaskCreated = vi.fn();
+    const { result, stream } = setup({ onTaskCreated });
+    stream.mockImplementationOnce(async () =>
+      play([
+        accepted(),
+        delta("Starting. "),
+        {
+          type: "task.created",
+          taskId: "task-1",
+          title: "Report",
+          status: "executing",
+          promoted: false,
+        },
+        delta("Done."),
+        done(),
+      ]),
+    );
+    await send(result, "make a report");
+    expect(onTaskCreated).toHaveBeenCalledTimes(1);
+    expect(onTaskCreated).toHaveBeenCalledWith({
+      taskId: "task-1",
+      title: "Report",
+      status: "executing",
+      promoted: false,
+    });
+    expect(result.current.messages[1]?.content).toBe("Starting. Done.");
+  });
+
+  it("passes promoted to onTaskCreated when the reply moved to the background", async () => {
+    const onTaskCreated = vi.fn();
+    const { result, stream } = setup({ onTaskCreated });
+    stream.mockImplementationOnce(async () =>
+      play([
+        accepted(),
+        {
+          type: "task.created",
+          taskId: "task-2",
+          title: "Long one",
+          status: "executing",
+          promoted: true,
+        },
+        done(),
+      ]),
+    );
+    await send(result, "a long question");
+    expect(onTaskCreated).toHaveBeenCalledWith({
+      taskId: "task-2",
+      title: "Long one",
+      status: "executing",
+      promoted: true,
+    });
+  });
+
+  it("shows a tool chip while the tool runs and clears it on tool.finished", async () => {
+    const running = deferred();
+    const finishing = deferred();
+    const { result, stream } = setup();
+    stream.mockImplementationOnce(async () =>
+      play([
+        accepted(),
+        { type: "tool.started", callId: "c1", name: "create_file_inline" },
+        running.promise,
+        {
+          type: "tool.finished",
+          callId: "c1",
+          name: "create_file_inline",
+          status: "ok",
+        },
+        finishing.promise,
+        done(),
+      ]),
+    );
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("make notes");
+    });
+    await waitFor(() =>
+      expect(result.current.messages[1]?.runningTools).toEqual([
+        { callId: "c1", name: "create_file_inline" },
+      ]),
+    );
+    running.resolve();
+    await waitFor(() =>
+      expect(result.current.messages[1]?.runningTools).toEqual([]),
+    );
+    finishing.resolve();
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.messages[1]?.runningTools).toBeUndefined();
+  });
+
+  it("adds a file card with the ids its download needs, once even when replayed", async () => {
+    const file: ChatEvent = {
+      type: "file.created",
+      file: {
+        fileId: "f1",
+        name: "notes.md",
+        fileType: "md",
+        mimeType: "text/markdown",
+        sizeBytes: 120,
+        action: "created",
+        sourceUploadId: null,
+      },
+    };
+    const { result, stream } = setup();
+    stream.mockImplementationOnce(async () =>
+      play([accepted(), file, file, done()]),
+    );
+    await send(result, "write notes");
+    expect(result.current.messages[1]?.files).toEqual([
+      {
+        fileId: "f1",
+        name: "notes.md",
+        fileType: "md",
+        mimeType: "text/markdown",
+        sizeBytes: 120,
+        action: "created",
+        sessionId: "session-1",
+        messageId: "assistant-1",
+      },
+    ]);
+  });
+
+  it("finalizes a reply that ends with a file card and a still-running step", async () => {
+    const file: ChatEvent = {
+      type: "file.created",
+      file: {
+        fileId: "f1",
+        name: "Solar_Power_Report.pdf",
+        fileType: "pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 47000,
+        action: "created",
+        sourceUploadId: null,
+      },
+    };
+    const step: ChatEvent = {
+      type: "progress",
+      step: {
+        runId: "r1",
+        stepId: "s1",
+        parentId: null,
+        kind: "render",
+        label: "Rendering PDF",
+        detail: null,
+        state: "running",
+        index: null,
+        total: null,
+        elapsedMs: null,
+        thought: null,
+      },
+    };
+    const { result, stream } = setup();
+    stream.mockImplementationOnce(async () =>
+      play([
+        accepted(),
+        step,
+        file,
+        delta("Solar_Power_Report.pdf is ready (3 pages)."),
+        done(),
+      ]),
+    );
+    await send(result, "ek report PDF banao");
+    expect(result.current.status).toBe("idle");
+    expect(result.current.messages[1]).toMatchObject({
+      state: "complete",
+      content: "Solar_Power_Report.pdf is ready (3 pages).",
+    });
+    expect(result.current.messages[1]?.progress?.[0]?.state).toBe("done");
+    expect(result.current.messages[1]?.runningTools).toBeUndefined();
+  });
+
+  it("does not hang when the connection closes after the card without done", async () => {
+    const file: ChatEvent = {
+      type: "file.created",
+      file: {
+        fileId: "f1",
+        name: "r.pdf",
+        fileType: "pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        action: "created",
+        sourceUploadId: null,
+      },
+    };
+    const { result, stream } = setup({ maxAttempts: 1 });
+    stream.mockImplementationOnce(async () => play([accepted(), file]));
+    await send(result, "make a pdf");
+    expect(result.current.status).toBe("error");
+    expect(result.current.messages[1]?.state).toBe("interrupted");
+    expect(result.current.canRetry).toBe(true);
+  });
+
+  it("shows the file card from stored metadata after a reload", () => {
+    const { result } = setup();
+    act(() => {
+      result.current.openSession("session-9", [
+        {
+          id: "a-9",
+          role: "assistant",
+          content: "Saved the report.",
+          created_at: "2026-11-11T10:00:00Z",
+          finish_reason: "stop",
+          metadata: {
+            files_created: [
+              {
+                file_id: "f9",
+                name: "report.docx",
+                file_type: "docx",
+                mime_type:
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                size_bytes: 2048,
+                sha256: "0",
+                action: "created",
+                source_upload_id: null,
+              },
+              { file_id: "broken" },
+            ],
+          },
+        },
+      ]);
+    });
+    expect(result.current.messages[0]?.files).toEqual([
+      {
+        fileId: "f9",
+        name: "report.docx",
+        fileType: "docx",
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        sizeBytes: 2048,
+        action: "created",
+        sessionId: "session-9",
+        messageId: "a-9",
+      },
+    ]);
+  });
+
+  it("attaches memory.saved to the reply, once, and keeps the text", async () => {
+    const { result, stream } = setup();
+    const saved: ChatEvent = {
+      type: "memory.saved",
+      memoryId: "mem-1",
+      text: "Favourite colour is blue",
+      updated: false,
+    };
+    stream.mockImplementationOnce(async () =>
+      play([accepted(), saved, delta("Noted."), saved, done()]),
+    );
+    await send(result, "Yaad rakhna: mera favourite colour neela hai");
+    const reply = result.current.messages[1];
+    expect(reply?.content).toBe("Noted.");
+    expect(reply?.memoriesSaved).toEqual([
+      { memoryId: "mem-1", text: "Favourite colour is blue", updated: false },
+    ]);
+    expect(result.current.messages[0]?.memoriesSaved).toBeUndefined();
+  });
+
+  it("restores saved memories from stored message metadata", () => {
+    const { result } = setup();
+    act(() => {
+      result.current.openSession("session-1", [
+        {
+          id: "m-user",
+          role: "user",
+          content: "remember",
+          created_at: "2026-11-09T10:00:00Z",
+          metadata: { task: null, memories_saved: [] },
+        },
+        {
+          id: "m-reply",
+          role: "assistant",
+          content: "Saved.",
+          created_at: "2026-11-09T10:00:01Z",
+          metadata: {
+            memories_saved: [
+              { memory_id: "mem-9", text: "I live in Pune", updated: true },
+              { memory_id: "", text: "bad" },
+              "junk",
+            ],
+          },
+        },
+      ]);
+    });
+    expect(result.current.messages[0]?.memoriesSaved).toBeUndefined();
+    expect(result.current.messages[1]?.memoriesSaved).toEqual([
+      { memoryId: "mem-9", text: "I live in Pune", updated: true },
+    ]);
   });
 
   it("passes through sending, then streaming, then idle", async () => {
@@ -1104,12 +1394,10 @@ describe("reset", () => {
 });
 
 describe("local checks and unknown events", () => {
-  it("refuses empty, too long and disallowed text without calling the network", async () => {
+  it("refuses empty and disallowed text without calling the network", async () => {
     const { result, stream } = setup();
     await send(result, "   ");
     expect(result.current.error?.code).toBe("empty");
-    await send(result, "a".repeat(CHAT_MAX_MESSAGE_CHARS + 1));
-    expect(result.current.error?.code).toBe("too_long");
     await send(result, "bad\u0000text");
     expect(result.current.error?.code).toBe("invalid_characters");
     expect(stream).not.toHaveBeenCalled();
@@ -1770,7 +2058,7 @@ describe("deltas are applied once per animation frame", () => {
 
   it("drops the buffered text and the pending frame on reset", async () => {
     const frames = stubFrames();
-    const { result, stream } = setup();
+    const { result, stream, unmount } = setup();
     stream.mockImplementationOnce(async (params) =>
       hang(params.signal, [accepted(), delta("never shown")]),
     );
@@ -1779,14 +2067,19 @@ describe("deltas are applied once per animation frame", () => {
       sending = result.current.send("Hi");
     });
     await waitFor(() => expect(frames.pending()).toBe(1));
+    // Changed on purpose: reset no longer aborts the request (the reply keeps running in the
+    // background, see useChatStream.background.test.tsx); the buffered text goes to the
+    // background copy, never to the new empty conversation. Unmount (logout) ends it.
     act(() => {
       result.current.reset();
     });
     expect(frames.pending()).toBe(0);
+    act(() => frames.run());
+    expect(result.current.messages).toEqual([]);
+    unmount();
     await act(async () => {
       await sending;
     });
-    act(() => frames.run());
     expect(result.current.messages).toEqual([]);
   });
 

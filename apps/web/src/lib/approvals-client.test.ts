@@ -193,4 +193,21 @@ describe("approvals-client", () => {
     );
     expect(result.status).toBe("revoked");
   });
+
+  it("refreshes the session on 401 and retries once", async () => {
+    vi.spyOn(authSession, "refreshSession").mockResolvedValue(
+      {} as authSession.RefreshedSession,
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    await expect(listApprovals()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

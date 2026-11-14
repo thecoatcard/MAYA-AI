@@ -72,7 +72,7 @@ def test_model_overrides_validation() -> None:
 
     # Unknown alias
     with pytest.raises(ValidationError, match="Invalid model override alias 'unknown'"):
-        make_valid_settings(gemini_model_overrides={"unknown": "gemini-3.8-flash"})
+        make_valid_settings(gemini_model_overrides={"unknown": "gemini-4-hydrogen"})
 
     # Non-REST alias cannot be overridden
     for non_rest in ("live", "live-thinking", "research", "tts"):
@@ -111,3 +111,28 @@ def test_logging_redacts_gemini_api_key() -> None:
     parsed = json.loads(formatted)
     assert fake_key not in parsed["message"]
     assert "[redacted]" in parsed["message"]
+
+
+def test_logging_redacts_all_pool_keys() -> None:
+    k1 = "-".join(["test", "log", "redact", "k1"])
+    k2 = "-".join(["test", "log", "redact", "k2"])
+    settings = make_valid_settings(gemini_api_keys=[k1, k2])
+    configure_logging(settings)
+    logger = logging.getLogger("maya")
+    formatter = logger.handlers[0].formatter
+    assert isinstance(formatter, JsonFormatter)
+
+    record = logging.LogRecord(
+        name="maya",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg=f"Calling with {k1} and {k2}",
+        args=(),
+        exc_info=None,
+    )
+    formatted = formatter.format(record)
+    parsed = json.loads(formatted)
+    assert k1 not in parsed["message"]
+    assert k2 not in parsed["message"]
+    assert parsed["message"] == "Calling with [redacted] and [redacted]"

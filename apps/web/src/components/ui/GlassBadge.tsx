@@ -22,39 +22,39 @@ const variantStyles: Record<
   { pill: string; dot: string; glow: string }
 > = {
   teal: {
-    pill: "bg-teal-500/10 text-teal-300 border-teal-500/30 shadow-sm shadow-teal-500/5",
-    dot: "bg-teal-400",
-    glow: "shadow-[0_0_8px_rgba(45,212,191,0.6)]",
+    pill: "bg-maya-surface text-maya-accent border-maya-accent",
+    dot: "bg-maya-accent",
+    glow: "",
   },
   emerald: {
-    pill: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 shadow-sm shadow-emerald-500/5",
-    dot: "bg-emerald-400",
-    glow: "shadow-[0_0_8px_rgba(52,211,153,0.6)]",
+    pill: "bg-maya-success-soft text-maya-success border-maya-success",
+    dot: "bg-maya-success",
+    glow: "",
   },
   amber: {
-    pill: "bg-amber-500/10 text-amber-300 border-amber-500/30 shadow-sm shadow-amber-500/5",
-    dot: "bg-amber-400",
-    glow: "shadow-[0_0_8px_rgba(251,191,36,0.6)]",
+    pill: "bg-maya-warning-soft text-maya-warning border-maya-warning",
+    dot: "bg-maya-warning",
+    glow: "",
   },
   rose: {
-    pill: "bg-rose-500/10 text-rose-300 border-rose-500/30 shadow-sm shadow-rose-500/5",
-    dot: "bg-rose-400",
-    glow: "shadow-[0_0_8px_rgba(244,63,94,0.6)]",
+    pill: "bg-maya-danger-soft text-maya-danger border-maya-danger",
+    dot: "bg-maya-danger",
+    glow: "",
   },
   blue: {
-    pill: "bg-blue-500/10 text-blue-300 border-blue-500/30 shadow-sm shadow-blue-500/5",
-    dot: "bg-blue-400",
-    glow: "shadow-[0_0_8px_rgba(96,165,250,0.6)]",
+    pill: "bg-maya-info-soft text-maya-info border-maya-info",
+    dot: "bg-maya-info",
+    glow: "",
   },
   zinc: {
-    pill: "bg-zinc-800/60 text-zinc-300 border-zinc-700/60 shadow-sm shadow-black/10",
-    dot: "bg-zinc-400",
-    glow: "shadow-[0_0_8px_rgba(161,161,170,0.5)]",
+    pill: "bg-maya-surface text-maya-muted border-maya-border-strong",
+    dot: "bg-maya-muted",
+    glow: "",
   },
   purple: {
-    pill: "bg-purple-500/10 text-purple-300 border-purple-500/30 shadow-sm shadow-purple-500/5",
-    dot: "bg-purple-400",
-    glow: "shadow-[0_0_8px_rgba(192,132,252,0.6)]",
+    pill: "bg-maya-surface text-maya-text border-maya-border-strong",
+    dot: "bg-maya-text",
+    glow: "",
   },
 };
 
@@ -63,25 +63,25 @@ const sizeStyles: Record<
   { pill: string; dot: string; icon: string }
 > = {
   sm: {
-    pill: "text-[10px] px-2 py-0.5 gap-1.5",
+    pill: "text-maya-caption px-2 py-0.5 gap-1.5",
     dot: "w-1.5 h-1.5",
     icon: "w-3 h-3",
   },
   md: {
-    pill: "text-xs px-2.5 py-1 gap-1.5",
+    pill: "text-maya-caption px-2.5 py-1 gap-1.5",
     dot: "w-2 h-2",
     icon: "w-3.5 h-3.5",
   },
   lg: {
-    pill: "text-xs md:text-sm px-3.5 py-1.5 gap-2",
+    pill: "text-maya-caption md:text-sm px-3.5 py-1.5 gap-2",
     dot: "w-2.5 h-2.5",
     icon: "w-4 h-4",
   },
 };
 
 /**
- * GlassBadge - Status pill and indicator badge with glassmorphism glow,
- * rich color variants, pulsing dot indicator, and monospace font option.
+ * GlassBadge: status pill. Meaning always comes from the label as well as the
+ * colour; the optional dot is decorative. No glow or blur.
  */
 export const GlassBadge = forwardRef<HTMLSpanElement, GlassBadgeProps>(
   function GlassBadge(
@@ -105,13 +105,13 @@ export const GlassBadge = forwardRef<HTMLSpanElement, GlassBadgeProps>(
     return (
       <span
         ref={ref}
-        className={`inline-flex items-center rounded-full border backdrop-blur-md select-none transition-colors duration-150 ${style.pill} ${sizeConfig.pill} ${monoClass} ${className}`.trim()}
+        className={`inline-flex items-center rounded-full border select-none transition-colors duration-150 ${style.pill} ${sizeConfig.pill} ${monoClass} ${className}`.trim()}
         {...props}
       >
         {dot && (
           <span
             className={`rounded-full shrink-0 ${sizeConfig.dot} ${style.dot} ${style.glow} ${
-              dotPulse ? "animate-pulse" : ""
+              dotPulse ? "animate-pulse motion-reduce:animate-none" : ""
             }`}
             aria-hidden="true"
           />

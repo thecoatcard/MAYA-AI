@@ -66,6 +66,49 @@ describe("MarkdownRenderer: supported subset", () => {
     );
   });
 
+  it("renders a pipe table as a real table in a named scroll region", () => {
+    const { container } = renderMarkdown(
+      "| Name | Qty |\n| :-- | --: |\n| apples | **3** |\n| pears | 4 |",
+    );
+    const region = container.querySelector('[role="region"]');
+    expect(region?.getAttribute("aria-label")).toBe("Table, 2 rows");
+    expect(region?.getAttribute("tabindex")).toBe("0");
+    const table = region?.querySelector("table");
+    expect(table).not.toBeNull();
+    const headers = Array.from(table?.querySelectorAll("th") ?? []);
+    expect(headers.map((th) => th.textContent)).toEqual(["Name", "Qty"]);
+    expect(headers.every((th) => th.getAttribute("scope") === "col")).toBe(
+      true,
+    );
+    expect(table?.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(table?.querySelector("td strong")?.textContent).toBe("3");
+    // Alignment is a data attribute (a style attribute is never rendered from a reply).
+    expect(headers[1]?.getAttribute("data-align")).toBe("right");
+    expect(headers[0]?.getAttribute("data-align")).toBe("left");
+  });
+
+  it("keeps text inside table cells inert", () => {
+    const { container } = renderMarkdown(
+      "| a |\n| - |\n| <img src=x onerror=1> |\n| [x](javascript:alert(1)) |",
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("td")?.textContent).toContain("<img");
+    expectNoEventHandlerAttributes(container);
+  });
+
+  it("lets the browser pick the direction of each block (dir=auto)", () => {
+    const { container } = renderMarkdown(
+      "# שלום\n\nשלום עולם\n\n- רשימה\n\n> ציטוט\n\n| א |\n| - |\n| ב |",
+    );
+    for (const selector of ["h3", "p", "li", "blockquote", "th", "td"]) {
+      expect(
+        container.querySelector(selector)?.getAttribute("dir"),
+        selector,
+      ).toBe("auto");
+    }
+  });
+
   it("opens safe links in a new tab with rel noopener noreferrer", () => {
     const { container } = renderMarkdown(
       "[docs](https://example.com/a), <https://example.org> and https://example.net/x.",
@@ -391,8 +434,8 @@ describe("rendering never goes through innerHTML", () => {
       "components/chat/ChatNotice.tsx",
       "components/chat/ThemeToggle.tsx",
       "components/chat/useReducedMotion.ts",
-      "components/chat/ChatWorkspace.tsx",
-      "app/chat/page.tsx",
+      "components/chat/ConversationView.tsx",
+      "app/(app)/page.tsx",
       "app/layout.tsx",
     ]) {
       expect(files).toContain(required);
@@ -418,4 +461,46 @@ describe("rendering never goes through innerHTML", () => {
       }
     },
   );
+});
+
+describe("MarkdownRenderer math", () => {
+  it("shows inline and display math as readable text with the source as label", () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={
+          "Time is $O(n^2)$ then $O(n)$.\n\n$$\\text{complement} = \\text{target} - \\text{current number}$$"
+        }
+      />,
+    );
+    expect(container.textContent).not.toContain("$");
+    expect(container.textContent).not.toContain("\\");
+    expect(container.textContent).toContain("O(n²)");
+    expect(container.textContent).toContain(
+      "complement = target - current number",
+    );
+    const labelled = Array.from(container.querySelectorAll('[role="math"]'));
+    expect(labelled).toHaveLength(3);
+    expect(labelled[0].getAttribute("aria-label")).toBe("O(n^2)");
+    expect(container.querySelector(".maya-md__math-block")).not.toBeNull();
+  });
+
+  it("shows an unknown command as written inside a code span, with currency intact", () => {
+    const { container } = render(
+      <MarkdownRenderer
+        // Was \binom (unknown to the text fallback). KaTeX now typesets \binom, so this uses a
+        // command that neither KaTeX nor the fallback knows.
+        content={"It costs $5 and $10, and $\\nosuchcommand{n}{k}$."}
+      />,
+    );
+    expect(container.textContent).toContain("$5 and $10");
+    const code = container.querySelector("code.maya-md__code");
+    expect(code?.textContent).toBe("\\nosuchcommand{n}{k}");
+  });
+
+  it("does not turn markup in math into elements", () => {
+    const { container } = render(
+      <MarkdownRenderer content={"$x<img src=x onerror=alert(1)>$"} />,
+    );
+    expect(container.querySelector("img")).toBeNull();
+  });
 });

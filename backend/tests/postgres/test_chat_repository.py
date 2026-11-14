@@ -195,7 +195,7 @@ async def test_records_map_to_the_api_models(app_engine: AsyncEngine, tenants: T
             session.id,
             "orchestrator",
             "hello",
-            metadata={"model_id": "gemini-3.8-flash", "finish_reason": "stop"},
+            metadata={"model_id": "gemini-4-hydrogen", "finish_reason": "stop"},
         )
     assert SessionOut.model_validate(session).title == "hello"
     as_user = MessageOut.model_validate(user)
@@ -204,8 +204,27 @@ async def test_records_map_to_the_api_models(app_engine: AsyncEngine, tenants: T
     assert (as_reply.role, as_reply.finish_reason, as_reply.model_id) == (
         "assistant",
         "stop",
-        "gemini-3.8-flash",
+        "gemini-4-hydrogen",
     )
+
+
+async def test_a_voice_turn_maps_modality_and_safe_metadata(
+    app_engine: AsyncEngine, tenants: Tenants
+) -> None:
+    async with repository(app_engine, tenants[0]) as repo:
+        session = await repo.create_session("voice")
+        spoken = await repo.add_message(
+            session.id,
+            "user",
+            "hello",
+            modality="audio",
+            metadata={"turn_id": "t-1", "source": "live", "interrupted": True},
+        )
+        typed = await repo.add_message(session.id, "user", "typed")
+    out = MessageOut.model_validate(spoken)
+    assert (out.modality, out.turn_id, out.source) == ("audio", "t-1", "live")
+    plain = MessageOut.model_validate(typed)
+    assert (plain.modality, plain.turn_id, plain.source) == ("text", None, None)
 
 
 async def test_the_seeded_session_and_message_are_readable_by_their_owner(
@@ -417,7 +436,7 @@ async def test_metadata_round_trips_as_a_json_object(
     tenant = tenants[0]
     session_id = await new_session(app_engine, tenant)
     metadata = {
-        "model_id": "gemini-3.8-flash",
+        "model_id": "gemini-4-hydrogen",
         "alias": "orchestrator",
         "finish_reason": "stop",
         "status": "completed",
@@ -438,7 +457,7 @@ async def test_metadata_round_trips_as_a_json_object(
         listed = (await repo.list_messages(session_id)).items
     assert again is not None and again.metadata == metadata
     assert listed[0].metadata == metadata
-    assert (again.finish_reason, again.model_id) == ("stop", "gemini-3.8-flash")
+    assert (again.finish_reason, again.model_id) == ("stop", "gemini-4-hydrogen")
 
 
 async def test_metadata_defaults_to_an_empty_object_and_converts_decimal_uuid_and_time(

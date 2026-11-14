@@ -1,4 +1,4 @@
-"""Schemas for Approval Center requests and responses."""
+"""Schemas for approval requests and responses."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -36,7 +36,7 @@ class ApprovalRequestOut(BaseModel):
     payload_hash: str
     tier: Literal["APPROVAL_REQUIRED", "RESTRICTED"]
     action_description: str
-    payload_diff: dict[str, Any] | list[Any] | None = None
+    payload_diff: dict[str, Any] | list[Any] | str | None = None
     status: ApprovalStatus | str
     approval_token: str | None = None
     requested_at: datetime
@@ -44,6 +44,9 @@ class ApprovalRequestOut(BaseModel):
     decided_at: datetime | None = None
     consumed_at: datetime | None = None
     decision_channel: Literal["web", "api"] | None = None
+    # True when the owner's Notion auto-approve setting (not a click) recorded the approval. The
+    # decide route only ever writes "web", so the stored "api" channel is that marker.
+    auto_approved: bool = False
 
     # Execution lifecycle tracking fields
     claimed_by: str | None = None

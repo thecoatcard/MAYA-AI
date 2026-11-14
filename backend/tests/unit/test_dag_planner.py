@@ -257,7 +257,9 @@ def test_plan_schema_publishes_plan_and_dependency_bounds() -> None:
     subtask_schema = schema["properties"]["subtasks"]
     dependency_schema = schema["$defs"]["SubTaskPlanItem"]["properties"]["dependencies"]
 
-    assert subtask_schema["minItems"] == 1
+    # A plan needs a step unless it is a refusal (unsupported / needs_clarification): the
+    # "at least one" rule is a model validator now, not a schema minimum.
+    assert "minItems" not in subtask_schema
     assert subtask_schema["maxItems"] == MAX_SUBTASKS_PER_PLAN
     assert dependency_schema["maxItems"] == MAX_SUBTASKS_PER_PLAN - 1
     assert dependency_schema["uniqueItems"] is True
@@ -339,14 +341,14 @@ async def test_dag_planner_cycle_repair_includes_previous_plan() -> None:
     cyclic = PlanDecompositionResponse(
         intent="Synthetic intent",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A", dependencies=["b"]),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )
     repaired = PlanDecompositionResponse(
         intent="Synthetic intent",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A"),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A"),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )
@@ -373,7 +375,7 @@ async def test_dag_planner_self_repair_on_cycle() -> None:
     cyclic_plan = PlanDecompositionResponse(
         intent="Circular intent",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A", dependencies=["b"]),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )
@@ -381,7 +383,7 @@ async def test_dag_planner_self_repair_on_cycle() -> None:
     repaired_plan = PlanDecompositionResponse(
         intent="Repaired intent",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=[]),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A", dependencies=[]),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )
@@ -404,7 +406,7 @@ async def test_generate_plan_dag_success_and_alias() -> None:
     mock_gateway.generate_structured.return_value = PlanDecompositionResponse(
         intent="Orchestrate workflow",
         subtasks=[
-            SubTaskPlanItem(id="t1", assigned_agent="research", description="Find"),
+            SubTaskPlanItem(id="t1", assigned_agent="executor", description="Find"),
             SubTaskPlanItem(
                 id="t2", assigned_agent="email", description="Send", dependencies=["t1"]
             ),
@@ -419,9 +421,9 @@ async def test_generate_plan_dag_success_and_alias() -> None:
     assert subtasks[1].id == "t2"
     assert subtasks[1].requires_approval is True  # email role propagates requires_approval
 
-    # Verify alias used is 'orchestrator'
+    # The planner uses the agent model policy alias (lite by default)
     mock_gateway.generate_structured.assert_called_once()
-    assert mock_gateway.generate_structured.call_args.kwargs["alias"] == "orchestrator"
+    assert mock_gateway.generate_structured.call_args.kwargs["alias"] == "lite"
 
 
 @pytest.mark.asyncio
@@ -438,7 +440,7 @@ async def test_generate_plan_dag_repair_failure_raises_planner_error() -> None:
     cyclic = PlanDecompositionResponse(
         intent="Synthetic",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A", dependencies=["b"]),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )
@@ -454,7 +456,7 @@ async def test_generate_plan_dag_persistent_cycle_fails_with_cycle_error() -> No
     cyclic = PlanDecompositionResponse(
         intent="Synthetic",
         subtasks=[
-            SubTaskPlanItem(id="a", assigned_agent="research", description="A", dependencies=["b"]),
+            SubTaskPlanItem(id="a", assigned_agent="executor", description="A", dependencies=["b"]),
             SubTaskPlanItem(id="b", assigned_agent="coding", description="B", dependencies=["a"]),
         ],
     )

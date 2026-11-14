@@ -58,6 +58,11 @@ DELETE_SESSION = text(
     "WHERE id = :session_id AND workspace_id = :workspace_id AND user_id = :user_id "
     "RETURNING id"
 )
+RENAME_SESSION = text(
+    "UPDATE sessions SET title = :title "
+    "WHERE id = :session_id AND workspace_id = :workspace_id AND user_id = :user_id "
+    "RETURNING id, workspace_id, user_id, title, channel, status, created_at"
+)
 LIST_SESSIONS_FIRST = text(
     "SELECT id, workspace_id, user_id, title, channel, status, created_at FROM sessions "
     "WHERE workspace_id = :workspace_id AND user_id = :user_id "
@@ -86,6 +91,15 @@ GET_MESSAGE = text(
     "m.created_at FROM messages AS m "
     "JOIN sessions AS s ON s.workspace_id = m.workspace_id AND s.id = m.session_id "
     "WHERE m.id = :message_id AND m.workspace_id = :workspace_id AND s.user_id = :user_id"
+)
+FIND_TASK_RESULT = text(
+    "SELECT m.id, m.workspace_id, m.session_id, m.sender, m.modality, m.content, m.metadata, "
+    "m.created_at FROM messages AS m "
+    "JOIN sessions AS s ON s.workspace_id = m.workspace_id AND s.id = m.session_id "
+    "WHERE m.workspace_id = :workspace_id AND m.session_id = :session_id "
+    "AND s.user_id = :user_id AND m.sender = 'orchestrator' "
+    "AND m.metadata->>'kind' = 'task_result' AND m.metadata->>'task_id' = :task_id "
+    "AND m.metadata->>'status' = :status ORDER BY m.created_at ASC LIMIT 1"
 )
 # The conversation is the user's and the assistant's turns; agent and system rows are not part of
 # it (Phase 05 and later may write them), so the list queries leave them out.
@@ -185,6 +199,18 @@ class ChatMessageRecord:
     content: str
     metadata: dict[str, Any]
     created_at: datetime
+
+    @property
+    def turn_id(self) -> str | None:
+        """The voice turn id from the stored metadata, when it is a string."""
+        value = self.metadata.get("turn_id")
+        return value if isinstance(value, str) else None
+
+    @property
+    def source(self) -> str | None:
+        """The voice turn source from the stored metadata, when it is a string."""
+        value = self.metadata.get("source")
+        return value if isinstance(value, str) else None
 
     @property
     def role(self) -> Literal["user", "assistant"]:
@@ -453,6 +479,22 @@ class ChatRepository:
         ).first()
         return None if row is None else _session(row)
 
+    async def rename_session(self, session_id: UUID, title: str) -> ChatSessionRecord | None:
+        """Set the title of this user's session (cut to 255 characters). ``None`` when the
+        session does not exist or is not this user's."""
+        row = (
+            await self._connection.execute(
+                RENAME_SESSION,
+                {
+                    "session_id": session_id,
+                    "workspace_id": self._workspace_id,
+                    "user_id": self._user_id,
+                    "title": _storable(title)[:MAX_TITLE_CHARS],
+                },
+            )
+        ).first()
+        return None if row is None else _session(row)
+
     async def lock_session(self, session_id: UUID) -> None:
         """Lock this caller's session row until the current transaction ends.
 
@@ -567,6 +609,25 @@ class ChatRepository:
                     "message_id": message_id,
                     "workspace_id": self._workspace_id,
                     "user_id": self._user_id,
+                },
+            )
+        ).first()
+        return None if row is None else _message(row)
+
+    async def find_task_result(
+        self, session_id: UUID, task_id: str, status: str
+    ) -> ChatMessageRecord | None:
+        """The stored task-result message of this task and terminal ``status``, if one exists
+        (what makes posting a result idempotent)."""
+        row = (
+            await self._connection.execute(
+                FIND_TASK_RESULT,
+                {
+                    "session_id": session_id,
+                    "workspace_id": self._workspace_id,
+                    "user_id": self._user_id,
+                    "task_id": task_id,
+                    "status": status,
                 },
             )
         ).first()

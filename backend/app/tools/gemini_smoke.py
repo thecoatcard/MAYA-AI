@@ -31,7 +31,14 @@ async def run_smoke(args: argparse.Namespace) -> int:
         print(f"Error loading settings: {exc}", file=sys.stderr)
         return 1
 
-    if settings.gemini_api_key is None or not settings.gemini_api_key.get_secret_value().strip():
+    effective_keys = getattr(settings, "effective_gemini_api_keys", [])
+    raw_key = ""
+    if effective_keys:
+        raw_key = effective_keys[0].get_secret_value()
+    elif settings.gemini_api_key is not None and settings.gemini_api_key.get_secret_value().strip():
+        raw_key = settings.gemini_api_key.get_secret_value()
+
+    if not raw_key:
         print(
             "Error: MAYA_GEMINI_API_KEY is not set or is blank. "
             "Configure it in .env before running.",
@@ -71,7 +78,7 @@ async def run_smoke(args: argparse.Namespace) -> int:
     # Initialize client safely (never printing key)
     try:
         client = build_genai_client(
-            api_key=settings.gemini_api_key.get_secret_value(),
+            api_key=raw_key,
             timeout_seconds=settings.gemini_request_timeout_seconds,
         )
     except Exception as exc:

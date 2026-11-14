@@ -169,6 +169,9 @@ class _FakeTransaction:
             role=role,
         )
 
+    async def any_account_exists(self) -> bool:
+        return bool(self._store.users)
+
     async def latest_challenge_created_at(self, user_id: UUID, purpose: str) -> datetime | None:
         times = [
             row.created_at
@@ -293,6 +296,12 @@ class _FakeTransaction:
         if row is None or row.user_id != user_id or not self._visible(row.workspace_id):
             return None
         return row
+
+    async def get_profile(self, user_id: UUID) -> tuple[str, str] | None:
+        user = self._store.users.get(user_id)
+        if user is None or not self._visible(user.workspace_id):
+            return None
+        return (user.email, user.full_name)
 
     async def get_live_session(
         self, session_id: UUID, user_id: UUID, now: datetime

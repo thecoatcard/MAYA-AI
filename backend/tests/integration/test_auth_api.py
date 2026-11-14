@@ -118,6 +118,8 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         ("/api/v1/healthz", "GET"),
         ("/api/v1/readyz", "GET"),
         (f"{BASE}/identify", "POST"),
+        (f"{BASE}/bootstrap", "POST"),
+        (f"{BASE}/bootstrap/status", "GET"),
         (f"{BASE}/signup/otp", "POST"),
         (f"{BASE}/signup/complete", "POST"),
         (f"{BASE}/register", "POST"),
@@ -130,14 +132,55 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         (f"{BASE}/logout", "POST"),
         (f"{BASE}/me", "GET"),
         ("/api/v1/chat/message", "POST"),
+        # Scheduled reports (docs/api/SCHEDULES.md, ADR-0033): added on purpose.
+        ("/api/v1/schedules", "GET"),
+        ("/api/v1/schedules", "POST"),
+        ("/api/v1/schedules/updates", "GET"),
+        ("/api/v1/schedules/updates/{schedule_id}/ack", "POST"),
+        ("/api/v1/schedules/settings", "PUT"),
+        ("/api/v1/schedules/recipients/request", "POST"),
+        ("/api/v1/schedules/recipients/confirm", "POST"),
+        ("/api/v1/schedules/drafts/{draft_id}", "GET"),
+        ("/api/v1/schedules/drafts/{draft_id}/confirm", "POST"),
+        ("/api/v1/schedules/drafts/{draft_id}/cancel", "POST"),
+        ("/api/v1/schedules/{schedule_id}", "PATCH"),
+        ("/api/v1/schedules/{schedule_id}", "DELETE"),
+        ("/api/v1/schedules/{schedule_id}/run-now", "POST"),
+        ("/api/v1/settings/chat", "GET"),
+        ("/api/v1/settings/chat", "PUT"),
+        # Intentional: the owner-only Notion auto-approve setting (authenticated, default off).
+        ("/api/v1/settings/notion-auto-approve", "GET"),
+        ("/api/v1/settings/notion-auto-approve", "PUT"),
+        ("/api/v1/settings/connections", "GET"),
+        ("/api/v1/settings/connections/{provider}", "PUT"),
+        ("/api/v1/settings/connections/{provider}", "DELETE"),
+        ("/api/v1/settings/connections/{provider}/test", "POST"),
         ("/api/v1/chat/sessions", "GET"),
         ("/api/v1/chat/sessions/{session_id}", "DELETE"),
+        # Right-click menus (docs/api/CHAT.md): rename/pin/archive, branch, export, feedback.
+        ("/api/v1/chat/sessions/{session_id}", "PATCH"),
+        ("/api/v1/chat/sessions/{session_id}/duplicate", "POST"),
+        ("/api/v1/chat/sessions/{session_id}/export", "GET"),
+        ("/api/v1/chat/messages/{message_id}/feedback", "POST"),
         ("/api/v1/chat/sessions/{session_id}/messages", "GET"),
+        ("/api/v1/chat/sessions/{session_id}/messages/{message_id}", "GET"),
+        (
+            "/api/v1/chat/sessions/{session_id}/messages/{message_id}/files/{file_id}",
+            "GET",
+        ),
+        # History deletion (docs/api/CHAT.md, docs/api/TASKS_SPECIFICATION.md): added on purpose.
+        (
+            "/api/v1/chat/sessions/{session_id}/messages/{message_id}/files/{file_id}",
+            "DELETE",
+        ),
         ("/api/v1/tasks", "POST"),
         ("/api/v1/tasks", "GET"),
+        ("/api/v1/tasks/delete", "POST"),
         ("/api/v1/tasks/{task_id}", "GET"),
+        ("/api/v1/tasks/{task_id}", "DELETE"),
         ("/api/v1/tasks/{task_id}/abort", "POST"),
         ("/api/v1/tasks/{task_id}/events", "GET"),
+        ("/api/v1/tasks/{task_id}/input", "POST"),
         ("/api/v1/approvals", "GET"),
         ("/api/v1/approvals/{request_id}", "GET"),
         ("/api/v1/approvals/{request_id}/decide", "POST"),
@@ -145,10 +188,30 @@ def test_the_public_surface_is_exactly_the_documented_endpoints(api: Api) -> Non
         ("/api/v1/mcp/servers", "POST"),
         ("/api/v1/mcp/servers/{server_id}/health", "GET"),
         ("/api/v1/mcp/servers/{server_id}", "DELETE"),
+        ("/api/v1/mcp-client/status", "GET"),  # read-only MCP client status (ADR-0028)
+        ("/api/v1/decisions/status", "GET"),  # read-only decision model status (ADR-0029)
+        ("/api/v1/search/status", "GET"),  # read-only per-engine web search state (WEB_SEARCH.md)
         ("/api/v1/artifacts", "GET"),
+        ("/api/v1/artifacts/delete", "POST"),
         ("/api/v1/artifacts/{artifact_id}", "GET"),
+        ("/api/v1/artifacts/{artifact_id}", "DELETE"),
         ("/api/v1/artifacts/{artifact_id}/metadata", "GET"),
         ("/api/v1/audit", "GET"),
+        ("/api/v1/agents", "GET"),
+        ("/api/v1/agents/custom", "POST"),
+        ("/api/v1/agents/custom/preview", "POST"),
+        ("/api/v1/agents/custom/draft", "POST"),
+        ("/api/v1/agents/custom/{name}", "PUT"),
+        ("/api/v1/agents/custom/{name}/enabled", "POST"),
+        ("/api/v1/files/folder", "GET"),
+        ("/api/v1/files/folder", "PUT"),
+        ("/api/v1/files/folder", "DELETE"),
+        ("/api/v1/files/folder/tree", "GET"),
+        ("/api/v1/files/uploads", "POST"),
+        ("/api/v1/files/uploads", "GET"),
+        ("/api/v1/files/uploads/{upload_id}", "GET"),
+        ("/api/v1/files/uploads/{upload_id}", "DELETE"),
+        ("/api/v1/files/uploads/{upload_id}/download", "GET"),
         ("/api/v1/browser/action", "POST"),
         ("/api/v1/browser/session/{session_id}/takeover", "GET"),
         ("/api/v1/browser/session/{session_id}/resume", "POST"),
@@ -177,7 +240,10 @@ def test_the_whole_account_lifecycle_over_http(api: Api) -> None:
     me = api.client.get(f"{BASE}/me", headers=bearer(tokens["access_token"]))
     assert me.status_code == 200
     assert me.json()["role"] == "admin"
-    assert set(me.json()) == {"user_id", "workspace_id", "role"}
+    assert set(me.json()) == {"user_id", "workspace_id", "role", "email", "display_name"}
+    # The caller sees their own email and name (display only).
+    assert me.json()["email"] == account["email"]
+    assert me.json()["display_name"] == account["full_name"]
 
     rotated = api.post("refresh", refresh_token=tokens["refresh_token"])
     assert rotated.status_code == 200

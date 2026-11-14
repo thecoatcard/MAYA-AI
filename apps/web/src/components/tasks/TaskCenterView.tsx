@@ -1,30 +1,42 @@
 "use client";
 
 import {
-  AlertCircle,
-  Ban,
-  Bot,
-  CheckCircle2,
-  Clock,
-  DollarSign,
-  Layers,
+  ArrowLeft,
+  Check,
+  Copy,
+  ClipboardCopy,
+  FolderOpen,
+  Hash,
+  MessagesSquare,
+  MoreHorizontal,
+  OctagonX,
+  RotateCcw,
+  FileCheck,
   ListTodo,
-  Loader2,
   PlusCircle,
   Radio,
   RefreshCw,
-  RotateCw,
   Search,
-  ShieldAlert,
-  Sparkles,
+  Trash2,
+  XCircle,
 } from "lucide-react";
-import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import { useOptionalRouter } from "../../hooks/useOptionalRouter";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { ConversationContext } from "../chat/ConversationContext";
 
 import {
   abortTask,
+  deleteTask,
+  deleteTasks,
   getTask,
   listTasks,
+  submitTask,
   type TaskAbortResponse,
   type TaskDetailResponse,
   type TaskListItem,
@@ -33,19 +45,154 @@ import {
   useTaskEvents,
   type TaskEventPayload,
 } from "../../hooks/useTaskEvents";
+import { TaskApprovals } from "../approvals/TaskApprovals";
+import { pendingTaskInput, type PendingTaskInput } from "../../lib/task-input";
+import { TaskInputCard } from "./TaskInputCard";
+import { useOptionalWorkspace } from "../layout/WorkspaceProvider";
 import { DagVisualizer } from "../dag/DagVisualizer";
+import {
+  Badge,
+  Button,
+  ConfirmDeleteDialog,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  Notice,
+  Pane,
+  SelectionBar,
+  Skeleton,
+  Truncate,
+  WrapText,
+} from "../ui";
+import { MenuButton, useContextMenu, type ContextMenuEntry } from "../ui";
+import { copyText } from "../../lib/menu-actions";
+import { FailureReason } from "./FailureReason";
+import { TaskResultSection } from "./TaskResultSection";
+import {
+  CANCEL_FIRST,
+  TASK_DELETE_KEEPS,
+  TASK_DELETE_REMOVES,
+} from "./taskDeleteCopy";
 import { NewTaskModal } from "./NewTaskModal";
+import { TaskStatusBadge } from "./TaskStatusBadge";
+import {
+  describeTask,
+  failureTextOf,
+  formatCost,
+  isTerminalPhase,
+  phaseOfStatus,
+} from "./taskStatus";
 
 export interface TaskCenterViewProps {
   readonly initialTaskId?: string | null;
+  /** Called after an approval was decided on a task here (refresh the pending counters). */
+  readonly onApprovalDecided?: () => void;
+}
+
+const PAGE_SIZE = 50;
+/** The API accepts at most 100 rows per request. */
+const MAX_REFRESH = 100;
+const REFRESH_MS = 10_000;
+
+const FILTERS = [
+  { id: "all", label: "All" },
+  { id: "executing", label: "Running" },
+  { id: "awaiting_approval", label: "Approval" },
+  { id: "completed", label: "Done" },
+  { id: "failed", label: "Failed" },
+] as const;
+
+const TERMINAL_EVENTS = new Set([
+  "task_completed",
+  "task_failed",
+  "task_cancelled",
+  "task_paused_approval",
+]);
+
+function when(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message !== "" ? err.message : fallback;
+}
+
+/** Long text clamps to a few lines with a "Show all" control; nothing is lost or cut. */
+function ExpandableText({
+  text,
+}: {
+  readonly text: string;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 400;
+  return (
+    <div className="min-w-0">
+      <WrapText
+        as="p"
+        dir="auto"
+        className={`m-0 block text-maya-body ${
+          long && !open ? "line-clamp-6" : ""
+        }`}
+      >
+        {text}
+      </WrapText>
+      {long && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-1"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "Show less" : "Show all"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** One row of the task list: the same menu opens on right-click, Menu key or the "..." button. */
+function TaskRowShell({
+  label,
+  getItems,
+  children,
+}: {
+  readonly label: string;
+  readonly getItems: () => readonly ContextMenuEntry[];
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const menu = useContextMenu({ label, getItems });
+  return (
+    <li
+      className="maya-reveal flex min-w-0 shrink-0 items-stretch gap-1"
+      {...menu.triggerProps}
+    >
+      {children}
+      <MenuButton
+        label={`More actions for ${label}`}
+        buttonProps={menu.buttonProps}
+      >
+        <MoreHorizontal size={14} aria-hidden="true" />
+      </MenuButton>
+      {menu.menu}
+    </li>
+  );
 }
 
 export function TaskCenterView({
   initialTaskId,
+  onApprovalDecided,
 }: TaskCenterViewProps): React.JSX.Element {
   const [tasks, setTasks] = useState<readonly TaskListItem[]>([]);
+  const [total, setTotal] = useState<number>(0);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
     initialTaskId ?? null,
+  );
+  // Narrow containers show either the list or the detail; wide ones show both.
+  const [view, setView] = useState<"list" | "detail">(
+    initialTaskId ? "detail" : "list",
   );
   const [selectedTaskDetail, setSelectedTaskDetail] =
     useState<TaskDetailResponse | null>(null);
@@ -53,99 +200,203 @@ export function TaskCenterView({
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<boolean>(false);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isAborting, setIsAborting] = useState<boolean>(false);
+  const [retrying, setRetrying] = useState<boolean>(false);
   const [abortResult, setAbortResult] = useState<TaskAbortResponse | null>(
     null,
   );
   const [isNewTaskOpen, setIsNewTaskOpen] = useState<boolean>(false);
+  const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Load task list
-  const loadTasks = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const statusParam = filterStatus === "all" ? undefined : filterStatus;
-      const res = await listTasks(statusParam, 50, 0);
-      setTasks(res.items);
-      if (res.items.length > 0 && !selectedTaskId) {
-        setSelectedTaskId(res.items[0].id);
+  const notify = useOptionalWorkspace()?.notify;
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [confirmIds, setConfirmIds] = useState<readonly string[] | null>(null);
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const tasksRef = useRef<readonly TaskListItem[]>([]);
+  tasksRef.current = tasks;
+  const selectedRef = useRef<string | null>(selectedTaskId);
+  selectedRef.current = selectedTaskId;
+  const filterRef = useRef<string>(filterStatus);
+  filterRef.current = filterStatus;
+  const requestRef = useRef<number>(0);
+
+  /**
+   * reset: first page for the current filter (shows the loading state).
+   * silent: refresh everything already loaded without a spinner or a scroll jump.
+   * more: append the next page.
+   */
+  const loadTasks = useCallback(
+    async (mode: "reset" | "silent" | "more" = "reset"): Promise<void> => {
+      const request = ++requestRef.current;
+      const statusParam =
+        filterRef.current === "all" ? undefined : filterRef.current;
+      if (mode === "reset") {
+        setLoading(true);
+        setListError(null);
+      } else if (mode === "more") {
+        setLoadingMore(true);
+      } else {
+        setRefreshing(true);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load tasks");
-    } finally {
-      setLoading(false);
-    }
-  }, [filterStatus, selectedTaskId]);
+      try {
+        const loaded = tasksRef.current.length;
+        const res =
+          mode === "more"
+            ? await listTasks(statusParam, PAGE_SIZE, loaded)
+            : await listTasks(
+                statusParam,
+                mode === "silent"
+                  ? Math.min(MAX_REFRESH, Math.max(PAGE_SIZE, loaded))
+                  : PAGE_SIZE,
+                0,
+              );
+        if (request !== requestRef.current) return;
+        setTotal(res.total);
+        setRefreshError(false);
+        if (mode === "more") {
+          const known = new Set(tasksRef.current.map((t) => t.id));
+          setTasks([
+            ...tasksRef.current,
+            ...res.items.filter((t) => !known.has(t.id)),
+          ]);
+        } else if (mode === "silent" && loaded > MAX_REFRESH) {
+          // Keep the rows beyond the refreshed window instead of dropping them.
+          setTasks([...res.items, ...tasksRef.current.slice(res.items.length)]);
+        } else {
+          setTasks(res.items);
+        }
+        if (res.items.length > 0 && !selectedRef.current) {
+          setSelectedTaskId(res.items[0].id);
+        }
+      } catch (err) {
+        if (request !== requestRef.current) return;
+        if (mode === "reset") {
+          setTasks([]);
+          setTotal(0);
+          setListError(errorText(err, "Failed to load tasks"));
+        } else {
+          // Keep the list we have; say that it may be out of date.
+          setRefreshError(true);
+        }
+      } finally {
+        if (request === requestRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    loadTasks();
+    void loadTasks("reset");
+  }, [filterStatus, loadTasks]);
+
+  // The list refreshes on its own so statuses and new tasks appear without pressing a button.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) {
+        void loadTasks("silent");
+      }
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
   }, [loadTasks]);
 
-  // Load selected task details
-  const loadTaskDetail = useCallback(async (taskId: string) => {
-    setDetailLoading(true);
-    setAbortResult(null);
-    try {
-      const detail = await getTask(taskId);
-      setSelectedTaskDetail(detail);
-    } catch {
-      // Failed to load details
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+  const loadTaskDetail = useCallback(
+    async (taskId: string, silent: boolean = false): Promise<void> => {
+      if (!silent) {
+        setDetailLoading(true);
+        setAbortResult(null);
+        setDetailError(null);
+      }
+      try {
+        const detail = await getTask(taskId);
+        if (selectedRef.current === taskId) setSelectedTaskDetail(detail);
+      } catch (err) {
+        if (selectedRef.current === taskId && !silent) {
+          setSelectedTaskDetail(null);
+          setDetailError(errorText(err, "Failed to load the task"));
+        }
+      } finally {
+        if (!silent && selectedRef.current === taskId) setDetailLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (selectedTaskId) {
-      loadTaskDetail(selectedTaskId);
+      void loadTaskDetail(selectedTaskId);
+    } else {
+      setSelectedTaskDetail(null);
     }
   }, [selectedTaskId, loadTaskDetail]);
 
-  // Live SSE listener for real-time task progress
-  const handleLiveEvent = useCallback((event: TaskEventPayload) => {
-    if (!event.payload) return;
-    const payload = event.payload;
-    const subtaskId = payload.subtask_id as string | undefined;
-    const newStatus = payload.status as string | undefined;
+  // Live stream for the selected task: step status changes are applied at once, and the
+  // events that end or pause a task refetch the real detail and the list.
+  const handleLiveEvent = useCallback(
+    (event: TaskEventPayload) => {
+      if (!event.payload) return;
+      const payload = event.payload;
+      const subtaskId = payload.subtask_id as string | undefined;
+      const newStatus = payload.status as string | undefined;
 
-    setSelectedTaskDetail((prev) => {
-      if (!prev) return prev;
-      let updatedSubtasks = prev.subtasks;
-      if (subtaskId && newStatus) {
-        updatedSubtasks = prev.subtasks.map((st) =>
-          st.id === subtaskId || String(st.id) === subtaskId
-            ? {
-                ...st,
-                status: newStatus,
-                output_result: payload.output ?? st.output_result,
-              }
-            : st,
-        );
+      setSelectedTaskDetail((prev) => {
+        if (!prev) return prev;
+        let updatedSubtasks = prev.subtasks;
+        if (subtaskId && newStatus) {
+          updatedSubtasks = prev.subtasks.map((st) =>
+            st.id === subtaskId || String(st.id) === subtaskId
+              ? {
+                  ...st,
+                  status: newStatus,
+                  output_result: payload.output ?? st.output_result,
+                }
+              : st,
+          );
+        }
+
+        let updatedStatus = prev.status;
+        let updatedPlanStatus = prev.plan_status;
+        if (event.event_type === "task_completed") {
+          updatedStatus = "completed";
+          updatedPlanStatus = "completed";
+        } else if (event.event_type === "task_failed") {
+          updatedStatus = "failed";
+          updatedPlanStatus = "failed";
+        } else if (event.event_type === "task_cancelled") {
+          updatedStatus = "cancelled";
+        } else if (event.event_type === "task_paused_approval") {
+          updatedStatus = "awaiting_approval";
+          updatedPlanStatus = "paused";
+        }
+
+        return {
+          ...prev,
+          status: updatedStatus,
+          plan_status: updatedPlanStatus,
+          subtasks: updatedSubtasks,
+        };
+      });
+
+      if (TERMINAL_EVENTS.has(event.event_type)) {
+        const id = selectedRef.current;
+        if (id) void loadTaskDetail(id, true);
+        void loadTasks("silent");
       }
-
-      let updatedStatus = prev.status;
-      let updatedPlanStatus = prev.plan_status;
-      if (event.event_type === "task_completed") {
-        updatedStatus = "completed";
-        updatedPlanStatus = "completed";
-      } else if (event.event_type === "task_failed") {
-        updatedStatus = "failed";
-        updatedPlanStatus = "failed";
-      } else if (event.event_type === "task_paused_approval") {
-        updatedStatus = "awaiting_approval";
-        updatedPlanStatus = "paused";
-      }
-
-      return {
-        ...prev,
-        status: updatedStatus,
-        plan_status: updatedPlanStatus,
-        subtasks: updatedSubtasks,
-      };
-    });
-  }, []);
+    },
+    [loadTaskDetail, loadTasks],
+  );
 
   const { isConnected } = useTaskEvents({
     taskId: selectedTaskId,
@@ -153,19 +404,235 @@ export function TaskCenterView({
     onEvent: handleLiveEvent,
   });
 
-  const handleAbort = async () => {
+  const handleAbort = async (): Promise<void> => {
     if (!selectedTaskId) return;
     setIsAborting(true);
+    setActionError(null);
     try {
       const res = await abortTask(selectedTaskId);
-      await loadTaskDetail(selectedTaskId);
+      await loadTaskDetail(selectedTaskId, true);
       setAbortResult(res);
-      await loadTasks();
+      await loadTasks("silent");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to abort task");
+      setActionError(errorText(err, "Failed to cancel the task"));
     } finally {
       setIsAborting(false);
     }
+  };
+
+  const toggleChecked = (id: string): void =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const askDelete = (ids: readonly string[]): void => {
+    setDeleteError(null);
+    setConfirmIds(ids);
+  };
+
+  const performDelete = async (): Promise<void> => {
+    if (confirmIds === null) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const gone = new Set<string>();
+      if (confirmIds.length === 1) {
+        await deleteTask(confirmIds[0] as string);
+        gone.add(confirmIds[0] as string);
+      } else {
+        const result = await deleteTasks(confirmIds);
+        result.deleted.forEach((id) => gone.add(id));
+        result.notFound.forEach((id) => gone.add(id));
+        if (result.notFinished.length > 0) {
+          setDeleteError(
+            `${result.notFinished.length} ${result.notFinished.length === 1 ? "task is" : "tasks are"} not finished. ${CANCEL_FIRST}.`,
+          );
+        }
+      }
+      const remaining = tasksRef.current.filter((t) => !gone.has(t.id));
+      setTasks(remaining);
+      setTotal((n) => Math.max(0, n - gone.size));
+      setChecked((prev) => new Set([...prev].filter((id) => !gone.has(id))));
+      if (selectedRef.current !== null && gone.has(selectedRef.current)) {
+        setSelectedTaskId(null);
+        setSelectedTaskDetail(null);
+        setView("list");
+      }
+      if (gone.size > 0) {
+        notify?.({
+          tone: "success",
+          message:
+            gone.size === 1 ? "Task deleted." : `${gone.size} tasks deleted.`,
+        });
+      }
+      if (gone.size === confirmIds.length) setConfirmIds(null);
+      else setConfirmIds(confirmIds.filter((id) => !gone.has(id)));
+    } catch (err) {
+      setDeleteError(
+        errorText(err, "The task could not be deleted. Try again."),
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const copyId = (id: string): void => {
+    try {
+      void navigator.clipboard?.writeText(id).then(() => {
+        setCopiedId(true);
+        setTimeout(() => setCopiedId(false), 2000);
+      });
+    } catch {
+      // Clipboard unavailable: the id stays selectable.
+    }
+  };
+
+  const selectTask = (id: string): void => {
+    setSelectedTaskId(id);
+    setView("detail");
+  };
+
+  const workspaceRouter = useOptionalRouter();
+  const runtimeCtx = useContext(ConversationContext);
+  const retryTasks = async (list: readonly TaskListItem[]): Promise<void> => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      for (const t of list) {
+        try {
+          const idempotencyKey = `task-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+          const sid = (t as { session_id?: string }).session_id;
+          await submitTask({
+            instruction: t.instruction,
+            title: t.title,
+            idempotency_key: idempotencyKey,
+            ...(sid ? { session_id: sid } : {}),
+          });
+        } catch {
+          setActionError("A task could not be started again. Try again.");
+        }
+      }
+      await loadTasks("silent");
+    } finally {
+      setRetrying(false);
+    }
+  };
+  const rowItems = (
+    t: TaskListItem,
+    title: string,
+    finished: boolean,
+  ): ContextMenuEntry[] => {
+    const failed = t.status.toLowerCase() === "failed";
+    const inSelection = checked.has(t.id) && checked.size > 1;
+    const items: ContextMenuEntry[] = [
+      {
+        id: "open",
+        label: "Open",
+        icon: <FolderOpen size={14} />,
+        onSelect: () => selectTask(t.id),
+      },
+    ];
+    if (!finished) {
+      items.push({
+        id: "cancel",
+        label: "Cancel",
+        icon: <OctagonX size={14} />,
+        onSelect: () =>
+          void abortTask(t.id)
+            .then(() => loadTasks("silent"))
+            .catch(() => setActionError("Failed to cancel the task")),
+      });
+    }
+    if (failed) {
+      items.push({
+        id: "retry",
+        label: "Retry",
+        icon: <RotateCcw size={14} />,
+        disabled: retrying,
+        disabledReason: retrying ? "Retrying task..." : undefined,
+        onSelect: () => void retryTasks([t]),
+      });
+    }
+    items.push(
+      { kind: "separator" },
+      {
+        id: "copy-id",
+        label: "Copy task ID",
+        icon: <Hash size={14} />,
+        onSelect: () => void copyText(t.id),
+      },
+      {
+        id: "copy-details",
+        label: "Copy details",
+        icon: <ClipboardCopy size={14} />,
+        onSelect: () =>
+          void copyText(
+            `Task: ${title}\nStatus: ${t.status}\nRequest: ${t.instruction}`,
+          ),
+      },
+      {
+        id: "artifacts",
+        label: "Open in Artifacts",
+        icon: <FileCheck size={14} />,
+        onSelect: () => workspaceRouter.push("/artifacts"),
+      },
+    );
+    const sid = (t as { session_id?: string }).session_id;
+    if (sid !== undefined && runtimeCtx !== null) {
+      items.push({
+        id: "conversation",
+        label: "Show in conversation",
+        icon: <MessagesSquare size={14} />,
+        onSelect: () => {
+          void runtimeCtx.openConversation(sid);
+          workspaceRouter.push("/");
+        },
+      });
+    }
+    if (inSelection) {
+      const failedSelected = tasks.filter(
+        (x) => checked.has(x.id) && x.status.toLowerCase() === "failed",
+      );
+      items.push(
+        { kind: "separator" },
+        {
+          id: "retry-failed",
+          label: "Retry failed",
+          icon: <RotateCcw size={14} />,
+          disabled: retrying || failedSelected.length === 0,
+          disabledReason: retrying
+            ? "Retrying tasks..."
+            : failedSelected.length === 0
+              ? "None of the selected tasks failed."
+              : undefined,
+          onSelect: () => void retryTasks(failedSelected),
+        },
+        {
+          id: "delete-selected",
+          label: `Delete ${checked.size} selected`,
+          icon: <Trash2 size={14} />,
+          danger: true,
+          onSelect: () => askDelete([...checked]),
+        },
+      );
+    } else {
+      items.push(
+        { kind: "separator" },
+        {
+          id: "delete",
+          label: "Delete",
+          icon: <Trash2 size={14} />,
+          danger: true,
+          disabled: !finished,
+          disabledReason: CANCEL_FIRST,
+          onSelect: () => askDelete([t.id]),
+        },
+      );
+    }
+    return items;
   };
 
   const filteredTasks = tasks.filter((t) => {
@@ -178,347 +645,482 @@ export function TaskCenterView({
     );
   });
 
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "completed":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-            <span>Completed</span>
-          </span>
-        );
-      case "in_progress":
-      case "executing":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.25)]">
-            <RotateCw className="w-3 h-3 text-cyan-400 animate-spin" />
-            <span>Executing</span>
-          </span>
-        );
-      case "awaiting_approval":
-      case "paused":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]">
-            <ShieldAlert className="w-3 h-3 text-amber-400" />
-            <span>Awaiting Approval</span>
-          </span>
-        );
-      case "cancelled":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 shadow-sm">
-            <Ban className="w-3 h-3 text-zinc-500" />
-            <span>Cancelled</span>
-          </span>
-        );
-      case "failed":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.25)]">
-            <AlertCircle className="w-3 h-3 text-rose-400" />
-            <span>Failed</span>
-          </span>
-        );
-      case "pending":
-      case "planning":
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 shadow-sm">
-            <Clock className="w-3 h-3 text-zinc-500" />
-            <span>Planning</span>
-          </span>
-        );
-    }
-  };
+  const detailSummary = describeTask(selectedTaskDetail);
+  const showWide = "@[69rem]:block";
 
-  return (
-    <div className="flex h-full w-full flex-col lg:flex-row overflow-hidden bg-zinc-950 text-zinc-100 min-h-0">
-      {/* Left Column: Task Master List (Glass Surface) */}
-      <div className="w-full lg:w-96 flex flex-col h-full min-h-0 overflow-hidden border-r border-white/10 bg-zinc-900/30 backdrop-blur-xl shrink-0">
-        {/* Search & Actions Bar */}
-        <div className="p-4 border-b border-white/5 flex flex-col gap-3 bg-zinc-950/40">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2 tracking-tight">
-              <div className="p-1 rounded-md bg-teal-500/10 border border-teal-500/20 text-teal-400">
-                <ListTodo className="w-3.5 h-3.5" />
-              </div>
-              <span>Task Ledger</span>
-            </h2>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={loadTasks}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
-                title="Refresh tasks"
-              >
-                <RefreshCw
-                  className={`w-3.5 h-3.5 ${loading ? "animate-spin text-teal-400" : ""}`}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsNewTaskOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-zinc-950 text-xs font-bold shadow-[0_0_15px_rgba(20,184,166,0.3)] transition-all cursor-pointer"
-              >
-                <PlusCircle className="w-3.5 h-3.5" />
-                <span>New Task</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Search box with glass styling */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-500" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search tasks, IDs, instructions…"
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-zinc-950/60 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-teal-400/60 focus:ring-1 focus:ring-teal-400/20 transition-all font-medium"
-            />
-          </div>
-
-          {/* Filter Pills with neon highlights */}
-          <div className="flex items-center gap-1 overflow-x-auto text-[11px] pt-0.5">
-            {[
-              { id: "all", label: "All" },
-              { id: "executing", label: "Running" },
-              { id: "awaiting_approval", label: "Approval" },
-              { id: "completed", label: "Done" },
-              { id: "failed", label: "Failed" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setFilterStatus(tab.id)}
-                className={`px-2.5 py-1 rounded-lg whitespace-nowrap transition-all font-medium ${
-                  filterStatus === tab.id
-                    ? "bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)] font-semibold"
-                    : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Task List Items */}
-        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-          {loading && tasks.length === 0 ? (
-            <div className="p-10 text-center text-zinc-500 text-xs flex flex-col items-center justify-center gap-2">
-              <Loader2 className="w-5 h-5 animate-spin text-teal-400" />
-              <span>Loading ledger tasks…</span>
-            </div>
-          ) : filteredTasks.length === 0 ? (
-            <div className="p-10 text-center text-zinc-500 text-xs">
-              No tasks found.
-            </div>
-          ) : (
-            filteredTasks.map((t) => {
-              const isSelected = t.id === selectedTaskId;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setSelectedTaskId(t.id)}
-                  className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer relative overflow-hidden ${
-                    isSelected
-                      ? "border-teal-400/60 bg-gradient-to-r from-teal-950/40 via-zinc-900/80 to-zinc-900/80 shadow-[0_0_20px_rgba(20,184,166,0.15)] ring-1 ring-teal-400/30"
-                      : "border-white/5 bg-zinc-900/30 hover:bg-zinc-900/60 hover:border-white/10"
-                  }`}
-                >
-                  {/* Subtle top edge glow */}
-                  {isSelected && (
-                    <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-400/60 to-transparent" />
-                  )}
-
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-xs font-bold text-zinc-200 line-clamp-1 tracking-tight">
-                      {t.title || "Autonomous Task"}
-                    </span>
-                    {getStatusBadge(t.status)}
-                  </div>
-                  <p className="text-xs text-zinc-400 line-clamp-2 mt-1.5 leading-relaxed font-mono">
-                    {t.instruction}
-                  </p>
-                  <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 mt-2.5 pt-2 border-t border-white/5">
-                    <span className="flex items-center gap-1 text-teal-300 font-semibold">
-                      <DollarSign className="w-3 h-3 text-teal-400" />
-                      <span>{Number(t.spent_usd).toFixed(2)} USD</span>
-                    </span>
-                    <span>{new Date(t.created_at).toLocaleTimeString()}</span>
-                  </div>
-                </button>
-              );
-            })
-          )}
+  /* ------------------------------------------------------------------ list */
+  const listHeader = (
+    <div className="flex min-w-0 flex-col gap-3 py-1">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <h2 className="m-0 flex min-w-0 items-center gap-2 text-maya-heading font-medium">
+          <ListTodo
+            aria-hidden="true"
+            size={20}
+            className="shrink-0 text-maya-muted"
+          />
+          <span className="min-w-0">Tasks</span>
+        </h2>
+        <div className="flex shrink-0 items-center gap-1">
+          <IconButton
+            size="sm"
+            label={refreshing || loading ? "Refreshing tasks" : "Refresh tasks"}
+            icon={<RefreshCw size={14} />}
+            onClick={() => void loadTasks("reset")}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            leftIcon={<PlusCircle size={14} />}
+            onClick={() => setIsNewTaskOpen(true)}
+          >
+            New Task
+          </Button>
         </div>
       </div>
+      <div className="relative min-w-0">
+        <Search
+          aria-hidden="true"
+          size={14}
+          className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-maya-muted"
+        />
+        <input
+          type="search"
+          aria-label="Search loaded tasks"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search tasks, IDs, instructions"
+          dir="auto"
+          className="w-full min-w-0 rounded-maya-md border border-maya-control-border bg-maya-pane py-2 pr-3 pl-9 text-maya-small text-maya-text placeholder:text-maya-muted hover:border-maya-border-strong focus:border-maya-focus"
+        />
+      </div>
+      <div
+        role="group"
+        aria-label="Filter by status"
+        className="flex min-w-0 flex-wrap gap-1"
+      >
+        {FILTERS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            aria-pressed={filterStatus === tab.id}
+            onClick={() => setFilterStatus(tab.id)}
+            className={`min-h-8 border px-3 text-maya-caption pointer-coarse:min-h-11 ${
+              filterStatus === tab.id
+                ? "border-maya-accent bg-maya-accent-soft font-medium text-maya-text"
+                : "border-maya-border text-maya-secondary hover:bg-maya-hover"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
-      {/* Right Column: Detailed Task View & Interactive DAG */}
-      <div className="flex-1 flex flex-col h-full min-h-0 overflow-y-auto bg-zinc-950 p-6 overscroll-contain">
-        {detailLoading ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 text-xs gap-3">
-            <Loader2 className="w-6 h-6 animate-spin text-teal-400" />
-            <span className="font-medium">Loading task execution details…</span>
-          </div>
-        ) : selectedTaskDetail ? (
-          <div className="max-w-5xl flex flex-col gap-6 mx-auto w-full">
-            {error && (
-              <div className="p-4 rounded-xl border border-rose-500/40 bg-rose-950/50 text-rose-200 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                <span>{error}</span>
-              </div>
-            )}
+  const listFooter = (
+    <div className="flex min-w-0 flex-col gap-2 text-maya-caption text-maya-muted">
+      <SelectionBar
+        count={checked.size}
+        noun="tasks"
+        onClear={() => setChecked(new Set())}
+        onDelete={() => askDelete([...checked])}
+      />
+      {refreshError && tasks.length > 0 && (
+        <p role="status" className="m-0 text-maya-warning">
+          Could not refresh. This list may be out of date.
+        </p>
+      )}
+      {listError === null && !loading && (
+        <p className="m-0" data-testid="task-count">
+          {total > tasks.length
+            ? `Showing ${tasks.length} of ${total} tasks`
+            : `${total} ${total === 1 ? "task" : "tasks"}`}
+          {searchQuery !== "" && " (search covers loaded tasks only)"}
+        </p>
+      )}
+      {total > tasks.length && listError === null && (
+        <Button
+          size="sm"
+          loading={loadingMore}
+          onClick={() => void loadTasks("more")}
+        >
+          Load more
+        </Button>
+      )}
+    </div>
+  );
 
-            {/* Task Header & Actions (Glass Surface) */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-2xl border border-white/10 bg-zinc-900/40 backdrop-blur-xl shadow-xl">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-zinc-100 tracking-tight">
-                    {selectedTaskDetail.title || "Autonomous Task"}
-                  </h2>
-                  {getStatusBadge(selectedTaskDetail.status)}
-                  {isConnected && (
-                    <span
-                      title="Live SSE connected"
-                      className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full"
-                    >
-                      <Radio className="w-2.5 h-2.5 animate-pulse text-emerald-400" />
-                      <span>Live Stream</span>
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-zinc-400">
-                  <span className="px-2 py-0.5 rounded-md bg-zinc-800/80 border border-white/5">
-                    ID: {selectedTaskDetail.id.slice(0, 13)}…
-                  </span>
-                  <span>•</span>
-                  <span>
-                    Created:{" "}
-                    {new Date(selectedTaskDetail.created_at).toLocaleString()}
-                  </span>
-                  <span>•</span>
-                  <span className="text-teal-300 font-semibold flex items-center gap-1">
-                    <DollarSign className="w-3.5 h-3.5 text-teal-400" />
-                    Budget: $
-                    {Number(selectedTaskDetail.budget_usd || 0).toFixed(2)} USD
-                  </span>
-                  <span>•</span>
-                  <span className="text-zinc-300 font-semibold">
-                    Spent: $
-                    {Number(selectedTaskDetail.spent_usd || 0).toFixed(4)} USD
-                  </span>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2.5">
-                {selectedTaskDetail.status === "awaiting_approval" && (
-                  <Link
-                    href={`/approvals?task_id=${selectedTaskDetail.id}`}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold text-xs transition-all shadow-[0_0_15px_rgba(245,158,11,0.3)] cursor-pointer"
+  let listBody: React.ReactNode;
+  if (loading && tasks.length === 0) {
+    listBody = (
+      <div className="grid gap-2 p-2" aria-busy="true">
+        <p className="m-0 px-1 text-maya-small text-maya-muted">
+          Loading tasks
+        </p>
+        {[0, 1, 2].map((n) => (
+          <Skeleton
+            key={n}
+            lines={3}
+            className="rounded-maya-lg border border-maya-border p-3"
+          />
+        ))}
+      </div>
+    );
+  } else if (listError !== null) {
+    listBody = (
+      <div className="p-2">
+        <ErrorState
+          title="Tasks could not be loaded"
+          message={listError}
+          onRetry={() => void loadTasks("reset")}
+        />
+      </div>
+    );
+  } else if (filteredTasks.length === 0) {
+    listBody = (
+      <div className="p-2">
+        <EmptyState
+          title={
+            searchQuery !== "" ? "No loaded task matches" : "No tasks found."
+          }
+          description={
+            searchQuery !== ""
+              ? "Try a different search, or load more tasks."
+              : "Tasks you start appear here."
+          }
+          action={
+            <Button size="sm" onClick={() => setIsNewTaskOpen(true)}>
+              New Task
+            </Button>
+          }
+        />
+      </div>
+    );
+  } else {
+    listBody = (
+      <ul className="m-0 flex list-none flex-col gap-2 p-2">
+        {filteredTasks.map((t) => {
+          const isSelected = t.id === selectedTaskId;
+          const failed = t.status.toLowerCase() === "failed";
+          const title = t.title || "Untitled task";
+          const finished = isTerminalPhase(phaseOfStatus(t.status));
+          return (
+            <TaskRowShell
+              key={t.id}
+              label={title}
+              getItems={() => rowItems(t, title, finished)}
+            >
+              <input
+                type="checkbox"
+                className="mt-4 size-4 shrink-0"
+                aria-label={`Select ${title}`}
+                checked={checked.has(t.id)}
+                disabled={!finished}
+                title={finished ? undefined : CANCEL_FIRST}
+                onChange={() => toggleChecked(t.id)}
+              />
+              <button
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => selectTask(t.id)}
+                className={`flex min-w-0 flex-1 flex-col gap-1.5 border p-3 text-left motion-interactive ${
+                  isSelected
+                    ? "border-maya-accent bg-maya-accent-soft"
+                    : "border-maya-border bg-maya-raised hover:bg-maya-hover"
+                } ${failed ? "border-l-4 border-l-maya-danger" : ""}`}
+              >
+                <span className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                  <Truncate
+                    lines={2}
+                    title={title}
+                    dir="auto"
+                    className="min-w-0 flex-1 basis-32 text-maya-small font-medium text-maya-text"
                   >
-                    <ShieldAlert className="w-4 h-4" />
-                    <span>Review Approval</span>
-                  </Link>
-                )}
+                    {title}
+                  </Truncate>
+                  <TaskStatusBadge
+                    status={t.status}
+                    partial={t.partial === true}
+                  />
+                </span>
+                <Truncate
+                  lines={2}
+                  title={t.instruction}
+                  dir="auto"
+                  className="text-maya-caption text-maya-secondary"
+                >
+                  {t.instruction}
+                </Truncate>
+                <span className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 text-maya-caption text-maya-muted">
+                  <span>{when(t.created_at)}</span>
+                  <span className="maya-tabular">
+                    {formatCost(t.spent_usd)}
+                  </span>
+                </span>
+              </button>
+              {finished && (
+                <IconButton
+                  size="sm"
+                  label={`Delete ${title}`}
+                  icon={<Trash2 size={14} />}
+                  onClick={() => askDelete([t.id])}
+                />
+              )}
+            </TaskRowShell>
+          );
+        })}
+      </ul>
+    );
+  }
 
-                {selectedTaskDetail.status !== "completed" &&
-                  selectedTaskDetail.status !== "cancelled" &&
-                  selectedTaskDetail.status !== "failed" && (
-                    <button
-                      type="button"
-                      onClick={handleAbort}
-                      disabled={isAborting}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-rose-500/40 bg-rose-950/40 hover:bg-rose-900/60 text-rose-200 font-semibold text-xs transition-all shadow-[0_0_12px_rgba(244,63,94,0.15)] disabled:opacity-50 cursor-pointer"
-                    >
-                      {isAborting ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-rose-400" />
-                      ) : (
-                        <Ban className="w-4 h-4 text-rose-400" />
-                      )}
-                      <span>Abort Task & Sagas</span>
-                    </button>
-                  )}
-              </div>
-            </div>
-
-            {/* Saga Compensation Report Alert if aborted */}
-            {abortResult && (
-              <div className="p-5 rounded-2xl border border-rose-500/40 bg-rose-950/40 backdrop-blur-xl text-rose-100 flex flex-col gap-2.5 shadow-xl">
-                <div className="flex items-center gap-2 font-bold text-sm text-rose-200">
-                  <AlertCircle className="w-4 h-4 text-rose-400" />
-                  <span>Saga Compensation Rollback Executed</span>
-                </div>
-                <div className="text-xs font-mono grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-zinc-950/60 border border-white/5">
-                  <div>
-                    <span className="text-zinc-500 block">Triggered:</span>
-                    <span className="text-rose-300 font-bold">
-                      {abortResult.compensations_triggered} compensations
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block">
-                      Executed Rollbacks:
-                    </span>
-                    <span className="text-emerald-300 font-bold">
-                      {abortResult.executed} successful
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block">Failed:</span>
-                    <span className="text-rose-300 font-bold">
-                      {abortResult.failed} failed
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Original Instruction Glass Card */}
-            <div className="p-5 rounded-2xl border border-white/10 bg-zinc-900/30 backdrop-blur-xl flex flex-col gap-2 shadow-lg">
-              <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-teal-400" />
-                <span>Original Natural Language Instruction</span>
-              </span>
-              <p className="text-xs text-zinc-200 leading-relaxed font-mono whitespace-pre-wrap">
-                {selectedTaskDetail.instruction}
-              </p>
-            </div>
-
-            {/* Interactive DAG Visualizer */}
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 tracking-tight">
-                <Layers className="w-4 h-4 text-teal-400" />
-                <span>Orchestrator LangGraph DAG Plan</span>
-              </h3>
-              <DagVisualizer subtasks={selectedTaskDetail.subtasks} />
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 text-center">
-            <div className="p-4 rounded-2xl bg-zinc-900/40 border border-white/5 shadow-inner mb-3">
-              <Bot className="w-12 h-12 text-teal-400 opacity-60" />
-            </div>
-            <p className="text-base font-bold text-zinc-200">
-              Select a Task from the Ledger
-            </p>
-            <p className="text-xs max-w-sm mt-1.5 text-zinc-400 leading-relaxed">
-              Select an execution task on the left or create a new task to view
-              the real-time DAG graph and subtask verification proofs.
-            </p>
-          </div>
+  /* ---------------------------------------------------------------- detail */
+  let detailBody: React.ReactNode;
+  if (detailLoading) {
+    detailBody = (
+      <div className="grid gap-3 p-4" aria-busy="true">
+        <p className="m-0 text-maya-small text-maya-muted">
+          Loading task details
+        </p>
+        <Skeleton lines={4} />
+      </div>
+    );
+  } else if (detailError !== null) {
+    detailBody = (
+      <div className="p-4">
+        <ErrorState
+          title="The task could not be loaded"
+          message={detailError}
+          onRetry={() => selectedTaskId && void loadTaskDetail(selectedTaskId)}
+        />
+      </div>
+    );
+  } else if (selectedTaskDetail) {
+    const d = selectedTaskDetail;
+    const terminal = isTerminalPhase(detailSummary.phase);
+    detailBody = (
+      <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 p-4">
+        {actionError && (
+          <Notice tone="danger" onDismiss={() => setActionError(null)}>
+            {actionError}
+          </Notice>
         )}
+
+        <section
+          aria-label="Task summary"
+          className="flex min-w-0 flex-col gap-3 rounded-maya-lg border border-maya-border bg-maya-raised p-4"
+        >
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2">
+            <h2
+              dir="auto"
+              className="m-0 min-w-0 flex-1 basis-60 text-maya-title font-medium [overflow-wrap:anywhere]"
+            >
+              {d.title || "Untitled task"}
+            </h2>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <TaskStatusBadge
+                phase={detailSummary.phase}
+                label={detailSummary.label}
+                partial={detailSummary.partial}
+              />
+              {isConnected && (
+                <Badge
+                  tone="success"
+                  icon={Radio}
+                  title="Live updates connected"
+                >
+                  Live
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          <dl className="m-0 grid min-w-0 grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-x-4 gap-y-2 text-maya-small">
+            <div className="min-w-0">
+              <dt className="maya-label">Created</dt>
+              <dd className="m-0">{when(d.created_at)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="maya-label">Budget cap</dt>
+              <dd className="maya-tabular m-0">
+                ${Number(d.budget_usd || 0).toFixed(2)}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="maya-label">Cost</dt>
+              <dd className="maya-tabular m-0">{formatCost(d.spent_usd)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="maya-label">Task id</dt>
+              <dd className="m-0 flex min-w-0 items-center gap-1">
+                <WrapText
+                  as="code"
+                  className="min-w-0 font-mono text-maya-mono"
+                >
+                  {d.id}
+                </WrapText>
+                <IconButton
+                  size="sm"
+                  label={copiedId ? "Task id copied" : "Copy task id"}
+                  icon={copiedId ? <Check size={14} /> : <Copy size={14} />}
+                  onClick={() => copyId(d.id)}
+                />
+              </dd>
+            </div>
+          </dl>
+
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {!terminal && (
+              <Button
+                variant="danger"
+                loading={isAborting}
+                leftIcon={<XCircle size={16} />}
+                onClick={() => void handleAbort()}
+              >
+                Cancel task
+              </Button>
+            )}
+            {terminal && (
+              <Button
+                variant="secondary"
+                leftIcon={<Trash2 size={16} />}
+                onClick={() => askDelete([d.id])}
+              >
+                Delete task
+              </Button>
+            )}
+          </div>
+        </section>
+
+        {detailSummary.phase === "awaiting_approval" &&
+          pendingTaskInput(d) !== null && (
+            <TaskInputCard
+              taskId={d.id}
+              pending={pendingTaskInput(d) as PendingTaskInput}
+              onAnswered={() => {
+                void loadTaskDetail(d.id, true);
+                void loadTasks("silent");
+              }}
+            />
+          )}
+
+        {detailSummary.phase === "awaiting_approval" &&
+          pendingTaskInput(d) === null && (
+            <TaskApprovals
+              taskId={d.id}
+              waiting
+              refreshKey={d}
+              onDecided={() => {
+                void loadTaskDetail(d.id, true);
+                void loadTasks("silent");
+                onApprovalDecided?.();
+              }}
+            />
+          )}
+
+        {detailSummary.phase === "failed" && (
+          <FailureReason error={failureTextOf(d)} />
+        )}
+
+        {abortResult && (
+          <Notice tone="warning" title="Cleanup after cancelling">
+            <p className="m-0">
+              {abortResult.compensations_triggered} cleanup actions started,{" "}
+              {abortResult.executed} finished, {abortResult.failed} failed.
+            </p>
+          </Notice>
+        )}
+
+        <TaskResultSection task={d} finished={terminal} />
+
+        <section aria-label="Instruction" className="min-w-0">
+          <h3 className="maya-label m-0 mb-1">Instruction</h3>
+          <ExpandableText text={d.instruction} />
+        </section>
+
+        <section aria-label="Plan" className="flex min-w-0 flex-col gap-2">
+          <details open className="min-w-0">
+            <summary className="maya-label mb-2 cursor-pointer">
+              Technical details: steps and proofs
+            </summary>
+            <DagVisualizer subtasks={d.subtasks} />
+          </details>
+        </section>
+      </div>
+    );
+  } else {
+    detailBody = (
+      <div className="p-4">
+        <EmptyState
+          title="Select a task"
+          description="Pick a task from the list, or start a new one, to see its plan and result."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="@container h-full min-h-0 w-full min-w-0 bg-maya-bg text-maya-text">
+      <div className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[minmax(0,1fr)] @[69rem]:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
+        <div
+          className={`min-h-0 min-w-0 ${view === "detail" ? `hidden ${showWide}` : "block"}`}
+        >
+          <Pane
+            aria-label="Task list"
+            header={listHeader}
+            footer={listFooter}
+            bodyLabel="Task list"
+          >
+            {listBody}
+          </Pane>
+        </div>
+        <div
+          className={`min-h-0 min-w-0 ${view === "list" ? `hidden ${showWide}` : "block"}`}
+        >
+          <Pane aria-label="Task details" bodyLabel="Task details">
+            <div className="p-2 @[69rem]:hidden">
+              <Button
+                size="sm"
+                variant="ghost"
+                leftIcon={<ArrowLeft size={14} />}
+                onClick={() => setView("list")}
+              >
+                Back to tasks
+              </Button>
+            </div>
+            {detailBody}
+          </Pane>
+        </div>
       </div>
 
       <NewTaskModal
         isOpen={isNewTaskOpen}
         onClose={() => setIsNewTaskOpen(false)}
         onTaskCreated={(task) => {
-          loadTasks();
+          void loadTasks("reset");
           setSelectedTaskId(task.task_id);
+          setView("detail");
         }}
       />
+      {confirmIds !== null && (
+        <ConfirmDeleteDialog
+          title={
+            confirmIds.length === 1
+              ? "Delete this task?"
+              : `Delete ${confirmIds.length} tasks?`
+          }
+          removes={TASK_DELETE_REMOVES}
+          keeps={TASK_DELETE_KEEPS}
+          confirmLabel={
+            confirmIds.length === 1
+              ? "Delete task"
+              : `Delete ${confirmIds.length} tasks`
+          }
+          busy={deleting}
+          error={deleteError}
+          onClose={() => setConfirmIds(null)}
+          onConfirm={() => void performDelete()}
+        />
+      )}
     </div>
   );
 }

@@ -105,7 +105,7 @@ This plan implements the comprehensive engineering remediation of Maya AI's Phas
 - [ ] In `apps/web/src/lib/approvals-client.ts`:
   - Update status types to support `pending`, `approved`, `rejected`, `expired`, `revoked`, `claimed`, `executing`, `completed`, `failed`.
   - Add `revokeApproval(id)` client method.
-- [ ] In `apps/web/src/components/approvals/ApprovalCenterModal.tsx`:
+- [ ] In ApprovalCenterModal (removed; approvals are now inline on the task card):
   - Display full status badges with appropriate visual semantics.
   - Add Revoke button for pending and approved requests.
   - Show execution output or failure reason when available.

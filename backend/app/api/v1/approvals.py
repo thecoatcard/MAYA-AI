@@ -1,4 +1,4 @@
-"""Approval Center API endpoints (Decision D4, Decision D5)."""
+"""Approval API endpoints (Decision D4, Decision D5)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.auth.dependencies import TenantDatabase, get_principal, get_tenant_database
 from app.auth.models import Principal
@@ -22,8 +23,51 @@ from app.schemas.approvals import (
     ApprovalDecisionResponse,
     ApprovalRequestOut,
 )
+from app.services.approval_effects import fail_subtask_after_rejection
+from app.services.audit_service import AuditWriteError, record_audit
+from app.tasks.queue import SubtaskJob, SubtaskQueue
 
 router = APIRouter(prefix="/api/v1/approvals", tags=["approvals"])
+
+
+def _require_settings(request: Request) -> Settings:
+    """Return the application settings or fail closed; never fall back to a fixed key."""
+    configured: Settings | None = getattr(request.app.state, "settings", None)
+    if configured is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "server_misconfigured", "message": "Signing keys are not configured."},
+        )
+    return configured
+
+
+async def _audit_decision(
+    conn: AsyncConnection,
+    principal: Principal,
+    record: ApprovalRecord,
+    *,
+    action: str,
+    status_value: str,
+) -> None:
+    """Record the decision in the audit chain; fail closed (503, decision rolled back)."""
+    try:
+        async with AsyncSession(bind=conn, expire_on_commit=False) as audit_session:
+            await record_audit(
+                audit_session,
+                workspace_id=principal.workspace_id,
+                user_ref=str(principal.user_id),
+                status=status_value,
+                action=action,
+                task_id=record.task_id,
+                subtask_id=record.subtask_id,
+                approval_id=record.id,
+                input={"tool": record.tool_name, "tier": record.tier},
+            )
+    except AuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "audit_unavailable"},
+        ) from exc
 
 
 def _derive_user_totp_secret(otp_hmac_key: str, user_id: UUID) -> bytes:
@@ -51,6 +95,7 @@ def _to_schema(record: ApprovalRecord) -> ApprovalRequestOut:
         decided_at=record.decided_at,
         consumed_at=record.consumed_at,
         decision_channel=record.decision_channel,
+        auto_approved=record.decision_channel == "api",
         claimed_by=record.claimed_by,
         claimed_at=record.claimed_at,
         started_at=record.started_at,
@@ -106,6 +151,20 @@ async def decide_approval(
     """Approve or deny an approval request. Voice channel is explicitly barred from approving."""
     # 1. Enforce Channel Isolation: Voice channel cannot grant approval
     if decision.action == "approve" and x_maya_channel and x_maya_channel.lower() == "voice":
+        try:
+            async with database.transaction() as audit_conn:
+                async with AsyncSession(bind=audit_conn, expire_on_commit=False) as audit_session:
+                    await record_audit(
+                        audit_session,
+                        workspace_id=principal.workspace_id,
+                        user_ref=str(principal.user_id),
+                        status="denied",
+                        action="approval.denied",
+                        approval_id=request_id,
+                        input={"channel": "voice"},
+                    )
+        except AuditWriteError:
+            pass  # the request is denied either way
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -115,6 +174,8 @@ async def decide_approval(
         )
 
     now = datetime.now(UTC)
+    resume_job: SubtaskJob | None = None
+    response_body: ApprovalDecisionResponse
 
     async with database.transaction() as conn:
         repo = ApprovalRepository(conn, principal.workspace_id, principal.user_id)
@@ -146,6 +207,16 @@ async def decide_approval(
                 reason=decision.rejection_reason,
                 now=now,
             )
+            await _audit_decision(
+                conn, principal, record, action="approval.rejected", status_value="rejected"
+            )
+            if record.subtask_id is not None:
+                await fail_subtask_after_rejection(
+                    conn,
+                    workspace_id=principal.workspace_id,
+                    subtask_id=record.subtask_id,
+                    reason=decision.rejection_reason,
+                )
             return ApprovalDecisionResponse(id=request_id, status="denied")
 
         if decision.action == "revoke":
@@ -153,12 +224,13 @@ async def decide_approval(
                 request_id,
                 reason=decision.rejection_reason or "Revoked by user",
             )
+            await _audit_decision(
+                conn, principal, record, action="approval.revoked", status_value="aborted"
+            )
             return ApprovalDecisionResponse(id=request_id, status="revoked")
 
         # 3. Approval branch
-        conn_settings: Settings | None = getattr(request.app.state, "settings", None) or (
-            conn.info.get("settings") if hasattr(conn, "info") else None
-        )
+        conn_settings = _require_settings(request)
 
         # 3a. Step-Up Authentication for RESTRICTED tier
         if record.tier == "RESTRICTED":
@@ -174,7 +246,7 @@ async def decide_approval(
                     },
                 )
 
-            otp_key = conn_settings.otp_hmac_key.get_secret_value() if conn_settings else "1" * 32
+            otp_key = conn_settings.otp_hmac_key.get_secret_value()
             user_totp_secret = _derive_user_totp_secret(otp_key, principal.user_id)
             try:
                 valid = verify_totp_hardened(
@@ -208,7 +280,7 @@ async def decide_approval(
                 ) from exc
 
         # 3b. Mint cryptographically signed single-use JWT approval token
-        jwt_key = conn_settings.jwt_signing_key.get_secret_value() if conn_settings else "0" * 32
+        jwt_key = conn_settings.jwt_signing_key.get_secret_value()
 
         approval_token, token_jti = mint_approval_token(
             jwt_key,
@@ -227,6 +299,10 @@ async def decide_approval(
             token_jti=token_jti,
             channel="web",
             now=now,
+        )
+
+        await _audit_decision(
+            conn, principal, record, action="approval.approved", status_value="success"
         )
 
         # 3c. If associated with a subtask, update input_data with approval_token and resume
@@ -252,26 +328,25 @@ async def decide_approval(
             )
             sub_row = sub_res.first()
             if sub_row is not None:
-                resources = getattr(request.app.state, "resources", None)
-                if (
-                    resources is not None
-                    and hasattr(resources, "subtask_queue")
-                    and resources.subtask_queue is not None
-                ):
-                    from app.tasks.queue import SubtaskJob
+                resume_job = SubtaskJob(
+                    workspace_id=principal.workspace_id,
+                    user_id=principal.user_id,
+                    task_id=sub_row.task_id,
+                    subtask_id=record.subtask_id,
+                    assigned_agent=str(sub_row.assigned_agent),
+                )
 
-                    requeued_job = SubtaskJob(
-                        workspace_id=principal.workspace_id,
-                        user_id=principal.user_id,
-                        task_id=sub_row.task_id,
-                        subtask_id=record.subtask_id,
-                        assigned_agent=str(sub_row.assigned_agent),
-                    )
-                    await resources.subtask_queue.enqueue(requeued_job)
-
-        return ApprovalDecisionResponse(
+        response_body = ApprovalDecisionResponse(
             id=request_id,
             status="approved",
             approval_token=approval_token,
             expires_at=expires_at,
         )
+
+    # Enqueue only after the approval and the subtask reset have committed.
+    if resume_job is not None:
+        resources = getattr(request.app.state, "resources", None)
+        queue = getattr(resources, "subtask_queue", None)
+        if isinstance(queue, SubtaskQueue):
+            await queue.enqueue(resume_job)
+    return response_body

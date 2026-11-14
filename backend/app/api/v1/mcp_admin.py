@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/mcp", tags=["mcp"])
 
+_TRANSPORT_ALIASES = {"http": "streamable_http"}
+
+
+def normalize_transport(value: str) -> str:
+    """Map the UI alias to the stored value; unknown values are a clean 422."""
+    transport = _TRANSPORT_ALIASES.get(value, value)
+    if transport not in ("stdio", "streamable_http"):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "validation_error", "fields": ["transport"]},
+        )
+    return transport
+
 
 @router.get("/servers", response_model=list[McpServerOut])
 async def list_mcp_servers(
@@ -53,7 +66,7 @@ async def register_mcp_server(
             workspace_id=principal.workspace_id,
             user_id=principal.user_id,
             name=payload.name,
-            transport=payload.transport,
+            transport=normalize_transport(payload.transport),
             command=payload.command,
             args=payload.args,
             url=payload.url,

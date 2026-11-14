@@ -7,21 +7,15 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from starlette.responses import StreamingResponse
 
-from app.agents.planner import DAGPlanner
-from app.agents.state import SubTask
 from app.auth.dependencies import TenantDatabase, get_principal, get_tenant_database
 from app.auth.models import Principal
 from app.db.models import (
-    PlanStatus,
-    Subtask,
-    SubtaskAgent,
-    SubtaskStatus,
     Task,
 )
 from app.db.tenant import tenant_session
@@ -29,21 +23,27 @@ from app.gateway.model_gateway import ModelGateway
 from app.schemas.tasks import (
     SubtaskResponse,
     TaskAbortResponse,
+    TaskBulkDeleteRequest,
+    TaskBulkDeleteResponse,
     TaskCreateRequest,
     TaskDetailResponse,
+    TaskInputRequest,
+    TaskInputResponse,
     TaskListItem,
     TaskListResponse,
     TaskSubmissionResponse,
 )
-from app.services.projection_service import resolve_subtask_uuid
+from app.services.artifact_service import ArtifactService
+from app.services.audit_service import AuditWriteError, record_audit
+from app.services.task_deletion import delete_tasks, not_deleted
+from app.services.task_submission import TaskRefusal, TaskSubmissionService
 from app.tasks.events import (
     TaskEventPublisher,
     TaskEventType,
     get_event_channel,
 )
-from app.tasks.idempotency import TaskIdempotencyService
 from app.tasks.outbox import write_outbox_event
-from app.tasks.queue import SubtaskJob, SubtaskQueue
+from app.tasks.queue import SubtaskQueue
 from app.tasks.saga import SagaManager
 
 logger = logging.getLogger(__name__)
@@ -113,127 +113,34 @@ async def submit_task(
             ),
         )
 
-    async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
-        task, is_new = await TaskIdempotencyService.get_or_create_task(
-            session=session,
-            workspace_id=principal.workspace_id,
-            user_id=principal.user_id,
-            idempotency_key=idempotency_key,
-            user_instruction=payload.instruction,
-            title=payload.title,
-            budget_usd=payload.budget_usd,
-            session_id=str(payload.session_id) if payload.session_id else None,
+    submission = await TaskSubmissionService(
+        engine=db.engine, gateway=model_gateway, queue=queue
+    ).submit(
+        workspace_id=principal.workspace_id,
+        user_id=principal.user_id,
+        idempotency_key=idempotency_key,
+        instruction=payload.instruction,
+        title=payload.title,
+        session_id=payload.session_id,
+        budget_usd=payload.budget_usd,
+        source="api",
+        input_files=payload.input_files,
+    )
+    if isinstance(submission, TaskRefusal):
+        # Nothing was created: say plainly what cannot be done and what to connect.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=submission.as_result(),
         )
-
-        if not is_new:
-            response.status_code = status.HTTP_200_OK
-            return TaskSubmissionResponse(
-                task_id=task.id,
-                status=task.status or "pending",
-                idempotency_key=idempotency_key,
-                created_at=task.created_at,
-                is_new=False,
-            )
-
-        # Generate DAG plan for new task
-        subtask_nodes: list[Any] = []
-        if model_gateway is not None:
-            planner = DAGPlanner(gateway=model_gateway)
-            try:
-                _intent, subtask_nodes = await planner.plan(
-                    instruction=payload.instruction,
-                    workspace_id=principal.workspace_id,
-                    task_id=task.id,
-                )
-            except Exception as exc:
-                logger.warning("Model planner failed, using root subtask fallback: %s", exc)
-                subtask_nodes = [
-                    SubTask(
-                        id="step_1",
-                        assigned_agent="research",
-                        description=payload.instruction,
-                        dependencies=[],
-                        status="pending",
-                        input_data={},
-                    )
-                ]
-        else:
-            subtask_nodes = [
-                SubTask(
-                    id="step_1",
-                    assigned_agent="research",
-                    description=payload.instruction,
-                    dependencies=[],
-                    status="pending",
-                    input_data={},
-                )
-            ]
-
-        # Project initial agent execution state to relational tables
-        subtask_dicts = [node.model_dump() for node in subtask_nodes]
-        task.active_plan = subtask_dicts
-        task.status = "executing"
-        task.plan_status = PlanStatus.EXECUTING
-
-        ready_subtasks: list[tuple[UUID, str]] = []
-        for node in subtask_nodes:
-            agent_str = str(getattr(node.assigned_agent, "value", node.assigned_agent))
-            agent_enum = (
-                SubtaskAgent(agent_str)
-                if agent_str in SubtaskAgent._value2member_map_
-                else SubtaskAgent.RESEARCH
-            )
-            st_uuid = resolve_subtask_uuid(task.id, str(node.id))
-            dep_uuids = [str(resolve_subtask_uuid(task.id, str(dep))) for dep in node.dependencies]
-            st = Subtask(
-                id=st_uuid,
-                task_id=task.id,
-                workspace_id=principal.workspace_id,
-                assigned_agent=agent_enum,
-                description=node.description,
-                dependencies=dep_uuids,
-                status=SubtaskStatus.PENDING,
-                input_data=node.input_data,
-            )
-            session.add(st)
-            if not node.dependencies:
-                ready_subtasks.append((st_uuid, agent_str))
-
-        task.execution_trace = [{"action": "plan_generated", "subtask_count": len(subtask_nodes)}]
-
-        # Write outbox event atomically
-        await write_outbox_event(
-            session=session,
-            workspace_id=principal.workspace_id,
-            task_id=task.id,
-            event_type=TaskEventType.TASK_PLAN_CREATED,
-            payload={
-                "task_id": str(task.id),
-                "instruction": payload.instruction,
-                "subtasks_count": len(subtask_nodes),
-            },
-        )
-
-        # Enqueue ready root subtasks to execution queue if available
-        if queue is not None:
-            for ready_id, agent_name in ready_subtasks:
-                await queue.enqueue(
-                    SubtaskJob(
-                        workspace_id=principal.workspace_id,
-                        user_id=principal.user_id,
-                        task_id=task.id,
-                        subtask_id=ready_id,
-                        assigned_agent=agent_name,
-                    )
-                )
-
-        return TaskSubmissionResponse(
-            task_id=task.id,
-            status="executing",
-            idempotency_key=idempotency_key,
-            created_at=task.created_at,
-            is_new=True,
-        )
+    if not submission.is_new:
+        response.status_code = status.HTTP_200_OK
+    return TaskSubmissionResponse(
+        task_id=submission.task_id,
+        status=submission.status,
+        idempotency_key=idempotency_key,
+        created_at=submission.created_at,
+        is_new=submission.is_new,
+    )
 
 
 @router.get(
@@ -252,7 +159,7 @@ async def list_tasks(
     from sqlalchemy import desc, func, select
 
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
-        query = select(Task).where(Task.workspace_id == principal.workspace_id)
+        query = select(Task).where(Task.workspace_id == principal.workspace_id, not_deleted())
         if task_status is not None:
             query = query.where((Task.status == task_status) | (Task.plan_status == task_status))
 
@@ -277,6 +184,7 @@ async def list_tasks(
                 created_at=t.created_at,
                 completed_at=t.completed_at,
                 subtask_count=len(t.active_plan) if t.active_plan else 0,
+                partial=bool((t.shared_context or {}).get("partial")),
             )
             for t in tasks
         ]
@@ -306,7 +214,7 @@ async def get_task(
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
         stmt = (
             select(Task)
-            .where(Task.id == task_id, Task.workspace_id == principal.workspace_id)
+            .where(Task.id == task_id, Task.workspace_id == principal.workspace_id, not_deleted())
             .options(selectinload(Task.subtasks))
         )
         res = await session.execute(stmt)
@@ -355,6 +263,11 @@ async def get_task(
             completed_at=task.completed_at,
             active_plan=task.active_plan or [],
             subtasks=subtask_responses,
+            warnings=[str(w) for w in (task.shared_context or {}).get("warnings") or []],
+            recovered=list((task.shared_context or {}).get("healing") or []),
+            error=((task.shared_context or {}).get("failure") or {}).get("message"),
+            partial=bool((task.shared_context or {}).get("partial")),
+            failed_steps=list((task.shared_context or {}).get("failed_steps") or []),
         )
 
 
@@ -374,7 +287,7 @@ async def abort_task(
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
         stmt = (
             select(Task)
-            .where(Task.id == task_id, Task.workspace_id == principal.workspace_id)
+            .where(Task.id == task_id, Task.workspace_id == principal.workspace_id, not_deleted())
             .limit(1)
         )
         res = await session.execute(stmt)
@@ -397,7 +310,7 @@ async def abort_task(
             session=session,
             workspace_id=principal.workspace_id,
             task_id=task_id,
-            event_type=TaskEventType.TASK_FAILED,
+            event_type=TaskEventType.TASK_CANCELLED,
             payload={
                 "task_id": str(task_id),
                 "status": "cancelled",
@@ -405,6 +318,19 @@ async def abort_task(
                 "compensations": rollback_result.executed,
             },
         )
+
+        try:
+            await record_audit(
+                session,
+                workspace_id=principal.workspace_id,
+                user_ref=str(principal.user_id),
+                status="aborted",
+                action="task.aborted",
+                task_id=task_id,
+                output={"compensations": rollback_result.total_compensations},
+            )
+        except AuditWriteError:
+            logger.error("abort_audit_write_failed task=%s", task_id)
 
         return TaskAbortResponse(
             task_id=task_id,
@@ -416,6 +342,90 @@ async def abort_task(
         )
 
 
+@router.post(
+    "/{task_id}/input",
+    response_model=TaskInputResponse,
+    summary="Answer the question of a step that paused for a detail",
+)
+async def answer_task_input(
+    task_id: UUID,
+    payload: TaskInputRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[TenantDatabase, Depends(get_tenant_database)],
+    queue: Annotated[SubtaskQueue | None, Depends(get_subtask_queue)] = None,
+) -> TaskInputResponse:
+    """Resume a paused step (``needs_input``) from the task card, same path as the chat card."""
+    message = await TaskSubmissionService(
+        engine=db.engine, gateway=None, queue=queue
+    ).resume_with_input(
+        workspace_id=principal.workspace_id,
+        user_id=principal.user_id,
+        task_id=task_id,
+        subtask_id=payload.subtask_id,
+        answers=[a.model_dump() for a in payload.answers],
+    )
+    return TaskInputResponse(message=message)
+
+
+_artifacts = ArtifactService()
+_CANCEL_FIRST = {"error": "task_not_finished", "message": "Cancel the task first"}
+
+
+@router.post(
+    "/delete",
+    response_model=TaskBulkDeleteResponse,
+    summary="Delete several finished tasks (at most 100)",
+)
+async def delete_tasks_bulk(
+    payload: TaskBulkDeleteRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[TenantDatabase, Depends(get_tenant_database)],
+) -> TaskBulkDeleteResponse:
+    """Delete the caller's finished tasks. Unfinished ones are listed in ``not_finished`` and
+    left alone; ids that are unknown, foreign or already deleted are ``not_found``."""
+    outcome = await delete_tasks(
+        db.engine,
+        workspace_id=principal.workspace_id,
+        user_id=principal.user_id,
+        task_ids=payload.ids,
+        storage_root=_artifacts.storage_root,
+    )
+    return TaskBulkDeleteResponse(
+        deleted=outcome.deleted,
+        not_found=outcome.not_found,
+        not_finished=outcome.not_finished,
+        files_removed=outcome.files_removed,
+    )
+
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete one finished task from history",
+)
+async def delete_task(
+    task_id: UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[TenantDatabase, Depends(get_tenant_database)],
+) -> None:
+    """204 when deleted; 404 for an unknown, foreign or already deleted task; 409
+    ``task_not_finished`` ("Cancel the task first") while it is still running or waiting."""
+    outcome = await delete_tasks(
+        db.engine,
+        workspace_id=principal.workspace_id,
+        user_id=principal.user_id,
+        task_ids=[task_id],
+        storage_root=_artifacts.storage_root,
+    )
+    if outcome.not_finished:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_CANCEL_FIRST)
+    if outcome.not_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found in workspace",
+        )
+
+
 @router.get(
     "/{task_id}/events",
     summary="SSE live progress stream for a task",
@@ -423,9 +433,27 @@ async def abort_task(
 async def task_events_stream(
     task_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[TenantDatabase, Depends(get_tenant_database)],
     publisher: Annotated[TaskEventPublisher, Depends(get_event_publisher)],
 ) -> StreamingResponse:
     """Stream live task and subtask progress events via Server-Sent Events (SSE)."""
+    from sqlalchemy import select
+
+    async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
+        found = (
+            await session.execute(
+                select(Task.id).where(
+                    Task.id == task_id,
+                    Task.workspace_id == principal.workspace_id,
+                    not_deleted(),
+                )
+            )
+        ).first()
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found in workspace",
+        )
 
     async def event_generator() -> AsyncIterator[str]:
         # Initial connect ping
@@ -481,7 +509,7 @@ async def task_events_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },

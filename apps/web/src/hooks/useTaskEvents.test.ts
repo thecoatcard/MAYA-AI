@@ -78,4 +78,67 @@ describe("useTaskEvents hook", () => {
       expect.objectContaining({ event_type: "task_completed" }),
     );
   });
+
+  it("maps task_cancelled to a cancelled status", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"event_type":"task_cancelled","task_id":"task-9","payload":{}}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const onEvent = vi.fn();
+    renderHook(() =>
+      useTaskEvents({ taskId: "task-9", enabled: true, onEvent }),
+    );
+    await waitFor(() => {
+      expect(onEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: "task_cancelled",
+          status: "cancelled",
+        }),
+      );
+    });
+  });
+});
+
+describe("useTaskEvents per-task state", () => {
+  it("does not carry one task's detail into the next task", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(authSession, "getAccessToken").mockReturnValue(
+      "example-test-token",
+    );
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("stream down"));
+    const tasksClient = await import("../lib/tasks-client");
+    vi.spyOn(tasksClient, "getTask").mockImplementation((id: string) =>
+      Promise.resolve({
+        id,
+        title: `title-${id}`,
+        status: "executing",
+        subtasks: [],
+      } as never),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) =>
+        useTaskEvents({ taskId: id, pollIntervalMs: 20 }),
+      { initialProps: { id: "task-a" } },
+    );
+    await waitFor(() => expect(result.current.taskDetail?.id).toBe("task-a"));
+
+    rerender({ id: "task-b" });
+    // Never task A's detail under task B, not even for one render.
+    expect(result.current.taskDetail?.id).not.toBe("task-a");
+    await waitFor(() => expect(result.current.taskDetail?.id).toBe("task-b"));
+  });
 });

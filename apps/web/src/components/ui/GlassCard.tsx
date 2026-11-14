@@ -16,14 +16,12 @@ export interface GlassCardProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const variantStyles: Record<GlassCardVariant, string> = {
-  default:
-    "bg-zinc-900/60 backdrop-blur-xl border border-white/10 text-zinc-100 shadow-xl shadow-black/25 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]",
-  teal: "bg-zinc-900/60 backdrop-blur-xl border border-teal-500/25 text-zinc-100 shadow-xl shadow-teal-950/20 shadow-[inset_0_1px_0_0_rgba(45,212,191,0.12)]",
+  default: "bg-maya-surface border border-maya-border text-maya-text",
+  teal: "bg-maya-surface border border-maya-accent text-maya-text",
   raised:
-    "bg-zinc-800/70 backdrop-blur-2xl border border-white/15 text-zinc-100 shadow-2xl shadow-black/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.14)]",
-  ghost:
-    "bg-white/[0.03] backdrop-blur-md border border-white/5 text-zinc-200 shadow-sm shadow-black/10",
-  glow: "bg-zinc-900/70 backdrop-blur-xl border border-teal-500/35 text-zinc-100 shadow-[0_0_30px_-5px_rgba(45,212,191,0.18)] shadow-[inset_0_1px_0_0_rgba(45,212,191,0.2)]",
+    "bg-maya-raised border border-maya-border-strong text-maya-text shadow-maya-1",
+  ghost: "bg-transparent border border-maya-border text-maya-text",
+  glow: "bg-maya-surface border border-maya-accent text-maya-text",
 };
 
 const paddingStyles: Record<GlassCardPadding, string> = {
@@ -33,17 +31,18 @@ const paddingStyles: Record<GlassCardPadding, string> = {
   lg: "p-6 sm:p-8",
 };
 
+/* Hover changes the border only; nothing lifts, glows or blurs. */
 const hoverStyles: Record<GlassCardHover, string> = {
   none: "",
-  lift: "hover:-translate-y-1 hover:border-white/20 hover:shadow-2xl transition-all duration-200 ease-out motion-reduce:hover:translate-y-0",
-  glow: "hover:border-teal-500/40 hover:shadow-[0_0_25px_-5px_rgba(45,212,191,0.25)] transition-all duration-200 ease-out",
-  "lift-glow":
-    "hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-[0_12px_30px_-5px_rgba(45,212,191,0.25)] transition-all duration-200 ease-out motion-reduce:hover:translate-y-0",
+  lift: "hover:border-maya-border-strong transition-colors duration-150",
+  glow: "hover:border-maya-accent transition-colors duration-150",
+  "lift-glow": "hover:border-maya-accent transition-colors duration-150",
 };
 
 /**
- * GlassCard - Centralized Glassmorphic container with translucent frosted backdrop,
- * subtle 1px border highlight, inner glow, and optional header/footer slots.
+ * GlassCard: flat token-backed container with a hairline border and optional
+ * header/footer slots. The name is kept for existing imports; there is no
+ * blur, glow or translucency.
  */
 export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
   function GlassCard(
@@ -66,11 +65,11 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
     return (
       <div
         ref={ref}
-        className={`relative rounded-2xl overflow-hidden ${variantClass} ${hoverClass} ${className}`.trim()}
+        className={`relative rounded-maya-lg overflow-hidden ${variantClass} ${hoverClass} ${className}`.trim()}
         {...props}
       >
         {header && (
-          <div className="border-b border-white/5 px-5 py-3 sm:px-6">
+          <div className="border-b border-maya-border px-5 py-3 sm:px-6">
             {header}
           </div>
         )}
@@ -88,7 +87,7 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
         </div>
 
         {footer && (
-          <div className="border-t border-white/5 px-5 py-3 sm:px-6 bg-white/[0.01]">
+          <div className="border-t border-maya-border px-5 py-3 sm:px-6">
             {footer}
           </div>
         )}
@@ -104,7 +103,7 @@ export function GlassCardHeader({
 }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   return (
     <div
-      className={`flex items-center justify-between gap-4 border-b border-white/5 pb-3 mb-4 ${className}`.trim()}
+      className={`flex items-center justify-between gap-4 border-b border-maya-border pb-3 mb-4 ${className}`.trim()}
       {...props}
     >
       {children}
@@ -119,7 +118,7 @@ export function GlassCardTitle({
 }: React.HTMLAttributes<HTMLHeadingElement>): React.JSX.Element {
   return (
     <h3
-      className={`text-base font-semibold text-zinc-100 tracking-tight flex items-center gap-2 ${className}`.trim()}
+      className={`text-base font-semibold text-maya-text tracking-tight flex items-center gap-2 ${className}`.trim()}
       {...props}
     >
       {children}
@@ -134,7 +133,7 @@ export function GlassCardDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>): React.JSX.Element {
   return (
     <p
-      className={`text-xs text-zinc-400 leading-relaxed mt-0.5 ${className}`.trim()}
+      className={`text-maya-caption text-maya-muted leading-relaxed mt-0.5 ${className}`.trim()}
       {...props}
     >
       {children}
@@ -161,7 +160,7 @@ export function GlassCardFooter({
 }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   return (
     <div
-      className={`flex items-center justify-between gap-3 border-t border-white/5 pt-4 mt-4 ${className}`.trim()}
+      className={`flex items-center justify-between gap-3 border-t border-maya-border pt-4 mt-4 ${className}`.trim()}
       {...props}
     >
       {children}

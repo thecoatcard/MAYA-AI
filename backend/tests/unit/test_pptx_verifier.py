@@ -63,15 +63,45 @@ def test_pptx_engine_generates_verified_8_slide_deck(tmp_path: Path) -> None:
     assert len(report.errors) == 0
 
 
-def test_pptx_verifier_detects_slide_count_mismatch(tmp_path: Path) -> None:
-    """Negative test: slide count mismatch triggers verification failure."""
+def test_pptx_engine_applies_brand_template_to_slides(tmp_path: Path) -> None:
+    """Polished decks should include the branded accent bar and a solid background treatment."""
+    file_path = tmp_path / "template_deck.pptx"
+    slides: list[dict[str, Any]] = [
+        {"layout": "title", "title": "Quarterly Strategy Review", "subtitle": "MAYA AI • FY2026"},
+        {
+            "layout": "bullets",
+            "title": "Key priorities",
+            "bullets": ["Scale execution", "Launch AI workflows", "Verify quality"],
+        },
+    ]
+
+    out = create_presentation(slides, file_path)
+    prs = Presentation(str(out))
+
+    first_slide = prs.slides[0]
+    colored_shapes = []
+    for shape in first_slide.shapes:
+        try:
+            _ = shape.fill.fore_color
+        except TypeError:
+            continue
+        colored_shapes.append(shape)
+
+    assert any(colored_shapes)
+    assert len(prs.slides) == 2
+
+
+def test_pptx_verifier_reports_a_slide_count_mismatch_as_a_warning(tmp_path: Path) -> None:
+    """Count policy (deliberate update): a slide count that differs is a WARNING, never a failed
+    file. This used to be an error that made the whole verification (and the task step) fail."""
     file_path = tmp_path / "short_deck.pptx"
     slides = [{"layout": "title", "title": "Single Slide"}]
     out = create_presentation(slides, file_path)
 
     report = verify_pptx(out, expected_slides=8)
-    assert report.status == "failed"
-    assert any("Slide count mismatch: expected 8, got 1" in err for err in report.errors)
+    assert report.status == "verified" and not report.errors
+    assert any("Slide count mismatch: expected 8, got 1" in w for w in report.warnings)
+    assert "slide_count_matches_expected_8" not in report.checks_passed
 
 
 def test_pptx_verifier_detects_canvas_overflow(tmp_path: Path) -> None:

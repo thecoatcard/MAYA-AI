@@ -51,7 +51,7 @@ server cannot be reached.
 The chat sidebar lists sessions grouped by Today and Earlier, paginates history,
 loads stored messages oldest-first, and continues an opened session. Session create,
 rename and delete endpoints are not part of the MVP. The mobile history sidebar is
-a keyboard-managed drawer; theme preference is system-based with a manual switch.
+a keyboard-managed drawer; there are two themes only, dark (default) and light, switched by one icon button and stored per device (see docs/architecture/UI_DESIGN_SYSTEM.md); IBM Plex is self-hosted.
 
 **Configuration.** The browser sends API requests to same-origin `/api/v1` paths.
 Next.js rewrites those paths to the origin in the server-only
@@ -80,6 +80,7 @@ ends a silent reply.
 | `src/lib/markdown.ts`         | Dependency-free safe Markdown subset (no HTML strings)                                                                                                                                                                                                                                             |
 | `src/hooks/useChatStream.ts`  | Conversation state machine: one Idempotency-Key per message reused on every same-key retry, replay replaces partial text, bounded automatic retry (3 attempts, backoff with jitter) for network errors and 409, `Retry-After` for 429, `stop()`, and text applied at most once per animation frame |
 | `src/components/auth/`        | User-selected sign-in and account-creation forms with neutral account-status messaging, accessible inputs, and the shared theme                                                                                                                                                                    |
+| `src/components/ui/`          | Design system primitives (Pane, Button, Badge, states, toasts, popover, theme toggle) on the shared tokens; see docs/architecture/UI_DESIGN_SYSTEM.md                                                                                                                                              |
 | `src/components/chat/`        | `ChatWorkspace`, paginated session history, `MessageThread`, safe Markdown, composer, notice, theme toggle, and shared design tokens/rules                                                                                                                                                         |
 
 The chat uses the existing `/chat` design tokens and the owner-approved `system-ui`
@@ -171,3 +172,11 @@ by static checks of `chat.css`, not by looking at a rendered page. An idle or st
 watchdog for a stream that goes silent (it needs a server heartbeat decision), a
 Content-Security-Policy (deployment configuration), a chosen typeface and spoken
 announcement of a finished reply are open owner decisions and are not built.
+
+## Client layer (`src/lib`, `src/hooks`)
+
+- `api-client.ts`: `ApiError` carries the backend `message`; `BackendUnreachableError` marks a bare proxy "Internal Server Error"; `checkBackendReady()` reads `/api/v1/readyz`.
+- `voice-protocol.ts`, `voice-url.ts`, `hooks/useLiveVoice.ts`: voice protocol v2 over a same-origin WebSocket (see `docs/api/VOICE_SPECIFICATION.md`). The hook exposes `state`, `transcripts` (one per `turn_id`), `readySessionId`, `unavailableReason`, `startSession`, `stopSession`, `interruptPlayback` and `sendText`.
+- `auth-session.ts` `ensureFreshAccessToken()`; `auth-client.ts` `getBootstrapStatus`, `bootstrapOwner`, `safeRedirectPath`.
+- `artifacts-client.ts` `downloadArtifact`/`fetchArtifactBlob` send the Bearer token (plain `<a download>` always 401s).
+- `useTaskEvents`: `task_cancelled`, backoff reconnect and a detail refetch fallback.

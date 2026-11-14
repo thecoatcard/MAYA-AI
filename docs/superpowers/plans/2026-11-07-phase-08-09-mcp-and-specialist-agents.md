@@ -142,7 +142,7 @@
 - Create: `backend/app/mcp/connectors/filesystem.py`
 - Create: `backend/app/mcp/connectors/git.py`
 - Create: `backend/app/mcp/connectors/github.py`
-- Create: `backend/app/mcp/connectors/brave.py`
+- Create: brave connector (removed 2026-11-09)
 - Create: `backend/app/mcp/connectors/notion.py`
 - Test: `backend/tests/integration/test_core_connectors.py`
 
@@ -293,15 +293,15 @@
 **Files:**
 
 - Create: `apps/web/src/lib/mcp-client.ts`
-- Create: `apps/web/src/components/mcp/McpStatusIndicator.tsx`
+- Create: McpStatusIndicator.tsx (removed 2026-11-09 with the UI redesign: no importer)
 - Create: `apps/web/src/components/approvals/GitDiffViewer.tsx`
 - Create: `apps/web/src/components/approvals/EmailApprovalCard.tsx`
-- Create: `apps/web/src/components/artifacts/ArtifactCard.tsx`
-- Create: `apps/web/src/components/citations/ResearchCitationsView.tsx`
-- Modify: `apps/web/src/components/approvals/ApprovalCenterModal.tsx`
-- Modify: `apps/web/src/components/tasks/TaskCenterDrawer.tsx`
-- Modify: `apps/web/src/components/chat/ChatWorkspace.tsx`
-- Test: `apps/web/src/components/mcp/McpStatusIndicator.test.tsx`
+- Create: ArtifactCard.tsx (removed 2026-11-09 with the UI redesign: no importer)
+- Create: ResearchCitationsView.tsx (removed 2026-11-09 with the UI redesign: no importer)
+- Modify: ApprovalCenterModal (removed; approvals are now inline on the task card)
+- Modify: WorkPanel.tsx (removed 2026-11-10; its task progress now lives in the chat TaskCard)
+- Modify: `apps/web/src/components/chat/ConversationView.tsx`
+- Create: McpStatusIndicator.test.tsx (removed 2026-11-09 with the UI redesign: no importer) (removed 2026-11-09 with the UI redesign: the component had no importer)
 - Test: `apps/web/src/components/approvals/GitDiffViewer.test.tsx`
 
 **Interfaces:**

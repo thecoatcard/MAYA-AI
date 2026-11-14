@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CHAT_MAX_MESSAGE_CHARS } from "../../lib/api-client";
 import { ChatInput, type ChatInputProps } from "./ChatInput";
 
 function Harness(props: Partial<ChatInputProps> & { initial?: string } = {}) {
@@ -143,56 +142,48 @@ describe("ChatInput disabled", () => {
   });
 });
 
-describe("ChatInput length counter", () => {
-  it("shows the count against the provisional limit constant", () => {
-    expect(CHAT_MAX_MESSAGE_CHARS).toBe(8000);
+describe("ChatInput length", () => {
+  it("shows the character count without a fixed limit", () => {
     render(<Harness initial="hello" />);
-    expect(
-      screen.getByText(`5 / ${CHAT_MAX_MESSAGE_CHARS}`),
-    ).toBeInTheDocument();
+    expect(screen.getByText("5 characters")).toBeInTheDocument();
+    expect(screen.queryByText(/ \/ /)).toBeNull();
   });
 
   it("counts characters, not UTF-16 units", () => {
     render(<Harness initial="😀😀" />);
-    expect(
-      screen.getByText(`2 / ${CHAT_MAX_MESSAGE_CHARS}`),
-    ).toBeInTheDocument();
+    expect(screen.getByText("2 characters")).toBeInTheDocument();
   });
 
-  it("warns near the limit with text and an icon, not colour alone", () => {
-    const { container } = render(<Harness initial={"a".repeat(7300)} />);
-    expect(screen.getByText("Close to the limit.")).toBeInTheDocument();
-    expect(container.querySelector(".maya-composer__count svg")).not.toBeNull();
+  it("has no warning or block for long text", () => {
+    const onSubmit = vi.fn();
+    const { container } = render(
+      <Harness initial={"a".repeat(50_000)} onSubmit={onSubmit} />,
+    );
+    expect(screen.queryByText(/limit/i)).toBeNull();
+    expect(container.querySelector(".maya-composer__count svg")).toBeNull();
+    expect(textbox()).toHaveAttribute("aria-invalid", "false");
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
   });
 
-  it("blocks sending over the limit and says by how much", () => {
+  it("sends long text in full", () => {
     const onSubmit = vi.fn();
-    render(
-      <Harness
-        initial={"a".repeat(CHAT_MAX_MESSAGE_CHARS + 5)}
-        onSubmit={onSubmit}
-      />,
-    );
-    expect(screen.getByText("Over by 5.")).toBeInTheDocument();
-    expect(textbox()).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    const long = "b".repeat(50_000);
+    render(<Harness onSubmit={onSubmit} />);
+    fireEvent.change(textbox(), { target: { value: long } });
     fireEvent.keyDown(textbox(), { key: "Enter" });
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(
-      screen
-        .getAllByRole("status")
-        .some((el) => el.textContent?.includes("over the length limit")),
-    ).toBe(true);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith(long);
   });
 
-  it("does not silently truncate pasted text", () => {
+  it("does not truncate pasted text", () => {
     render(<Harness />);
-    const long = "b".repeat(CHAT_MAX_MESSAGE_CHARS + 50);
+    const long = "b".repeat(50_000);
     fireEvent.change(textbox(), { target: { value: long } });
     expect(textbox().value).toHaveLength(long.length);
   });
+});
 
+describe("ChatInput validation", () => {
   it("blocks characters the server would reject", () => {
     const onSubmit = vi.fn();
     render(<Harness initial={"bad\u0000text"} onSubmit={onSubmit} />);
@@ -209,6 +200,6 @@ describe("ChatInput length counter", () => {
     expect(describedBy).toBeTruthy();
     const description = document.getElementById(describedBy ?? "");
     expect(description?.textContent).toContain("Enter to send");
-    expect(description?.textContent).toContain("2 / 8000");
+    expect(description?.textContent).toContain("2 characters");
   });
 });

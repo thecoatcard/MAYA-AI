@@ -22,7 +22,13 @@ _JWT_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 _BEARER_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bBearer\s+([A-Za-z0-9_\-\.~+/]+=*)")
 _AWS_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b")
-_GITHUB_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{36,255}\b")
+_GITHUB_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9_]{36,255}|github_pat_[A-Za-z0-9_]{22,255})\b"
+)
+# Notion integration secrets: ``secret_<43 chars>`` (older) and ``ntn_<~44 chars>`` (current).
+_NOTION_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:secret_[A-Za-z0-9]{43}|ntn_[A-Za-z0-9]{30,80})\b"
+)
 _SSN_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _CC_CANDIDATE_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
 
@@ -97,6 +103,10 @@ class PiiScrubber:
 
         # 5. GitHub Tokens
         modified, count = _GITHUB_TOKEN_PATTERN.subn(_REDACTED_SECRET, modified)
+        if count > 0:
+            redactions += count
+            detected_types.add("secret")
+        modified, count = _NOTION_TOKEN_PATTERN.subn(_REDACTED_SECRET, modified)
         if count > 0:
             redactions += count
             detected_types.add("secret")

@@ -3,7 +3,7 @@
  */
 
 import { getAccessToken, refreshSession } from "./auth-session";
-import { ApiError } from "./api-client";
+import { ApiError, apiErrorFromResponse } from "./api-client";
 
 export interface TaskSubmissionRequest {
   readonly instruction: string;
@@ -56,6 +56,13 @@ export interface TaskDetailResponse {
   readonly completed_at?: string;
   readonly active_plan: readonly Record<string, unknown>[];
   readonly subtasks: readonly SubtaskResponse[];
+  /** True when the task finished ("completed") but a step failed. */
+  readonly partial?: boolean;
+  readonly failed_steps?: readonly {
+    readonly step: string;
+    readonly error: string;
+    readonly deliverable_incomplete?: boolean;
+  }[];
 }
 
 export interface TaskListItem {
@@ -70,6 +77,7 @@ export interface TaskListItem {
   readonly created_at: string;
   readonly completed_at?: string;
   readonly subtask_count: number;
+  readonly partial?: boolean;
 }
 
 export interface TaskListResponse {
@@ -81,7 +89,7 @@ export interface TaskListResponse {
 
 export interface TaskAbortResponse {
   readonly task_id: string;
-  readonly status: string;
+  readonly status: "cancelled" | string;
   readonly compensations_triggered: number;
   readonly executed: number;
   readonly failed: number;
@@ -117,23 +125,7 @@ async function authenticatedFetch(
   }
 
   if (!response.ok) {
-    let errorCode = "unknown_error";
-    try {
-      const body = (await response.json()) as {
-        error?: string;
-        detail?: string | { msg?: string }[];
-      };
-      if (typeof body?.error === "string") {
-        errorCode = body.error;
-      } else if (typeof body?.detail === "string") {
-        errorCode = body.detail;
-      } else if (Array.isArray(body?.detail) && body.detail[0]?.msg) {
-        errorCode = body.detail[0].msg;
-      }
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(response.status, errorCode);
+    throw await apiErrorFromResponse(response);
   }
 
   return response;
@@ -197,4 +189,77 @@ export async function abortTask(taskId: string): Promise<TaskAbortResponse> {
   });
 
   return (await response.json()) as TaskAbortResponse;
+}
+
+/** Answer the question of a step that paused for a detail (the task card's inline question). */
+export async function answerTaskInput(
+  taskId: string,
+  subtaskId: string,
+  answers: readonly {
+    readonly selected: readonly string[];
+    readonly text: string;
+  }[],
+): Promise<{ readonly message: string }> {
+  const response = await authenticatedFetch(`/api/v1/tasks/${taskId}/input`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subtask_id: subtaskId,
+      answers: answers.map((a) => ({
+        selected: [...a.selected],
+        text: a.text,
+      })),
+    }),
+  });
+  return (await response.json()) as { message: string };
+}
+
+/** Most ids the server accepts in one bulk delete. */
+export const MAX_BULK_DELETE = 100;
+
+export interface BulkDeleteTasksResult {
+  readonly deleted: readonly string[];
+  readonly notFound: readonly string[];
+  readonly notFinished: readonly string[];
+}
+
+/**
+ * Delete one finished task from history. A task that is still running or waiting is refused
+ * (409, "Cancel the task first"). A task that is already gone (404) is treated as deleted so a
+ * second click never shows an error.
+ */
+export async function deleteTask(taskId: string): Promise<void> {
+  try {
+    await authenticatedFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return;
+    throw error;
+  }
+}
+
+/** Delete several finished tasks (batches of 100). Unfinished ones come back as `notFinished`. */
+export async function deleteTasks(
+  ids: readonly string[],
+): Promise<BulkDeleteTasksResult> {
+  const deleted: string[] = [];
+  const notFound: string[] = [];
+  const notFinished: string[] = [];
+  for (let start = 0; start < ids.length; start += MAX_BULK_DELETE) {
+    const response = await authenticatedFetch("/api/v1/tasks/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids.slice(start, start + MAX_BULK_DELETE) }),
+    });
+    const body = (await response.json()) as {
+      deleted?: string[];
+      not_found?: string[];
+      not_finished?: string[];
+    };
+    deleted.push(...(body.deleted ?? []));
+    notFound.push(...(body.not_found ?? []));
+    notFinished.push(...(body.not_finished ?? []));
+  }
+  return { deleted, notFound, notFinished };
 }

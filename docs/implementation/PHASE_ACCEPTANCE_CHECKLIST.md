@@ -135,12 +135,12 @@ Evidence for the items below is the [chat API contract](../api/CHAT.md), [ADR-00
 - [ ] MCP Client Manager maintains connection pools for stdio subprocesses and Streamable HTTP.
 - [ ] JSON-RPC ping every 15s detects unhealthy servers; crashed processes restart with backoff.
 - [ ] Schema-hash drift detection alerts and disables servers if tool descriptions change unexpectedly.
-- [ ] Core MVP servers (Filesystem in `/artifacts`, local Git, GitHub, Brave Search, Notion read-only) operational.
+- [ ] Core MVP servers (Filesystem in `/artifacts`, local Git, GitHub, Google Search grounding, Notion read-only) operational.
 - [ ] In-house Google adapter successfully searches and drafts emails via OAuth 2.0 without exposing raw credentials.
 
 ### Phase 09 — Specialist AI Agents
 
-- [ ] Research Agent searches Brave and synthesizes structured findings with source citations.
+- [ ] Research Agent searches with Gemini Google Search grounding and synthesizes structured findings with source citations.
 - [ ] Fixed-function Sandbox Runner executes commands in ephemeral containers without host Docker socket.
 - [ ] Coding Agent replicates bug, applies patch, passes sandbox tests, and pauses for PR approval (Workflow 3).
 - [ ] Document Agent generates deliverables strictly within `/artifacts` with verification proofs.

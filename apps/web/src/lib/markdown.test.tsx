@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { seededRandom } from "../components/chat/chat-test-utils";
 import {
   MAX_MARKDOWN_CHARS,
+  MAX_TABLE_COLUMNS,
   decodeBasicEntities,
   describeLinkTarget,
   inlinePlainText,
@@ -83,6 +84,9 @@ describe("sanitizeUrl", () => {
     ["mailto:someone@example.com", "mailto:someone@example.com"],
     ["  https://example.com  ", "https://example.com/"],
     ["HTTPS://EXAMPLE.COM/Path", "https://example.com/Path"],
+    // A bare domain is a website the model forgot the scheme for: it becomes https.
+    ["esc-plus.com", "https://esc-plus.com/"],
+    ["example.org/a/b", "https://example.org/a/b"],
   ])("allows %s", (raw, expected) => {
     expect(sanitizeUrl(raw)).toBe(expected);
   });
@@ -249,10 +253,66 @@ describe("blocks", () => {
     }
   });
 
-  it("shows tables as plain text lines because tables are not in the subset", () => {
-    const blocks = parseMarkdown("| a | b |\n| - | - |\n| 1 | 2 |");
+  it("parses a pipe table into header, alignment and body rows", () => {
+    const blocks = parseMarkdown(
+      "| a | b | c |\n| :-- | :-: | --: |\n| 1 | **2** | 3 |\n| 4 | 5 | 6 |",
+    );
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]?.type).toBe("paragraph");
+    const table = blocks[0];
+    if (table?.type !== "table") throw new Error("expected a table");
+    expect(table.align).toEqual(["left", "center", "right"]);
+    expect(table.header).toHaveLength(3);
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0]?.[1]?.[0]?.type).toBe("strong");
+  });
+
+  it("accepts a table without outer pipes, escaped pipes, and short or long rows", () => {
+    const blocks = parseMarkdown("a | b\n- | -\nx \\| y | z | extra\nonly | ");
+    const table = blocks[0];
+    if (table?.type !== "table") throw new Error("expected a table");
+    expect(table.header).toHaveLength(2);
+    expect(table.rows).toHaveLength(2);
+    // Every row has exactly one cell per header column.
+    expect(table.rows.every((row) => row.length === 2)).toBe(true);
+    expect(JSON.stringify(table.rows[0]?.[0])).toContain("x | y");
+  });
+
+  it("ends a table at a blank line and lets a table interrupt a paragraph", () => {
+    const blocks = parseMarkdown(
+      "intro\n| a | b |\n| - | - |\n| 1 | 2 |\n\nafter",
+    );
+    expect(blocks.map((block) => block.type)).toEqual([
+      "paragraph",
+      "table",
+      "paragraph",
+    ]);
+  });
+
+  it("keeps a header without a delimiter row, or with the wrong column count, as text", () => {
+    expect(parseMarkdown("| a | b |\n| 1 | 2 |")[0]?.type).toBe("paragraph");
+    expect(parseMarkdown("| a | b |\n| - |\n| 1 | 2 |")[0]?.type).toBe(
+      "paragraph",
+    );
+    expect(parseMarkdown("a\n---")[0]?.type).not.toBe("table");
+  });
+
+  it("shows a table with too many columns as plain text", () => {
+    const wide = Array.from({ length: MAX_TABLE_COLUMNS + 1 }, () => "x");
+    const blocks = parseMarkdown(
+      `| ${wide.join(" | ")} |\n| ${wide.map(() => "-").join(" | ")} |\n| ${wide.join(" | ")} |`,
+    );
+    expect(blocks.every((block) => block.type !== "table")).toBe(true);
+  });
+
+  it("keeps raw HTML and links inside table cells inert and safe", () => {
+    const blocks = parseMarkdown(
+      "| a |\n| - |\n| <script>x</script> |\n| [k](javascript:alert(1)) |",
+    );
+    const table = blocks[0];
+    if (table?.type !== "table") throw new Error("expected a table");
+    const text = JSON.stringify(table);
+    expect(text).not.toContain('"link"');
+    expect(text).toContain("<script>x</script>");
   });
 
   it("handles CRLF and tabs in indentation", () => {

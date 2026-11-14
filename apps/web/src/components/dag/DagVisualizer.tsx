@@ -1,25 +1,32 @@
 "use client";
 
+import { storedReviewLabel } from "../../lib/voice-task-updates";
 import {
-  AlertCircle,
-  ArrowRight,
   Bot,
-  CheckCircle2,
+  Check,
   Clock,
   Code,
+  Copy,
   ExternalLink,
   FileText,
   Layers,
-  Link as LinkIcon,
   Mail,
-  RotateCw,
   Search,
-  ShieldAlert,
-  Sparkles,
+  type LucideIcon,
 } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 
 import type { SubtaskResponse } from "../../lib/tasks-client";
+import { FailureReason } from "../tasks/FailureReason";
+import { TaskStatusBadge } from "../tasks/TaskStatusBadge";
+import {
+  Badge,
+  CodeBlockShell,
+  EmptyState,
+  IconButton,
+  ScrollArea,
+  WrapText,
+} from "../ui";
 
 export interface DagVisualizerProps {
   readonly subtasks: readonly SubtaskResponse[];
@@ -36,6 +43,66 @@ interface CitationItem {
   readonly domain?: string;
 }
 
+const AGENT_ICON: Readonly<Record<string, LucideIcon>> = {
+  research: Search,
+  coding: Code,
+  document: FileText,
+  email: Mail,
+  pm: Clock,
+};
+
+function agentIcon(agent: string): LucideIcon {
+  return AGENT_ICON[agent.toLowerCase()] ?? Bot;
+}
+
+function stepNumber(index: number): string {
+  return String(index + 1).padStart(2, "0");
+}
+
+function prettyJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function SectionTitle({
+  children,
+}: {
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return <h4 className="maya-label m-0 mb-1">{children}</h4>;
+}
+
+function CopyId({ id }: { readonly id: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      size="sm"
+      label={copied ? "Step id copied" : "Copy step id"}
+      icon={copied ? <Check size={14} /> : <Copy size={14} />}
+      onClick={() => {
+        try {
+          void navigator.clipboard?.writeText(id).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          });
+        } catch {
+          // Clipboard unavailable: the id is still selectable text.
+        }
+      }}
+    />
+  );
+}
+
+/**
+ * The plan of a task as a list of steps in order, with an inspector for the
+ * selected step. Layout: one column; side by side only when the container is
+ * wide. The step list and the inspector each scroll inside their own region,
+ * so up to 30 steps never overlap, widen the page or cut a card or pill.
+ */
 export function DagVisualizer({
   subtasks,
   selectedSubtaskId,
@@ -45,108 +112,42 @@ export function DagVisualizer({
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(
     subtasks[0]?.id ?? null,
   );
+  const nodeRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const activeId =
     selectedSubtaskId !== undefined ? selectedSubtaskId : internalSelectedId;
-  const activeSubtask =
-    subtasks.find((st) => st.id === activeId || String(st.id) === activeId) ??
-    subtasks[0] ??
-    null;
+  const activeIndex = Math.max(
+    0,
+    subtasks.findIndex(
+      (st) => st.id === activeId || String(st.id) === activeId,
+    ),
+  );
+  const activeSubtask = subtasks[activeIndex] ?? null;
 
-  const getAgentIcon = (agent: string) => {
-    switch (agent.toLowerCase()) {
-      case "research":
-        return <Search className="w-4 h-4 text-cyan-400" />;
-      case "coding":
-        return <Code className="w-4 h-4 text-emerald-400" />;
-      case "document":
-        return <FileText className="w-4 h-4 text-purple-400" />;
-      case "email":
-        return <Mail className="w-4 h-4 text-blue-400" />;
-      case "pm":
-        return <Clock className="w-4 h-4 text-amber-400" />;
-      default:
-        return <Bot className="w-4 h-4 text-teal-400" />;
-    }
-  };
+  const numberById = useMemo(() => {
+    const map = new Map<string, string>();
+    subtasks.forEach((st, index) => map.set(st.id, stepNumber(index)));
+    return map;
+  }, [subtasks]);
 
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "completed":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-            <span>Completed</span>
-          </span>
-        );
-      case "in_progress":
-      case "executing":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.25)]">
-            <RotateCw className="w-3 h-3 text-cyan-400 animate-spin" />
-            <span>In Progress</span>
-          </span>
-        );
-      case "awaiting_approval":
-      case "paused":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]">
-            <ShieldAlert className="w-3 h-3 text-amber-400" />
-            <span>Awaiting Approval</span>
-          </span>
-        );
-      case "failed":
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.25)]">
-            <AlertCircle className="w-3 h-3 text-rose-400" />
-            <span>Failed</span>
-          </span>
-        );
-      case "pending":
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 shadow-sm">
-            <Clock className="w-3 h-3 text-zinc-500" />
-            <span>Pending</span>
-          </span>
-        );
-    }
-  };
+  const dependencyLabel = (ids: readonly string[]): string =>
+    ids.map((dep) => numberById.get(dep) ?? dep).join(", ");
 
-  // Extract structured citations from verification proof or output
   const extractedCitations = useMemo<readonly CitationItem[]>(() => {
     if (!activeSubtask) return [];
     const sourceObj =
       (activeSubtask.verification_proof as Record<string, unknown> | null) ??
       (activeSubtask.output_result as Record<string, unknown> | null);
-
     if (!sourceObj || typeof sourceObj !== "object") return [];
-
     const rawList =
       (sourceObj.citations as unknown[]) ??
       (sourceObj.sources as unknown[]) ??
       (sourceObj.references as unknown[]) ??
       [];
-
-    if (!Array.isArray(rawList)) {
-      if (typeof sourceObj.citations === "number") {
-        return Array.from({ length: sourceObj.citations }).map((_, i) => ({
-          id: i + 1,
-          title: `Verified Ledger Citation #${i + 1}`,
-          snippet:
-            "Cryptographically verified Brave Search source citation recorded in execution ledger.",
-        }));
-      }
-      return [];
-    }
-
+    if (!Array.isArray(rawList)) return [];
     return rawList.map((item, idx) => {
       if (typeof item === "string") {
-        return {
-          id: idx + 1,
-          title: item,
-          snippet: item,
-        };
+        return { id: idx + 1, title: item };
       }
       if (item && typeof item === "object") {
         const record = item as Record<string, unknown>;
@@ -164,7 +165,7 @@ export function DagVisualizer({
           title:
             (record.title as string) ??
             (record.source as string) ??
-            `Citation Source #${idx + 1}`,
+            `Source ${idx + 1}`,
           url,
           domain,
           snippet:
@@ -178,284 +179,304 @@ export function DagVisualizer({
     });
   }, [activeSubtask]);
 
+  const citationCount = useMemo(() => {
+    const proof = activeSubtask?.verification_proof as
+      Record<string, unknown> | null | undefined;
+    return typeof proof?.citations === "number" ? proof.citations : null;
+  }, [activeSubtask]);
+
   if (subtasks.length === 0) {
     return (
-      <div
-        className={`p-10 text-center rounded-2xl bg-zinc-900/40 backdrop-blur-xl border border-white/10 shadow-xl text-zinc-400 ${className}`}
-      >
-        <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shadow-[0_0_15px_rgba(20,184,166,0.15)]">
-          <Bot className="w-6 h-6 opacity-80" />
-        </div>
-        <p className="text-sm font-semibold text-zinc-300">
-          No subtasks defined in the DAG plan.
-        </p>
-        <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-          When a task instruction is submitted, the LangGraph supervisor will
-          decompose it into an execution graph.
-        </p>
-      </div>
+      <EmptyState
+        className={className}
+        icon={Bot}
+        title="No steps planned yet"
+        description="The plan appears here once MAYA has broken the task into steps."
+      />
     );
   }
 
+  const select = (st: SubtaskResponse): void => {
+    setInternalSelectedId(st.id);
+    onSelectSubtask?.(st);
+  };
+
+  const onNodeKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ): void => {
+    let next = index;
+    if (event.key === "ArrowDown")
+      next = Math.min(index + 1, subtasks.length - 1);
+    else if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = subtasks.length - 1;
+    else return;
+    event.preventDefault();
+    nodeRefs.current[next]?.focus();
+  };
+
   return (
     <div
-      className={`flex flex-col lg:flex-row gap-5 rounded-2xl bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-5 shadow-xl text-zinc-100 ${className}`}
+      className={`@container min-w-0 max-w-full ${className}`.trim()}
+      data-testid="dag"
     >
-      {/* Left Column: DAG Node Graph Visualization */}
-      <div className="flex-1 flex flex-col gap-3.5">
-        <div className="flex items-center justify-between pb-3 border-b border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400">
-              <Layers className="w-3.5 h-3.5" />
-            </div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-              Execution DAG Dependency Graph
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-zinc-400 px-2 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/50">
-              {subtasks.length} Nodes
-            </span>
-          </div>
-        </div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 @[52rem]:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+        {/* Step list */}
+        <section
+          aria-label="Plan steps"
+          className="min-w-0 rounded-maya-lg overflow-hidden border border-maya-border bg-maya-pane"
+        >
+          <header className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-maya-border px-3 py-2">
+            <h3 className="m-0 flex min-w-0 items-center gap-2 text-maya-small font-medium text-maya-text">
+              <Layers
+                aria-hidden="true"
+                size={16}
+                className="shrink-0 text-maya-muted"
+              />
+              <span className="min-w-0">Plan</span>
+            </h3>
+            <Badge tone="neutral" icon={Layers}>
+              {subtasks.length} {subtasks.length === 1 ? "step" : "steps"}
+            </Badge>
+          </header>
+          <ScrollArea label="Plan steps list" className="max-h-[26rem] p-2">
+            <ol className="m-0 flex list-none flex-col gap-2 p-0">
+              {subtasks.map((st, index) => {
+                const isSelected = index === activeIndex;
+                const Icon = agentIcon(st.assigned_agent);
+                const deps = st.dependencies ?? [];
+                return (
+                  <li key={st.id} className="flex min-w-0 shrink-0 flex-col">
+                    {deps.length > 0 && (
+                      <p
+                        className="m-0 px-1 pb-1 text-maya-caption text-maya-muted [overflow-wrap:anywhere]"
+                        title={`Runs after: ${deps.join(", ")}`}
+                      >
+                        depends on: {dependencyLabel(deps)}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      ref={(el) => {
+                        nodeRefs.current[index] = el;
+                      }}
+                      tabIndex={isSelected ? 0 : -1}
+                      aria-pressed={isSelected}
+                      onClick={() => select(st)}
+                      onKeyDown={(event) => onNodeKeyDown(event, index)}
+                      className={`flex w-full min-w-0 flex-wrap items-start gap-x-3 gap-y-2 border p-3 text-left text-maya-text motion-interactive ${
+                        isSelected
+                          ? "border-maya-accent bg-maya-accent-soft"
+                          : "border-maya-border bg-maya-raised hover:bg-maya-hover"
+                      }`}
+                    >
+                      <span className="maya-tabular w-6 shrink-0 font-mono text-maya-mono text-maya-muted">
+                        {stepNumber(index)}
+                      </span>
+                      <span className="flex min-w-0 flex-1 basis-40 flex-col gap-1">
+                        <span className="flex min-w-0 items-center gap-2 text-maya-caption font-medium text-maya-secondary capitalize">
+                          <Icon
+                            aria-hidden="true"
+                            size={14}
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 [overflow-wrap:anywhere]">
+                            {st.assigned_agent} step
+                          </span>
+                        </span>
+                        <span
+                          dir="auto"
+                          title={st.description}
+                          className="min-w-0 text-maya-small [overflow-wrap:anywhere]"
+                        >
+                          {st.description}
+                        </span>
+                        {storedReviewLabel(st.output_result) !== null && (
+                          <span
+                            className="min-w-0 text-maya-caption text-maya-muted [overflow-wrap:anywhere]"
+                            data-testid="step-review"
+                          >
+                            {storedReviewLabel(st.output_result)}
+                          </span>
+                        )}
+                      </span>
+                      <TaskStatusBadge status={st.status} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </ScrollArea>
+        </section>
 
-        <div className="flex flex-col gap-2.5">
-          {subtasks.map((st, index) => {
-            const isSelected =
-              st.id === activeId || String(st.id) === String(activeId);
-            const hasDependencies =
-              st.dependencies && st.dependencies.length > 0;
+        {/* Inspector */}
+        {activeSubtask && (
+          <section
+            aria-label="Step details"
+            className="min-w-0 rounded-maya-lg overflow-hidden border border-maya-border bg-maya-pane"
+          >
+            <header className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-maya-border px-3 py-2">
+              <h3 className="m-0 min-w-0 text-maya-small font-medium text-maya-text capitalize [overflow-wrap:anywhere]">
+                Step {stepNumber(activeIndex)}: {activeSubtask.assigned_agent}
+              </h3>
+              <TaskStatusBadge status={activeSubtask.status} />
+            </header>
+            <ScrollArea
+              label="Step details content"
+              className="grid max-h-[26rem] content-start gap-4 p-3 text-maya-small"
+            >
+              <div className="min-w-0">
+                <SectionTitle>Description</SectionTitle>
+                <WrapText as="p" dir="auto" className="m-0 block">
+                  {activeSubtask.description}
+                </WrapText>
+              </div>
 
-            return (
-              <div key={st.id} className="flex flex-col">
-                {/* Dependency Connector Indicator with neon line */}
-                {hasDependencies && (
-                  <div className="flex items-center gap-2 pl-7 py-1 text-[11px] text-zinc-400 font-mono">
-                    <span className="w-3 h-px bg-teal-500/40" />
-                    <span>depends on: {st.dependencies.join(", ")}</span>
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="maya-label shrink-0">Step id</span>
+                <WrapText
+                  as="code"
+                  className="min-w-0 flex-1 font-mono text-maya-mono text-maya-muted"
+                >
+                  {activeSubtask.id}
+                </WrapText>
+                <CopyId id={activeSubtask.id} />
+              </div>
+
+              {activeSubtask.dependencies &&
+                activeSubtask.dependencies.length > 0 && (
+                  <div className="min-w-0">
+                    <SectionTitle>Runs after</SectionTitle>
+                    <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
+                      {activeSubtask.dependencies.map((dep) => (
+                        <li key={dep} className="min-w-0">
+                          <Badge tone="neutral" title={dep}>
+                            Step {numberById.get(dep) ?? dep}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
-                {/* Subtask Node Card */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setInternalSelectedId(st.id);
-                    onSelectSubtask?.(st);
-                  }}
-                  className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer relative overflow-hidden group ${
-                    isSelected
-                      ? "border-teal-400/50 bg-gradient-to-r from-teal-950/40 via-zinc-900/80 to-zinc-900/80 shadow-[0_0_20px_rgba(20,184,166,0.15)] ring-1 ring-teal-400/30"
-                      : "border-white/5 bg-zinc-900/30 hover:bg-zinc-900/60 hover:border-white/10"
-                  }`}
-                  aria-pressed={isSelected}
-                >
-                  {/* Subtle top edge glow */}
-                  {isSelected && (
-                    <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-400/60 to-transparent" />
-                  )}
+              {activeSubtask.error_message && (
+                <div className="min-w-0">
+                  <SectionTitle>What went wrong</SectionTitle>
+                  <FailureReason
+                    error={activeSubtask.error_message}
+                    note={
+                      activeSubtask.retry_count > 0
+                        ? `Retried ${activeSubtask.retry_count} ${
+                            activeSubtask.retry_count === 1 ? "time" : "times"
+                          }.`
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
 
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-mono font-bold text-zinc-500 w-5">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <div className="p-2 rounded-lg bg-zinc-800/80 border border-white/10 shadow-inner">
-                        {getAgentIcon(st.assigned_agent)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">
-                            {st.assigned_agent} Agent
-                          </span>
-                          <span className="text-[10px] font-mono text-zinc-500">
-                            #{st.id.slice(0, 8)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-zinc-300 line-clamp-1 mt-0.5 font-medium">
-                          {st.description}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      {getStatusBadge(st.status)}
-                      <ArrowRight
-                        className={`w-4 h-4 transition-transform duration-200 ${
-                          isSelected
-                            ? "text-teal-400 translate-x-0.5"
-                            : "text-zinc-600 group-hover:text-zinc-400"
-                        }`}
-                      />
-                    </div>
-                  </div>
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Right Column: Node Inspector Panel with Verification & Citation Previews */}
-      {activeSubtask && (
-        <div className="w-full lg:w-96 flex flex-col rounded-xl bg-zinc-900/60 backdrop-blur-xl border border-white/10 p-4 shadow-xl shrink-0">
-          {/* Inspector Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-white/5">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-lg bg-zinc-800/90 border border-white/10 shadow-xs">
-                {getAgentIcon(activeSubtask.assigned_agent)}
-              </div>
-              <div>
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">
-                  {activeSubtask.assigned_agent} Node
-                </span>
-                <p className="text-[10px] font-mono text-zinc-400">
-                  ID: {activeSubtask.id}
+              {citationCount !== null && extractedCitations.length === 0 && (
+                <p className="m-0 text-maya-caption text-maya-secondary">
+                  {citationCount} {citationCount === 1 ? "source" : "sources"}{" "}
+                  recorded.
                 </p>
-              </div>
-            </div>
-            {getStatusBadge(activeSubtask.status)}
-          </div>
+              )}
 
-          {/* Inspector Scroll Body */}
-          <div className="flex flex-col gap-4 pt-3 text-xs overflow-y-auto max-h-[500px] pr-1">
-            {/* Description */}
-            <div className="p-3 rounded-lg bg-zinc-950/50 border border-white/5">
-              <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
-                Instruction / Description
-              </span>
-              <p className="text-zinc-200 leading-relaxed font-medium">
-                {activeSubtask.description}
-              </p>
-            </div>
-
-            {/* Dependencies */}
-            {activeSubtask.dependencies &&
-              activeSubtask.dependencies.length > 0 && (
-                <div>
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
-                    Predecessor Dependencies
-                  </span>
-                  <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                    {activeSubtask.dependencies.map((dep) => (
-                      <span
-                        key={dep}
-                        className="px-2 py-0.5 rounded-md bg-zinc-800/80 text-teal-300 border border-teal-500/20 font-semibold"
+              {extractedCitations.length > 0 && (
+                <div className="min-w-0">
+                  <SectionTitle>
+                    Sources ({extractedCitations.length})
+                  </SectionTitle>
+                  <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                    {extractedCitations.map((c) => (
+                      <li
+                        key={String(c.id)}
+                        className="min-w-0 rounded-maya-md border border-maya-border bg-maya-raised p-2 text-maya-caption"
                       >
-                        {dep}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            {/* Citation Previews */}
-            {extractedCitations.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <LinkIcon className="w-3 h-3" />
-                    <span>Citation Previews ({extractedCitations.length})</span>
-                  </span>
-                  <span className="text-[10px] font-mono text-zinc-500">
-                    Brave Verified
-                  </span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {extractedCitations.map((c) => (
-                    <div
-                      key={String(c.id)}
-                      className="p-2.5 rounded-lg bg-cyan-950/20 border border-cyan-500/20 hover:border-cyan-500/40 transition-colors flex flex-col gap-1 text-[11px]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-cyan-200 line-clamp-1">
-                          {c.title}
-                        </span>
-                        {c.url && (
-                          <a
-                            href={c.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-cyan-400 hover:text-cyan-300 p-0.5 rounded transition-colors shrink-0"
-                            title="Open external citation"
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <span
+                            dir="auto"
+                            className="min-w-0 font-medium text-maya-text [overflow-wrap:anywhere]"
                           >
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                            {c.title}
+                          </span>
+                          {c.url && (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-maya-link"
+                              title="Open source in a new window"
+                              aria-label={`Open source: ${c.title ?? c.url}`}
+                            >
+                              <ExternalLink aria-hidden="true" size={14} />
+                            </a>
+                          )}
+                        </div>
+                        {c.snippet && (
+                          <p
+                            dir="auto"
+                            className="m-0 mt-1 text-maya-secondary [overflow-wrap:anywhere]"
+                          >
+                            &ldquo;{c.snippet}&rdquo;
+                          </p>
                         )}
-                      </div>
-                      {c.snippet && (
-                        <p className="text-zinc-400 line-clamp-2 leading-relaxed text-[11px] font-mono">
-                          &ldquo;{c.snippet}&rdquo;
-                        </p>
-                      )}
-                      {c.domain && (
-                        <span className="text-[10px] font-mono text-cyan-400/80 mt-0.5">
-                          {c.domain}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Verification Proof Display (Decision D8) */}
-            {Boolean(activeSubtask.verification_proof) && (
-              <div>
-                <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Verification Proof</span>
-                </span>
-                <pre className="p-3 rounded-lg bg-zinc-950/80 border border-emerald-500/20 text-[11px] font-mono text-emerald-300 overflow-x-auto shadow-inner leading-relaxed">
-                  {JSON.stringify(activeSubtask.verification_proof, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {/* Output Result */}
-            {activeSubtask.output_result !== undefined &&
-              activeSubtask.output_result !== null && (
-                <div>
-                  <span className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Output Result</span>
-                  </span>
-                  <pre className="p-3 rounded-lg bg-zinc-950/80 border border-white/5 text-[11px] font-mono text-zinc-300 overflow-x-auto shadow-inner leading-relaxed">
-                    {typeof activeSubtask.output_result === "object"
-                      ? JSON.stringify(activeSubtask.output_result, null, 2)
-                      : String(activeSubtask.output_result)}
-                  </pre>
+                        {c.domain && (
+                          <p className="m-0 mt-1 font-mono text-maya-muted [overflow-wrap:anywhere]">
+                            {c.domain}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
-            {/* Error & Retry */}
-            {activeSubtask.error_message && (
-              <div>
-                <span className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Error (Retries: {activeSubtask.retry_count})</span>
-                </span>
-                <p className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-200 text-xs font-mono leading-relaxed">
-                  {activeSubtask.error_message}
-                </p>
-              </div>
-            )}
-
-            {/* Input Data */}
-            {activeSubtask.input_data &&
-              Object.keys(activeSubtask.input_data).length > 0 && (
-                <div>
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
-                    Input Parameters
-                  </span>
-                  <pre className="p-2.5 rounded-lg bg-zinc-950/60 border border-white/5 text-[11px] font-mono text-zinc-400 overflow-x-auto leading-relaxed">
-                    {JSON.stringify(activeSubtask.input_data, null, 2)}
-                  </pre>
+              {Boolean(activeSubtask.verification_proof) && (
+                <div className="min-w-0">
+                  <SectionTitle>Verification Proof</SectionTitle>
+                  <CodeBlockShell
+                    label="Verification proof"
+                    maxHeight="14rem"
+                    className="whitespace-pre-wrap [overflow-wrap:anywhere]"
+                  >
+                    {prettyJson(activeSubtask.verification_proof)}
+                  </CodeBlockShell>
                 </div>
               )}
-          </div>
-        </div>
-      )}
+
+              {activeSubtask.output_result !== undefined &&
+                activeSubtask.output_result !== null && (
+                  <div className="min-w-0">
+                    <SectionTitle>Output</SectionTitle>
+                    <CodeBlockShell
+                      label="Step output"
+                      maxHeight="14rem"
+                      className="whitespace-pre-wrap [overflow-wrap:anywhere]"
+                    >
+                      {prettyJson(activeSubtask.output_result)}
+                    </CodeBlockShell>
+                  </div>
+                )}
+
+              {activeSubtask.input_data &&
+                Object.keys(activeSubtask.input_data).length > 0 && (
+                  <div className="min-w-0">
+                    <SectionTitle>Input</SectionTitle>
+                    <CodeBlockShell
+                      label="Step input"
+                      maxHeight="12rem"
+                      className="whitespace-pre-wrap [overflow-wrap:anywhere]"
+                    >
+                      {prettyJson(activeSubtask.input_data)}
+                    </CodeBlockShell>
+                  </div>
+                )}
+            </ScrollArea>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

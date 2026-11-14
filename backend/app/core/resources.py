@@ -13,6 +13,7 @@ from app.core.redis import create_redis_client
 from app.db.session import create_database_engine
 from app.db.tenant import verify_runtime_role
 from app.gateway.cost_tracker import BudgetTracker
+from app.gateway.key_pool import KeyPool
 from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import ModelRegistry, build_default_registry
 from app.tasks.events import TaskEventPublisher
@@ -33,10 +34,13 @@ class Resources:
         self.timeout = settings.probe_timeout_seconds
         self.registry: ModelRegistry = build_default_registry(settings.gemini_model_overrides)
         self.budget_tracker = BudgetTracker(self.redis, settings)
+        effective = getattr(settings, "effective_gemini_api_keys", [])
+        self.key_pool = KeyPool(effective) if effective else None
         self.model_gateway = ModelGateway(
             registry=self.registry,
             settings=settings,
             budget_tracker=self.budget_tracker,
+            key_pool=self.key_pool,
         )
         self.subtask_queue = SubtaskQueue()
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)

@@ -110,7 +110,9 @@ class VoiceSessionManager:
         now = current_time if current_time is not None else time.time()
         return (now - session_created_at) >= self.expiry_threshold
 
-    async def rotate_session(self, old_session: LiveVoiceSession) -> LiveVoiceSession:
+    async def rotate_session(
+        self, old_session: LiveVoiceSession, resumption_handle: str | None = None
+    ) -> LiveVoiceSession:
         """Transparently rotate an active session to a new instance preserving context."""
         new_session_id = str(uuid4())
         new_session = LiveVoiceSession(
@@ -125,14 +127,14 @@ class VoiceSessionManager:
         # Preserve active tracked tasks
         new_session._active_task_ids = set(old_session._active_task_ids)
 
-        # Generate and store a resumption token
-        token = f"token-renewed-{new_session_id}"
-        await self.store_resumption_token(
-            old_session.workspace_id,
-            new_session_id,
-            token,
-            ttl_seconds=int(self.expiry_threshold),
-        )
+        # Only a real provider handle is stored; none is ever fabricated.
+        if resumption_handle:
+            await self.store_resumption_token(
+                old_session.workspace_id,
+                new_session_id,
+                resumption_handle,
+                ttl_seconds=int(self.expiry_threshold),
+            )
 
         # Notify client of transparent renewal
         renewal_msg = OutgoingMessage(

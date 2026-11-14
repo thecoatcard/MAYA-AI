@@ -158,7 +158,7 @@ artifacts, not a claim that every named future file exists.
 - **Task ID:** P01-T005
 - **Task Name:** Initialize Next.js 15 Web Client with Tailwind CSS
 - **Detailed Description:** Scaffold `apps/web/` using a pinned Next.js 15 release, App Router, TypeScript, and Tailwind CSS. Configure `build`, `lint`, `typecheck`, and `test` scripts required by the repository stack checks. Create the root layout and basic navigation skeleton; do not imply authenticated chat UI is delivered in this phase.
-- **Expected Files:** `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`. Add an API client only when a consumer exists.
+- **Expected Files:** `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/src/app/layout.tsx`, `apps/web/src/app/(app)/page.tsx`. Add an API client only when a consumer exists.
 - **Dependencies:** P01-T001.
 - **Assigned Agent Role:** Frontend Systems Engineer.
 - **Required Tests:** `npm --prefix apps/web run lint`, `npm --prefix apps/web run typecheck`, `npm --prefix apps/web test`, and `npm --prefix apps/web run build`.
@@ -241,7 +241,7 @@ artifacts, not a claim that every named future file exists.
   - `apps/web/package.json`
   - `apps/web/tsconfig.json`
   - `apps/web/src/app/layout.tsx`
-  - `apps/web/src/app/page.tsx`
+  - `apps/web/src/app/(app)/page.tsx`
   - proposed ADR-0003 and benchmark report
 
 The health router is mounted by the application factory; no extra router wrapper

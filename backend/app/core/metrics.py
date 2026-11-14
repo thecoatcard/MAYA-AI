@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import defaultdict
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger("maya.metrics")
@@ -268,8 +269,85 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
 )
 REGISTRY.register(HTTP_REQUEST_DURATION_SECONDS)
 
+# 7. Gemini API key pool state
+GEMINI_KEY_POOL_SIZE = Gauge(
+    "maya_gemini_key_pool_size",
+    "Total number of Gemini API keys configured in the key pool",
+)
+REGISTRY.register(GEMINI_KEY_POOL_SIZE)
+
+GEMINI_KEY_POOL_COOLING = Gauge(
+    "maya_gemini_key_pool_cooling",
+    "Number of Gemini API keys currently in cooldown",
+)
+REGISTRY.register(GEMINI_KEY_POOL_COOLING)
+
+GEMINI_KEY_POOL_BAD = Gauge(
+    "maya_gemini_key_pool_bad",
+    "Number of Gemini API keys marked invalid or unauthorized for the process lifetime",
+)
+REGISTRY.register(GEMINI_KEY_POOL_BAD)
+
+# Per-key series use the ``key#N`` label only (never key text); at most one series per pool key.
+GEMINI_KEY_CALLS_TOTAL = Counter(
+    "maya_gemini_key_calls_total",
+    "Gemini provider attempts by key label, model alias and outcome (ok or error)",
+    label_names=["key", "alias", "outcome"],
+)
+REGISTRY.register(GEMINI_KEY_CALLS_TOTAL)
+
+GEMINI_KEY_FAILOVERS_TOTAL = Counter(
+    "maya_gemini_key_failovers_total",
+    "Attempts moved off a key to another key, by the failed key's label and the reason",
+    label_names=["key", "reason"],
+)
+REGISTRY.register(GEMINI_KEY_FAILOVERS_TOTAL)
+
+GEMINI_KEY_COOLDOWNS_TOTAL = Counter(
+    "maya_gemini_key_cooldowns_total",
+    "Cooldowns or invalidations applied to a key, by label and reason",
+    label_names=["key", "reason"],
+)
+REGISTRY.register(GEMINI_KEY_COOLDOWNS_TOTAL)
+
+# Chat replies that claimed a background task was started when none was (a guard corrects them).
+CHAT_FALSE_TASK_CLAIM_TOTAL = Counter(
+    "maya_chat_false_task_claim_total",
+    "Chat replies that claimed a task was started although no task was created this turn",
+)
+REGISTRY.register(CHAT_FALSE_TASK_CLAIM_TOTAL)
+
+# Where one chat turn spends its time. ``phase``: recall (memory embedding before the model call),
+# first_chunk (model call opened to first chunk), first_delta (turn start to the first text sent)
+# and total. ``outcome``: completed, failed or cancelled; recall also uses hit, empty, timeout,
+# error and skipped. Labels never carry user content, ids or model text.
+CHAT_TURN_PHASE_SECONDS = Histogram(
+    "maya_chat_turn_phase_seconds",
+    "Seconds a chat turn spends in each phase (recall, first_chunk, first_delta, total)",
+    label_names=["phase", "outcome"],
+    buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0, 34.0, 60.0, 120.0],
+)
+REGISTRY.register(CHAT_TURN_PHASE_SECONDS)
+
+
+def route_label(scope: Mapping[str, Any]) -> str:
+    """Low-cardinality ``endpoint`` label: the route template, never the raw path (UUIDs)."""
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if isinstance(template, str) and template:
+        return template
+    return "unmatched"
+
 
 def generate_latest(registry: PrometheusRegistry | None = None) -> str:
     """Generate Prometheus 0.0.4 text output for scraping."""
     reg = registry or REGISTRY
     return reg.generate_latest()
+
+
+DECISION_CALLS_TOTAL = Counter(
+    "maya_decision_calls_total",
+    "Gemini decision model calls by purpose and outcome (never content)",
+    label_names=["purpose", "outcome"],
+)
+REGISTRY.register(DECISION_CALLS_TOTAL)

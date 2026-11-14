@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  artifactToFile,
+  canOpenNatively,
+  deleteArtifact,
+  downloadArtifact,
+  downloadFileName,
   downloadArtifactFile,
+  openArtifactNatively,
   getArtifactDownloadUrl,
   getArtifactMetadata,
   listArtifacts,
@@ -135,5 +141,102 @@ describe("artifacts-client", () => {
     const result = await getArtifactMetadata("art-1");
     expect(result.sha256).toBe("abc123sha");
     expect(result.verification_status).toBe("verified");
+  });
+
+  it("names a download with its real extension, zips included", () => {
+    expect(downloadFileName("report.pdf", "pdf")).toBe("report.pdf");
+    expect(downloadFileName("bundle", "zip")).toBe("bundle.zip");
+    expect(downloadFileName("site.tar.gz", "zip")).toBe("site.tar.gz");
+    expect(downloadFileName("a/b\\c.zip", "zip")).toBe("c.zip");
+    expect(downloadFileName("", "")).toBe("download");
+  });
+
+  it("saves a zip under its file name", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["PK"]), { status: 200 })),
+    );
+    window.URL.createObjectURL = vi.fn(() => "blob:x");
+    window.URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.download).toBe("site.zip");
+      });
+    await downloadArtifact("art-9", "site", "zip");
+    expect(click).toHaveBeenCalled();
+    click.mockRestore();
+  });
+
+  it("deletes with DELETE and the bearer token", async () => {
+    setAccessToken("t", 3600);
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await deleteArtifact("a/1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/artifacts/a%2F1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("surfaces a failed delete", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 500 })),
+    );
+    await expect(deleteArtifact("a")).rejects.toBeTruthy();
+  });
+
+  it("cannot open natively in a plain browser", async () => {
+    expect(canOpenNatively()).toBe(false);
+    expect(
+      await openArtifactNatively({
+        id: "a",
+        file_name: "x.pdf",
+        file_type: "pdf",
+      }),
+    ).toEqual({ ok: false, reason: "no-desktop" });
+  });
+
+  it("opens through the desktop bridge with an id, never a path", async () => {
+    setAccessToken("tok", 3600);
+    const openArtifact = vi.fn(async () => ({ ok: true }));
+    (window as unknown as { maya: unknown }).maya = {
+      isDesktop: true,
+      openArtifact,
+    };
+    try {
+      expect(canOpenNatively()).toBe(true);
+      const result = await openArtifactNatively({
+        id: "a-1",
+        file_name: "deck",
+        file_type: "pptx",
+      });
+      expect(result).toEqual({ ok: true });
+      expect(openArtifact).toHaveBeenCalledWith({
+        artifactId: "a-1",
+        fileName: "deck.pptx",
+        token: "tok",
+      });
+    } finally {
+      delete (window as unknown as { maya?: unknown }).maya;
+    }
+  });
+
+  it("turns the artifact into a File for the chat", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("hello", { status: 200 })),
+    );
+    const file = await artifactToFile({
+      id: "a",
+      file_name: "notes",
+      file_type: "pdf",
+    });
+    expect(file.name).toBe("notes.pdf");
+    expect(file.size).toBe(5);
   });
 });

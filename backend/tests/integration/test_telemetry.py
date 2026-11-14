@@ -157,7 +157,10 @@ def test_prometheus_metrics_registry() -> None:
 def test_fastapi_metrics_scrape_endpoint() -> None:
     """Verify GET /metrics endpoint returns valid Prometheus 0.0.4 text format."""
     # Track some test production metrics
-    TOKEN_USAGE_TOTAL.inc(120.0, {"alias": "orchestrator", "type": "prompt"})
+    # Other tests (the gateway) add to this process-wide counter, so assert the exact total.
+    prompt_labels = {"alias": "orchestrator", "type": "prompt"}
+    TOKEN_USAGE_TOTAL.inc(120.0, prompt_labels)
+    prompt_total = TOKEN_USAGE_TOTAL.get(prompt_labels)
     SPEND_USD_TOTAL.inc(0.045, {"workspace_id": "ws-alpha"})
     VOICE_LATENCY_SECONDS.observe(0.35)
     TASK_DURATION_SECONDS.observe(4.2, {"status": "completed"})
@@ -189,7 +192,9 @@ def test_fastapi_metrics_scrape_endpoint() -> None:
         body = metrics_resp.text
         assert "# HELP maya_token_usage_total" in body
         assert "# TYPE maya_token_usage_total counter" in body
-        assert 'maya_token_usage_total{alias="orchestrator",type="prompt"} 120.0' in body
+        assert (
+            f'maya_token_usage_total{{alias="orchestrator",type="prompt"}} {prompt_total}' in body
+        )
         assert 'maya_mcp_server_health{server_name="filesystem"} 1.0' in body
         assert "# HELP maya_voice_latency_seconds" in body
         assert "maya_http_requests_total" in body

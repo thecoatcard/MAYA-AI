@@ -59,7 +59,7 @@ Identify the verified successor model ID (e.g. `gemini-3.8-flash` replacing an o
 Update the model alias mapping without changing application source code (Decision D13):
 ```bash
 # Example: Point 'orchestrator' alias to updated model ID
-export MAYA_GEMINI_MODEL_OVERRIDES='{"orchestrator": "gemini-3.8-flash"}'
+export MAYA_GEMINI_MODEL_OVERRIDES='{"orchestrator": "gemini-4-hydrogen"}'
 
 # Apply to production compose
 docker compose -f docker/docker-compose.prod.yml up -d --no-deps backend

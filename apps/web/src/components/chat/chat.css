@@ -1,235 +1,45 @@
 /*
- * MAYA shared UI: design tokens and component rules.
+ * Conversation, composer and shared sign-in rules.
  *
- * Imported by chat and sign-in components, so it loads only on those routes.
- * Tokens live on the shared .maya-app wrapper for landing, account and chat.
+ * Imported by the chat view and by the sign-in components. Everything themeable comes from the
+ * design tokens in app/globals.css (docs/architecture/UI_DESIGN_SYSTEM.md): this file declares no
+ * colours and no theme of its own. Rules of the standards document that apply here:
+ *  - tokens only (colours, sizes, spacing, radii, durations, easing);
+ *  - motion animates transform and opacity only, and every animation has a static equivalent
+ *    under prefers-reduced-motion (see the end of the file);
+ *  - nothing is blurred, glowing or gradient, and nothing requests an external resource.
  *
- * Rules of this file (docs/architecture/UI_UX_STANDARDS.md):
- *  - every colour, size, space, radius, shadow and duration is a token below;
- *  - both themes are defined (system by default, or data-maya-theme on the root);
- *  - motion animates transform and opacity only, and every animation has a
- *    static equivalent under prefers-reduced-motion (see the end of the file);
- *  - there are no external fonts, images or requests.
+ * Message arrival and the voice orb use the motion classes of globals.css (motion-message,
+ * motion-orb), not keyframes written here.
  */
 
-/* ------------------------------------------------------------------ tokens */
+/* ------------------------------------------------ chat-local sizes and timings */
 
-.maya-app {
-  color-scheme: light;
-  min-height: 100vh;
-  background: var(--maya-bg);
-  color: var(--maya-text);
-  font-family: var(--maya-font-sans);
-
-  /* Owner-approved local-only typeface; no external font request is made. */
-  --maya-font-sans: system-ui;
-  --maya-font-mono:
-    ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono",
-    monospace;
-
-  /* Type scale: size / line height */
-  --maya-text-caption: 0.75rem;
-  --maya-leading-caption: 1rem;
-  --maya-text-small: 0.875rem;
-  --maya-leading-small: 1.25rem;
-  --maya-text-body: 1rem;
-  --maya-leading-body: 1.65;
-  --maya-text-heading: 1.125rem;
-  --maya-text-title: 1.5rem;
-  --maya-leading-title: 2rem;
-  --maya-text-mono: 0.875rem;
-  --maya-leading-mono: 1.6;
-
-  /* Letter spacing */
-  --maya-tracking-wide: 0.14em;
-  --maya-tracking-caps: 0.1em;
-  --maya-tracking-tight: -0.02em;
-
-  /* Spacing, 4 px base */
-  --maya-space-1: 0.25rem;
-  --maya-space-2: 0.5rem;
-  --maya-space-3: 0.75rem;
-  --maya-space-4: 1rem;
-  --maya-space-5: 1.25rem;
-  --maya-space-6: 1.5rem;
-  --maya-space-8: 2rem;
-  --maya-space-10: 2.5rem;
-  --maya-space-12: 3rem;
-
-  /* Radius */
-  --maya-radius-sm: 6px;
-  --maya-radius-md: 10px;
-  --maya-radius-lg: 16px;
-
-  /* Layout */
-  --maya-column: 44rem;
-  --maya-column-wide: 64rem;
-  --maya-sidebar-width: 18rem;
-  --maya-sidebar-mobile-width: 86vw;
-  --maya-account-width: 30rem;
-  --maya-auth-check-width: 28rem;
-  --maya-text-display: clamp(var(--maya-text-title), 6vw, 4rem);
-  --maya-leading-display: 1.08;
-  --maya-home-measure: 12ch;
-  --maya-state-scrim-opacity: 0.45;
-  --maya-measure: 70ch;
-  --maya-touch: 2.75rem;
-  --maya-control: 2rem;
+/*
+ * Non-theme values that only this file needs. Theme colours, the type scale, spacing, radii,
+ * layers and the main durations are tokens in globals.css.
+ */
+:root {
   --maya-composer-max: 12rem;
   --maya-dot: 0.375rem;
-
-  /* Z-index */
-  --maya-z-base: 0;
-  --maya-z-float: 10;
-
-  /* Motion */
-  --maya-dur-instant: 90ms;
-  --maya-dur-fast: 150ms;
-  --maya-dur-base: 220ms;
-  --maya-dur-slow: 360ms;
-  --maya-dur-loop: 1200ms;
-  --maya-dur-ripple: 360ms;
-  --maya-dur-shimmer: 1200ms;
-  --maya-dur-ambient: 24s;
-  --maya-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --maya-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --maya-ease-in: cubic-bezier(0.4, 0, 1, 1);
-  --maya-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --maya-dur-loop: calc(1200ms * var(--maya-motion-scale));
+  --maya-dur-ripple: calc(360ms * var(--maya-motion-scale));
   --maya-ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --maya-rise: 0.5rem;
-  --maya-glass-blur: 16px;
   --maya-state-hover-opacity: 0.06;
   --maya-state-focus-opacity: 0.08;
   --maya-state-pressed-opacity: 0.12;
   --maya-state-ripple-opacity: 0.18;
   --maya-ripple-size: 14rem;
-
-  /* Colour roles: light */
-  --maya-bg: #f4f6f9;
-  --maya-surface: #fbfcfd;
-  --maya-raised: #fefefe;
-  --maya-code-bg: #eef2f7;
-  --maya-hover: #e9eef5;
-  --maya-border: #d9e0ea;
-  --maya-border-strong: #b6c2d2;
-  --maya-control-border: #7b8aa0;
-  --maya-text: #0f1b2c;
-  --maya-text-muted: #4a5a70;
-  --maya-accent: #0b7a70;
-  --maya-accent-hover: #086860;
-  --maya-accent-text: #f2fffd;
-  --maya-link: #0a6a62;
-  --maya-focus: #0a6a62;
-  --maya-danger: #b4232b;
-  --maya-danger-soft: rgb(180 35 43 / 0.07);
-  --maya-warning: #8a5a00;
-  --maya-disabled-bg: #e6ebf2;
-  --maya-disabled-text: #6b7a90;
-  --maya-glass-surface: rgb(251 252 253 / 0.94);
-  --maya-glass-raised: rgb(254 254 254 / 0.96);
-  --maya-glass-border: rgb(182 194 210 / 0.72);
-  --maya-state-layer: #0f1b2c;
-  --maya-ambient: rgb(11 122 112 / 0.09);
-
-  /* Syntax colours */
-  --maya-tok-keyword: #0b6a62;
-  --maya-tok-string: #9a4a00;
-  --maya-tok-number: #2f58b8;
-  --maya-tok-comment: #5b6b82;
-  --maya-tok-name: #7a3fa8;
-  --maya-tok-type: #0a6a8f;
-
-  /* Three restrained elevation levels; message surfaces remain flat. */
-  --maya-shadow-1: 0 1px 2px rgb(15 27 44 / 0.08);
-  --maya-shadow-2: 0 8px 24px rgb(15 27 44 / 0.16);
-  --maya-shadow-3: 0 18px 48px rgb(15 27 44 / 0.2);
 }
 
-@media (prefers-color-scheme: dark) {
-  .maya-app:not([data-maya-theme="light"]) {
-    color-scheme: dark;
-    --maya-bg: #0c1522;
-    --maya-surface: #111d2d;
-    --maya-raised: #172539;
-    --maya-code-bg: #0a111c;
-    --maya-hover: #1d2d44;
-    --maya-border: #223249;
-    --maya-border-strong: #34496a;
-    --maya-control-border: #5a6f8c;
-    --maya-text: #e7edf5;
-    --maya-text-muted: #9db0c7;
-    --maya-accent: #2dd4bf;
-    --maya-accent-hover: #5eead4;
-    --maya-accent-text: #052b27;
-    --maya-link: #5eead4;
-    --maya-focus: #5eead4;
-    --maya-danger: #f87171;
-    --maya-danger-soft: rgb(248 113 113 / 0.1);
-    --maya-warning: #fbbf24;
-    --maya-disabled-bg: #182539;
-    --maya-disabled-text: #7d90aa;
-    --maya-glass-surface: rgb(17 29 45 / 0.94);
-    --maya-glass-raised: rgb(23 37 57 / 0.96);
-    --maya-glass-border: rgb(52 73 106 / 0.72);
-    --maya-state-layer: #e7edf5;
-    --maya-ambient: rgb(45 212 191 / 0.1);
-    --maya-tok-keyword: #5eead4;
-    --maya-tok-string: #f0c27a;
-    --maya-tok-number: #8fb4ff;
-    --maya-tok-comment: #8a9db6;
-    --maya-tok-name: #d3b4ff;
-    --maya-tok-type: #7dd3fc;
-    --maya-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-    --maya-shadow-2: 0 8px 24px rgb(0 0 0 / 0.5);
-    --maya-shadow-3: 0 18px 48px rgb(0 0 0 / 0.55);
-  }
-}
-
-.maya-app[data-maya-theme="dark"] {
-  color-scheme: dark;
-  --maya-bg: #0c1522;
-  --maya-surface: #111d2d;
-  --maya-raised: #172539;
-  --maya-code-bg: #0a111c;
-  --maya-hover: #1d2d44;
-  --maya-border: #223249;
-  --maya-border-strong: #34496a;
-  --maya-control-border: #5a6f8c;
-  --maya-text: #e7edf5;
-  --maya-text-muted: #9db0c7;
-  --maya-accent: #2dd4bf;
-  --maya-accent-hover: #5eead4;
-  --maya-accent-text: #052b27;
-  --maya-link: #5eead4;
-  --maya-focus: #5eead4;
-  --maya-danger: #f87171;
-  --maya-danger-soft: rgb(248 113 113 / 0.1);
-  --maya-warning: #fbbf24;
-  --maya-disabled-bg: #182539;
-  --maya-disabled-text: #7d90aa;
-  --maya-glass-surface: rgb(17 29 45 / 0.94);
-  --maya-glass-raised: rgb(23 37 57 / 0.96);
-  --maya-glass-border: rgb(52 73 106 / 0.72);
-  --maya-state-layer: #e7edf5;
-  --maya-ambient: rgb(45 212 191 / 0.1);
-  --maya-tok-keyword: #5eead4;
-  --maya-tok-string: #f0c27a;
-  --maya-tok-number: #8fb4ff;
-  --maya-tok-comment: #8a9db6;
-  --maya-tok-name: #d3b4ff;
-  --maya-tok-type: #7dd3fc;
-  --maya-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-  --maya-shadow-2: 0 8px 24px rgb(0 0 0 / 0.5);
-  --maya-shadow-3: 0 18px 48px rgb(0 0 0 / 0.55);
-}
-
-/* The chat is a fixed-height app shell; keep the page from rubber-banding. */
+/* The sign-in pages are a fixed-height shell; keep the page from rubber-banding. */
 :root:has(.maya-chat) {
   overscroll-behavior: none;
 }
 
 /* ------------------------------------------------------------------- shell */
 
+/* Used by the sign-in pages (their own package restyles them). */
 .maya-chat {
   display: flex;
   flex-direction: column;
@@ -243,18 +53,6 @@
   -webkit-font-smoothing: antialiased;
 }
 
-.maya-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
 .maya-chat :is(a, button, [tabindex]):focus-visible {
   outline: 2px solid var(--maya-focus);
   outline-offset: 2px;
@@ -266,21 +64,7 @@
   z-index: var(--maya-z-float);
   flex: none;
   border-bottom: 1px solid var(--maya-border);
-  background: var(--maya-glass-surface);
-  backdrop-filter: blur(var(--maya-glass-blur));
-}
-
-@supports not (backdrop-filter: blur(1px)) {
-  .maya-chat__header {
-    background: var(--maya-raised);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .maya-chat__header {
-    background: var(--maya-raised);
-    backdrop-filter: none;
-  }
+  background: var(--maya-raised);
 }
 
 .maya-chat__header-inner {
@@ -303,7 +87,7 @@
   color: var(--maya-text);
   font-size: var(--maya-text-small);
   font-weight: 600;
-  letter-spacing: var(--maya-tracking-wide);
+  letter-spacing: var(--maya-tracking-label);
   text-decoration: none;
 }
 
@@ -373,9 +157,7 @@
     color var(--maya-dur-fast) var(--maya-ease-standard);
 }
 
-.maya-btn::before,
-.maya-theme__option::before,
-.maya-session::before {
+.maya-btn::before {
   position: absolute;
   z-index: -1;
   inset: 0;
@@ -387,21 +169,15 @@
   transition: opacity var(--maya-dur-fast) var(--maya-ease-standard);
 }
 
-.maya-btn:hover:not(:disabled)::before,
-.maya-theme__option:hover::before,
-.maya-session:hover::before {
+.maya-btn:hover:not(:disabled)::before {
   opacity: var(--maya-state-hover-opacity);
 }
 
-.maya-btn:focus-visible::before,
-.maya-theme__option:focus-visible::before,
-.maya-session:focus-visible::before {
+.maya-btn:focus-visible::before {
   opacity: var(--maya-state-focus-opacity);
 }
 
-.maya-btn:active:not(:disabled)::before,
-.maya-theme__option:active::before,
-.maya-session:active::before {
+.maya-btn:active:not(:disabled)::before {
   opacity: var(--maya-state-pressed-opacity);
 }
 
@@ -461,112 +237,62 @@
   }
 }
 
-.maya-tag {
-  display: inline-block;
-  margin: 0;
-  padding: 0.125rem var(--maya-space-2);
-  border: 1px solid var(--maya-border-strong);
-  border-radius: var(--maya-radius-sm);
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-  font-weight: 600;
-  line-height: var(--maya-leading-caption);
-  letter-spacing: var(--maya-tracking-caps);
-  text-transform: uppercase;
-}
-
-/* ------------------------------------------------------------ theme toggle */
-
-.maya-theme {
-  display: inline-flex;
-  padding: 2px;
-  border: 1px solid var(--maya-border);
-  border-radius: var(--maya-radius-md);
-  background: var(--maya-surface);
-}
-
-.maya-theme__option {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-  width: var(--maya-control);
-  height: var(--maya-control);
-  border: 0;
-  border-radius: var(--maya-radius-sm);
-  background: transparent;
-  color: var(--maya-text-muted);
-  cursor: pointer;
-  transition:
-    background-color var(--maya-dur-fast) var(--maya-ease-out),
-    color var(--maya-dur-fast) var(--maya-ease-out);
-}
-
-.maya-theme__option[aria-pressed="true"] {
-  background: var(--maya-raised);
-  color: var(--maya-text);
-  box-shadow:
-    var(--maya-shadow-1),
-    inset 0 0 0 1px var(--maya-border-strong);
-}
-
-@media (hover: hover) {
-  .maya-theme__option:hover {
-    color: var(--maya-text);
-  }
-}
-
 /* ------------------------------------------------------------------ thread */
 
 .maya-thread {
   position: relative;
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
+/* The one scroll region of the conversation pane. */
 .maya-thread__scroll {
-  display: block;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
-  height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
-.maya-chat .maya-thread__scroll:focus-visible {
+.maya-thread__scroll:focus-visible {
   outline-offset: -2px;
 }
 
 .maya-thread__inner {
   display: flex;
   flex-direction: column;
-  gap: var(--maya-space-8);
+  gap: var(--maya-space-6);
   width: 100%;
+  min-width: 0;
   max-width: var(--maya-column);
   margin: 0 auto;
-  padding: var(--maya-space-8) var(--maya-space-4) var(--maya-space-6);
+  padding: var(--maya-space-6) var(--maya-space-4) var(--maya-space-6);
 }
 
+/* Sits inside the thread pane, above the composer dock, so it can never cover the composer. */
 .maya-jump {
   position: absolute;
   right: 0;
-  bottom: var(--maya-space-4);
+  bottom: var(--maya-space-3);
   left: 0;
-  z-index: var(--maya-z-float);
+  z-index: var(--maya-z-sticky);
   display: inline-flex;
   align-items: center;
   gap: var(--maya-space-2);
   width: fit-content;
+  max-width: calc(100% - var(--maya-space-8));
   min-height: var(--maya-control);
   margin: 0 auto;
-  padding: 0 var(--maya-space-4);
+  padding: 0 var(--maya-space-3);
   border: 1px solid var(--maya-border-strong);
-  border-radius: var(--maya-radius-lg);
+  border-radius: var(--maya-radius-full);
   background: var(--maya-raised);
   box-shadow: var(--maya-shadow-2);
   color: var(--maya-text);
@@ -574,12 +300,53 @@
   font-size: var(--maya-text-small);
   font-weight: 500;
   cursor: pointer;
-  animation: maya-rise var(--maya-dur-fast) var(--maya-ease-out) backwards;
+  animation: maya-message var(--maya-dur-fast) var(--maya-ease-out) backwards;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+/* Hide while an inline approval card is pending in view: it must never float over Approve/Reject. */
+.maya-thread:has([data-testid="inline-approval"]:not([data-pending="false"]))
+  .maya-jump {
+  display: none;
+}
+
+.maya-jump:active {
+  transform: scale(var(--maya-press-scale));
+}
+
+.maya-jump__icon {
+  flex: none;
+  transition: transform var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-jump__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 var(--maya-space-1);
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  font-weight: 600;
+  line-height: 1;
 }
 
 @media (hover: hover) {
   .maya-jump:hover {
     background: var(--maya-hover);
+    box-shadow: var(--maya-shadow-3);
+  }
+
+  .maya-jump:hover .maya-jump__icon {
+    transform: translateY(var(--maya-nudge));
   }
 }
 
@@ -587,17 +354,31 @@
 
 .maya-msg {
   min-width: 0;
-  animation: maya-rise var(--maya-dur-base) var(--maya-ease-out) backwards;
+  max-width: 100%;
 }
 
+/* You: a tailored bubble on the right with smooth corners. */
 .maya-msg--user {
+  position: relative;
   align-self: flex-end;
+  width: fit-content;
   max-width: min(85%, 36rem);
   padding: var(--maya-space-3) var(--maya-space-4);
   border: 1px solid var(--maya-border);
-  border-radius: var(--maya-radius-md) var(--maya-radius-md)
-    var(--maya-radius-sm) var(--maya-radius-md);
+  border-radius: var(--maya-radius-lg) var(--maya-radius-lg)
+    var(--maya-radius-xs) var(--maya-radius-lg);
   background: var(--maya-raised);
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+@media (hover: hover) {
+  .maya-msg--user:hover {
+    box-shadow: var(--maya-shadow-lift);
+  }
 }
 
 .maya-msg__text {
@@ -606,10 +387,12 @@
   white-space: pre-wrap;
 }
 
+/* MAYA: calm, airy, elegant layout, subtle brand accent pip, preserved markdown. */
 .maya-msg--assistant {
   display: grid;
-  gap: var(--maya-space-2);
   align-self: stretch;
+  gap: var(--maya-space-2);
+  padding: var(--maya-space-1) 0;
 }
 
 .maya-msg--assistant > * {
@@ -618,23 +401,98 @@
 
 .maya-msg__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--maya-space-2);
+  margin-bottom: var(--maya-space-1);
+}
+
+.maya-msg__time {
+  color: var(--maya-text-muted);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  line-height: var(--maya-leading-label);
+  letter-spacing: var(--maya-tracking-label);
 }
 
 .maya-msg__mark {
+  flex: none;
   width: 0.5rem;
   height: 0.5rem;
-  border-radius: 2px;
+  border-radius: var(--maya-radius-sm);
   background: var(--maya-accent);
+  transition: transform var(--maya-dur-fast) var(--maya-ease-spring);
 }
 
 .maya-msg__who {
   color: var(--maya-text-muted);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  font-weight: 500;
+  line-height: var(--maya-leading-label);
+  letter-spacing: var(--maya-tracking-label);
+}
+
+/*
+ * Quiet meta chip ("Spoken"): icon plus text, only as wide as its text, never a bordered box that
+ * spans the thread. It is rendered only for turns that really were spoken.
+ */
+.maya-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 var(--maya-space-2);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-raised);
+  color: var(--maya-text-muted);
   font-size: var(--maya-text-caption);
-  font-weight: 600;
   line-height: var(--maya-leading-caption);
-  letter-spacing: var(--maya-tracking-wide);
+}
+
+.maya-msg__speak {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  min-height: var(--maya-control);
+  margin-left: auto;
+  padding: 0 var(--maya-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .maya-msg__speak:hover {
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+
+  .maya-msg__pill:hover:not(:disabled) {
+    border-color: var(--maya-border);
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+
+  .maya-msg__pill[data-active="true"]:hover:not(:disabled),
+  .maya-msg__pill[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--maya-accent-soft);
+    color: var(--maya-accent-hover);
+  }
 }
 
 .maya-msg__note {
@@ -645,6 +503,7 @@
   color: var(--maya-text-muted);
   font-size: var(--maya-text-small);
   line-height: var(--maya-leading-small);
+  overflow-wrap: anywhere;
 }
 
 .maya-msg__note svg {
@@ -730,7 +589,12 @@
 /* --------------------------------------------------------------- markdown */
 
 .maya-md {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.maya-md--streaming > :last-child {
+  animation: maya-fade-in var(--maya-dur-fast) var(--maya-ease-out) backwards;
 }
 
 .maya-md > :first-child {
@@ -756,7 +620,7 @@
 .maya-md ul,
 .maya-md ol {
   margin: 0 0 var(--maya-space-4);
-  padding-left: var(--maya-space-6);
+  padding-inline-start: var(--maya-space-6);
 }
 
 .maya-md ul {
@@ -773,7 +637,7 @@
 
 .maya-md li {
   margin: var(--maya-space-1) 0;
-  padding-left: var(--maya-space-1);
+  padding-inline-start: var(--maya-space-1);
 }
 
 .maya-md li::marker {
@@ -791,8 +655,9 @@
 
 .maya-md blockquote {
   margin: 0 0 var(--maya-space-4);
-  padding: 0 0 0 var(--maya-space-4);
-  border-left: 2px solid var(--maya-border-strong);
+  padding: 0;
+  padding-inline-start: var(--maya-space-4);
+  border-inline-start: 2px solid var(--maya-border-strong);
   color: var(--maya-text-muted);
 }
 
@@ -807,13 +672,12 @@
   font-size: var(--maya-text-body);
   font-weight: 600;
   line-height: 1.35;
-  letter-spacing: -0.01em;
 }
 
 .maya-md__h--1 {
   font-size: var(--maya-text-title);
   line-height: var(--maya-leading-title);
-  letter-spacing: var(--maya-tracking-tight);
+  letter-spacing: var(--maya-tracking-display);
 }
 
 .maya-md__h--2 {
@@ -829,6 +693,29 @@
   font-size: 0.9em;
 }
 
+.maya-md__math {
+  font-style: italic;
+  font-family: var(--maya-font-mono);
+  font-size: 0.95em;
+}
+
+.maya-md__math-block {
+  margin: var(--maya-space-3) 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-code-bg);
+  font-style: italic;
+  font-family: var(--maya-font-mono);
+  text-align: center;
+  overflow-x: auto;
+}
+
+.maya-md__math-block--raw {
+  font-style: normal;
+  text-align: start;
+}
+
 .maya-md__link {
   color: var(--maya-link);
   text-decoration: underline;
@@ -842,6 +729,23 @@
   }
 }
 
+/* A citation marker: a small superscript number linking to its source. */
+.maya-md__cite {
+  font-size: 0.72em;
+  line-height: 0;
+  margin-inline: 0.1em;
+}
+
+.maya-md__cite a {
+  color: var(--maya-link);
+  text-decoration: none;
+}
+
+.maya-md__cite a:hover,
+.maya-md__cite a:focus-visible {
+  text-decoration: underline;
+}
+
 /* Where the link really goes. inline-block keeps the link underline off it. */
 .maya-md__host {
   display: inline-block;
@@ -850,9 +754,62 @@
   text-decoration: none;
 }
 
+/*
+ * A real table inside a scroll wrapper (TableScroll): wide tables scroll sideways in their own
+ * box and never widen the message. Cells keep their natural width, so a column never collapses
+ * to a sliver; a very long unbroken value scrolls instead of being cut.
+ */
+.maya-md__table {
+  margin: 0 0 var(--maya-space-4);
+  border-radius: var(--maya-radius-md);
+}
+
+.maya-md__table table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+}
+
+.maya-md__table th,
+.maya-md__table td {
+  min-width: 5rem;
+  max-width: 28rem;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border-bottom: 1px solid var(--maya-border);
+  overflow-wrap: break-word;
+  text-align: start;
+  vertical-align: top;
+}
+
+.maya-md__table th {
+  background: var(--maya-raised);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.maya-md__table [data-align="center"] {
+  text-align: center;
+}
+
+.maya-md__table [data-align="left"] {
+  text-align: left;
+}
+
+.maya-md__table [data-align="right"] {
+  text-align: right;
+}
+
+.maya-md__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 /* -------------------------------------------------------------- code block */
 
-.maya-code {
+.maya-codeblock {
+  max-width: 100%;
+  min-width: 0;
   margin: 0 0 var(--maya-space-4);
   overflow: hidden;
   border: 1px solid var(--maya-border);
@@ -860,7 +817,7 @@
   background: var(--maya-code-bg);
 }
 
-.maya-code__bar {
+.maya-codeblock__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -870,12 +827,23 @@
   border-bottom: 1px solid var(--maya-border);
 }
 
+.maya-codeblock__tools {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
 .maya-code__lang {
+  min-width: 0;
+  overflow: hidden;
   color: var(--maya-text-muted);
   font-family: var(--maya-font-mono);
-  font-size: var(--maya-text-caption);
-  letter-spacing: 0.08em;
+  font-size: var(--maya-text-label);
+  letter-spacing: var(--maya-tracking-label);
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .maya-code__copy {
@@ -895,6 +863,11 @@
   transition:
     background-color var(--maya-dur-fast) var(--maya-ease-out),
     color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-code__copy[aria-pressed="true"] {
+  background: var(--maya-hover);
+  color: var(--maya-text);
 }
 
 .maya-code__copy[data-state="failed"] {
@@ -930,10 +903,17 @@
   transform: none;
 }
 
+/*
+ * The scrolling listing (a CodeBlockShell). Long lines scroll inside it by default; the Wrap
+ * toggle folds them instead. Unbroken strings wrap in wrap mode, so nothing is ever cut off.
+ */
 .maya-code__pre {
+  max-height: 28rem;
   margin: 0;
-  padding: var(--maya-space-4);
-  overflow-x: auto;
+  padding: var(--maya-space-3) var(--maya-space-4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--maya-text);
   font-family: var(--maya-font-mono);
   font-size: var(--maya-text-mono);
@@ -941,7 +921,13 @@
   tab-size: 2;
 }
 
-.maya-chat .maya-code__pre:focus-visible {
+.maya-code__pre[data-wrap="true"] {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.maya-code__pre:focus-visible {
   outline-offset: -2px;
 }
 
@@ -972,49 +958,52 @@
 
 /* ---------------------------------------------------------------- composer */
 
+/*
+ * The dock holds the notice, the voice dock and the composer. It is a flex sibling below the
+ * thread, so nothing in the thread can slide under it.
+ */
 .maya-chat__dock {
-  position: sticky;
-  bottom: 0;
-  z-index: var(--maya-z-base);
   display: flex;
   flex: none;
-  flex-shrink: 0;
   flex-direction: column;
-  gap: var(--maya-space-3);
+  gap: var(--maya-space-2);
   width: 100%;
+  min-width: 0;
   max-width: var(--maya-column);
   margin: 0 auto;
-  padding: 0 var(--maya-space-4)
-    max(var(--maya-space-4), env(safe-area-inset-bottom));
-  border-top: 1px solid var(--maya-glass-border);
-  border-radius: var(--maya-radius-lg) var(--maya-radius-lg) 0 0;
-  background: var(--maya-glass-raised);
-  box-shadow: var(--maya-shadow-1);
-  backdrop-filter: blur(var(--maya-glass-blur));
+  padding: var(--maya-space-2) var(--maya-space-4)
+    max(var(--maya-space-3), var(--maya-safe-bottom));
 }
 
-@supports not (backdrop-filter: blur(1px)) {
-  .maya-chat__dock {
-    background: var(--maya-raised);
-  }
+.maya-composer {
+  min-width: 0;
+  container-name: composer;
+  container-type: inline-size;
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  .maya-chat__dock {
-    background: var(--maya-raised);
-    backdrop-filter: none;
-  }
-}
-
+/* One row: mic, text field, Run as task, send. It reflows (below) when the pane is narrow. */
 .maya-composer__box {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--maya-space-2);
-  padding: var(--maya-space-2);
-  border: 1px solid var(--maya-control-border);
-  border-radius: var(--maya-radius-lg);
-  background: var(--maya-surface);
-  transition: border-color var(--maya-dur-fast) var(--maya-ease-out);
+  min-width: 0;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-xl);
+  background: var(--maya-pane);
+  box-shadow: var(--maya-shadow-2);
+  transition:
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-base) var(--maya-ease-spring),
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-fast) var(--maya-ease-spring);
+}
+
+@media (hover: hover) {
+  .maya-composer__box:hover {
+    box-shadow: var(--maya-shadow-lift);
+  }
 }
 
 /* The same 2 px indicator as every other control; a 1 px border change alone
@@ -1023,10 +1012,23 @@
   border-color: var(--maya-focus);
   outline: 2px solid var(--maya-focus);
   outline-offset: 2px;
+  box-shadow: var(--maya-shadow-lift);
 }
 
+.maya-composer__lead,
+.maya-composer__extra {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * The text field never collapses: it keeps a 12rem basis, and takes a whole line when the pane
+ * is narrower than the row needs (see the container rule below).
+ */
 .maya-composer__field {
-  flex: 1;
+  flex: 1 1 12rem;
   min-width: 0;
   max-height: var(--maya-composer-max);
   padding: var(--maya-space-2) var(--maya-space-3);
@@ -1049,32 +1051,64 @@
   cursor: not-allowed;
 }
 
-.maya-composer__action {
-  display: grid;
-  flex: none;
+.maya-composer__mic {
+  display: inline-grid;
   place-items: center;
-  width: var(--maya-touch);
-  height: var(--maya-touch);
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 var(--maya-space-2);
   border: 1px solid transparent;
-  border-radius: var(--maya-radius-md);
-  background: var(--maya-accent);
-  color: var(--maya-accent-text);
+  border-radius: var(--maya-radius-full);
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   transition:
     background-color var(--maya-dur-fast) var(--maya-ease-out),
     border-color var(--maya-dur-fast) var(--maya-ease-out),
     color var(--maya-dur-fast) var(--maya-ease-out),
-    transform var(--maya-dur-instant) var(--maya-ease-out);
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
+}
+
+.maya-composer__mic:active {
+  transform: scale(0.94);
+}
+
+@media (hover: hover) {
+  .maya-composer__mic:hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-composer__action {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+  cursor: pointer;
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
 }
 
 .maya-composer__action:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.94);
 }
 
 .maya-composer__action:disabled {
   border-color: var(--maya-border);
   background: var(--maya-disabled-bg);
   color: var(--maya-disabled-text);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
@@ -1087,6 +1121,7 @@
 @media (hover: hover) {
   .maya-composer__action:hover:not(:disabled) {
     background: var(--maya-accent-hover);
+    box-shadow: var(--maya-shadow-lift);
   }
 
   .maya-composer__action[data-mode="stop"]:hover:not(:disabled) {
@@ -1097,21 +1132,53 @@
 .maya-composer__icon {
   grid-area: 1 / 1;
   transition:
-    opacity var(--maya-dur-base) var(--maya-ease-out),
-    transform var(--maya-dur-base) var(--maya-ease-out);
+    opacity var(--maya-dur-base) var(--maya-ease-spring),
+    transform var(--maya-dur-base) var(--maya-ease-spring);
 }
 
-.maya-composer__action[data-mode="send"] .maya-composer__icon--stop,
+.maya-composer__action[data-mode="send"] .maya-composer__icon--stop {
+  opacity: 0;
+  transform: scale(0.4) rotate(90deg);
+}
+
+.maya-composer__action[data-mode="send"] .maya-composer__icon--send {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
 .maya-composer__action[data-mode="stop"] .maya-composer__icon--send {
   opacity: 0;
-  transform: scale(0.6);
+  transform: scale(0.4) rotate(-90deg);
+}
+
+.maya-composer__action[data-mode="stop"] .maya-composer__icon--stop {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.maya-composer__task {
+  border-radius: var(--maya-radius-full);
+  font-size: var(--maya-text-small);
+  font-weight: var(--maya-weight-medium);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
+}
+
+.maya-composer__task:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .maya-composer__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--maya-space-3);
+  gap: var(--maya-space-1) var(--maya-space-3);
+  min-width: 0;
   padding: var(--maya-space-2) var(--maya-space-2) 0;
   color: var(--maya-text-muted);
   font-size: var(--maya-text-caption);
@@ -1140,41 +1207,149 @@
   font-weight: 600;
 }
 
-/* ------------------------------------------------------------------ notice */
+/*
+ * Narrow pane (measured on the composer, not the window): the field takes a whole first line
+ * and the mic, Run as task and send sit together on the line below.
+ */
+@container composer (max-width: 30rem) {
+  .maya-composer__field {
+    flex-basis: 100%;
+    order: -1;
+  }
 
-.maya-notice {
+  .maya-composer__extra {
+    margin-left: auto;
+  }
+
+  .maya-composer__hint {
+    display: none;
+  }
+}
+
+/* Attachment chips under a sent message. */
+.maya-msg__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-2);
+  min-width: 0;
+  margin: var(--maya-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ------------------------------------------------------- composer attachments */
+
+/* Chips wrap onto as many lines as they need; nothing overflows at 320 px. */
+.maya-composer__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 var(--maya-space-2);
+  list-style: none;
+}
+
+.maya-composer__file {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.maya-attachment__bar {
+  display: block;
+  width: 100%;
+  height: 4px;
+  accent-color: var(--maya-accent);
+}
+
+.maya-composer__attach-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-1) var(--maya-space-2);
+  margin: 0;
+  padding: 0 var(--maya-space-1) var(--maya-space-2);
+  color: var(--maya-warning);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+/*
+ * Drop overlay: covers the conversation while files are dragged over it. It never takes pointer
+ * events, so typing, clicking and the drop itself keep working; it has no animation.
+ */
+.maya-dropzone {
+  position: absolute;
+  inset: var(--maya-space-2);
+  z-index: 5;
   display: grid;
-  grid-template-columns: auto 1fr;
+  place-items: center;
+  border: 2px dashed var(--maya-focus);
+  border-radius: var(--maya-radius-md);
+  pointer-events: none;
+}
+
+.maya-dropzone::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--maya-pane);
+  opacity: 0.88;
+  content: "";
+}
+
+.maya-dropzone__label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin: 0;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-raised);
+  color: var(--maya-text);
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+}
+
+/* ----------------------------------------------------------- composer notice */
+
+.maya-cnotice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--maya-space-2) var(--maya-space-3);
   align-items: start;
+  min-width: 0;
   padding: var(--maya-space-3) var(--maya-space-4);
   border: 1px solid var(--maya-border-strong);
   border-radius: var(--maya-radius-md);
-  background: var(--maya-surface);
+  background: var(--maya-pane);
   font-size: var(--maya-text-small);
   line-height: var(--maya-leading-small);
-  animation: maya-rise var(--maya-dur-fast) var(--maya-ease-out) backwards;
+  animation: maya-message var(--maya-dur-fast) var(--maya-ease-out) backwards;
 }
 
-.maya-notice--error {
+.maya-cnotice--error {
   border-color: var(--maya-danger);
   background: var(--maya-danger-soft);
 }
 
-.maya-notice__icon {
+.maya-cnotice__icon {
   margin-top: 0.1rem;
   color: var(--maya-accent);
 }
 
-.maya-notice--error .maya-notice__icon {
+.maya-cnotice--error .maya-cnotice__icon {
   color: var(--maya-danger);
 }
 
-.maya-notice__text {
+.maya-cnotice__text {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
-.maya-notice__actions {
+.maya-cnotice__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1183,899 +1358,73 @@
 }
 
 /* Visual only (aria-hidden): the wait is also in the alert text, once. */
-.maya-notice__countdown {
+.maya-cnotice__countdown {
   color: var(--maya-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* ------------------------------------------------- signed-out and empty */
+/* ------------------------------------------------------- empty conversation */
 
-.maya-signedout {
-  width: 100%;
-  max-width: var(--maya-column-wide);
-  margin: 0 auto;
-  padding: clamp(var(--maya-space-8), 14vh, 7rem) var(--maya-space-4)
-    var(--maya-space-8);
-}
-
-.maya-signedout > * {
-  max-width: 32rem;
-}
-
-.maya-signedout__icon {
-  display: grid;
-  place-items: center;
-  width: var(--maya-touch);
-  height: var(--maya-touch);
-  margin-bottom: var(--maya-space-6);
-  border: 1px solid var(--maya-border-strong);
-  border-radius: var(--maya-radius-md);
-  background: var(--maya-surface);
-  color: var(--maya-accent);
-}
-
-.maya-signedout__title {
-  margin: var(--maya-space-3) 0 var(--maya-space-3);
-  font-size: var(--maya-text-title);
-  font-weight: 600;
-  line-height: var(--maya-leading-title);
-  letter-spacing: var(--maya-tracking-tight);
-}
-
-.maya-signedout__body {
-  margin: 0 0 var(--maya-space-3);
-  color: var(--maya-text-muted);
-}
-
-.maya-signedout__link {
-  display: inline-flex;
-  align-items: center;
-  margin-top: var(--maya-space-4);
-  border-radius: var(--maya-radius-sm);
-  color: var(--maya-link);
-  font-size: var(--maya-text-small);
-  font-weight: 500;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
-
-.maya-signin {
-  width: 100%;
-  max-width: 28rem;
-  margin: clamp(var(--maya-space-8), 12vh, 6rem) auto var(--maya-space-8);
-  padding: 0 var(--maya-space-4);
-}
-
-.maya-account {
-  width: 100%;
-  max-width: var(--maya-account-width);
-  margin: clamp(var(--maya-space-8), 10vh, var(--maya-space-12)) auto;
-  padding: var(--maya-space-6);
-  border: 1px solid var(--maya-border);
-  border-radius: var(--maya-radius-lg);
-  background: var(--maya-surface);
-}
-
-.maya-auth-embedded {
-  width: 100%;
-}
-
-.maya-auth-embedded .maya-signin,
-.maya-auth-embedded .maya-account {
-  width: 100%;
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-}
-
-.maya-auth-embedded .maya-signedout__icon {
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.maya-auth-embedded .maya-signedout__title,
-.maya-auth-embedded .maya-signedout__body {
-  text-align: center;
-}
-
-.maya-auth-embedded .maya-signedout__link {
-  display: block;
-  text-align: center;
-  margin-top: var(--maya-space-5);
-}
-
-.maya-account__intro,
-.maya-account__notice {
-  color: var(--maya-text-muted);
-}
-
-.maya-account__notice {
-  margin: 0;
-  font-size: var(--maya-text-small);
-}
-
-.maya-account__links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--maya-space-3) var(--maya-space-5);
-  margin-top: var(--maya-space-4);
-}
-
-.maya-account__links a {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--maya-touch);
-  color: var(--maya-link);
-  font-size: var(--maya-text-small);
-  text-underline-offset: 0.2em;
-}
-
-.maya-account__resend {
-  margin-top: var(--maya-space-3);
-}
-
-.maya-workspace {
-  display: grid;
-  flex: 1;
-  grid-template-columns: var(--maya-sidebar-width) minmax(0, 1fr);
-  min-height: 0;
-  height: 100%;
-}
-
-.maya-workspace--no-sidebar {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.maya-workspace--drawer {
-  position: relative;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-.maya-workspace--drawer .maya-sidebar {
-  position: fixed;
-  z-index: var(--maya-z-float);
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: min(var(--maya-sidebar-mobile-width), var(--maya-sidebar-width));
-  border-right: 1px solid var(--maya-glass-border);
-  background: var(--maya-glass-surface);
-  box-shadow: var(--maya-shadow-3);
-  backdrop-filter: blur(var(--maya-glass-blur));
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-100%);
-  transition:
-    transform var(--maya-duration-slow) var(--maya-ease-out),
-    opacity var(--maya-duration-slow) var(--maya-ease-out);
-}
-
-.maya-workspace--drawer .maya-sidebar.is-open {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
-
-.maya-workspace--drawer .maya-sidebar__close,
-.maya-workspace--drawer .maya-sidebar__trigger {
-  display: inline-flex;
-  min-width: var(--maya-touch);
-  min-height: var(--maya-touch);
-  align-items: center;
-  justify-content: center;
-}
-
-.maya-workspace--drawer .maya-sidebar__scrim {
-  position: fixed;
-  z-index: calc(var(--maya-z-float) - 1);
-  inset: 0;
-  display: block;
-  border: 0;
-  background: var(--maya-scrim);
-  backdrop-filter: blur(var(--maya-scrim-blur));
-}
-
-.maya-chat--embedded {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.maya-chat--embedded .maya-chat__main {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.maya-chat--embedded .maya-workspace,
-.maya-chat--embedded .maya-workspace--drawer {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
-.maya-chat--embedded .maya-conversation {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
-/* Constrain drawer to embedded workspace so it never overlaps or escapes into AppShell */
-.maya-chat--embedded .maya-sidebar,
-.maya-chat--embedded .maya-workspace--drawer .maya-sidebar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 30;
-  width: min(var(--maya-sidebar-width), 280px);
-  max-width: 85%;
-  height: 100%;
-  border-right: 1px solid var(--maya-glass-border);
-  background: var(--maya-surface);
-  box-shadow: var(--maya-shadow-3);
-  backdrop-filter: blur(var(--maya-glass-blur));
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-100%);
-  transition:
-    transform var(--maya-dur-slow) var(--maya-ease-emphasized),
-    opacity var(--maya-dur-fast) var(--maya-ease-standard);
-}
-
-.maya-chat--embedded .maya-sidebar.is-open,
-.maya-chat--embedded .maya-workspace--drawer .maya-sidebar.is-open {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
-
-.maya-chat--embedded .maya-sidebar__scrim,
-.maya-chat--embedded .maya-workspace--drawer .maya-sidebar__scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 25;
-  background: var(--maya-scrim);
-  backdrop-filter: blur(var(--maya-scrim-blur));
-}
-
-.maya-sidebar {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  padding: var(--maya-space-4);
-  border-right: 1px solid var(--maya-border);
-  background: var(--maya-surface);
-}
-
-.maya-sidebar__head,
-.maya-sidebar__account,
-.maya-conversation__topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--maya-space-3);
-}
-
-.maya-sidebar__head {
-  justify-content: space-between;
-  margin-bottom: var(--maya-space-4);
-}
-
-.maya-sidebar__wordmark {
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-  font-weight: 700;
-  letter-spacing: var(--maya-tracking-wide);
-  text-transform: uppercase;
-}
-
-.maya-sidebar__close,
-.maya-sidebar__trigger {
-  display: none;
-}
-
-.maya-sidebar__new {
-  width: 100%;
-  min-height: var(--maya-touch);
-  justify-content: flex-start;
-}
-
-.maya-sidebar__new kbd {
-  margin-left: auto;
-  border: 1px solid currentColor;
-  border-radius: var(--maya-radius-sm);
-  padding: 0 var(--maya-space-1);
-  font: inherit;
-  font-size: var(--maya-text-caption);
-}
-
-.maya-sidebar__sessions {
-  flex: 1;
-  min-height: 0;
-  margin-top: var(--maya-space-5);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.maya-sidebar__sessions ul {
-  display: grid;
-  gap: var(--maya-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.maya-sidebar__group {
-  margin: var(--maya-space-4) 0 var(--maya-space-2);
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-  font-weight: 700;
-  letter-spacing: var(--maya-tracking-caps);
-  text-transform: uppercase;
-}
-
-.maya-session {
-  position: relative;
-  isolation: isolate;
-  display: block;
-  width: 100%;
-  min-height: var(--maya-touch);
-  padding: var(--maya-space-2) var(--maya-space-3);
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: var(--maya-radius-md);
-  background: transparent;
-  color: var(--maya-text);
-  font: inherit;
-  font-size: var(--maya-text-small);
-  text-align: left;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.maya-session__item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.maya-session__item .maya-session {
-  flex: 1;
-  min-width: 0;
-  padding-right: var(--maya-space-8);
-}
-
-.maya-session__delete {
-  position: absolute;
-  right: var(--maya-space-2);
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--maya-radius-sm);
-  background: transparent;
-  color: var(--maya-text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition:
-    opacity var(--maya-dur-fast) var(--maya-ease-standard),
-    color var(--maya-dur-fast) var(--maya-ease-standard),
-    background var(--maya-dur-fast) var(--maya-ease-standard);
-  z-index: 1;
-}
-
-.maya-session__item:hover .maya-session__delete,
-.maya-session__item:focus-within .maya-session__delete,
-.maya-session__delete:focus-visible {
-  opacity: 1;
-}
-
-.maya-session__delete:hover {
-  background: var(--maya-hover);
-  color: var(--maya-danger);
-}
-
-.maya-session__delete:disabled {
-  cursor: progress;
-  opacity: 0.5;
-}
-
-@media (pointer: coarse) {
-  .maya-session__delete {
-    opacity: 0.7;
-  }
-}
-
-.maya-session[aria-current="page"] {
-  border-color: var(--maya-border);
-  background: var(--maya-hover);
-  font-weight: 600;
-}
-
-.maya-session:disabled {
-  cursor: progress;
-}
-
-.maya-sidebar__empty,
-.maya-sidebar__error {
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-small);
-}
-
-.maya-sidebar__error {
-  color: var(--maya-danger);
-}
-
-.maya-sidebar__more {
-  width: 100%;
-  justify-content: center;
-  margin-top: var(--maya-space-3);
-}
-
-.maya-sidebar__account {
-  justify-content: space-between;
-  min-height: var(--maya-touch);
-  margin-top: var(--maya-space-4);
-  padding-top: var(--maya-space-3);
-  border-top: 1px solid var(--maya-border);
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-small);
-}
-
-.maya-conversation {
-  position: relative;
-  display: flex;
-  flex: 1;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.maya-conversation__topbar {
-  flex: none;
-  min-height: var(--maya-touch);
-  padding: var(--maya-space-2) var(--maya-space-4);
-  border-bottom: 1px solid var(--maya-border);
-  background: var(--maya-surface);
-}
-
-.maya-conversation__title {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--maya-text);
-  font-size: var(--maya-text-small);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.maya-conversation__delete {
-  flex: none;
-  color: var(--maya-text-muted);
-}
-
-.maya-conversation__delete:hover {
-  color: var(--maya-danger);
-}
-
-.maya-conversation__status {
-  margin-left: auto;
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-}
-
-.maya-sidebar__scrim {
-  display: none;
-}
-
-.maya-sidebar__skeleton {
-  display: grid;
-  gap: var(--maya-space-3);
-}
-
-.maya-skeleton {
-  display: block;
-  width: 100%;
-  height: var(--maya-touch);
-  border-radius: var(--maya-radius-md);
-  background: var(--maya-hover);
-  animation: maya-shimmer var(--maya-dur-shimmer) var(--maya-ease-in-out)
-    infinite;
-}
-
-.maya-auth-check {
-  display: grid;
-  gap: var(--maya-space-4);
-  width: min(calc(100% - var(--maya-space-8)), var(--maya-auth-check-width));
-  margin: auto;
-}
-
-.maya-auth-check__title {
-  margin: 0;
-  font-size: var(--maya-text-title);
-  line-height: var(--maya-leading-title);
-}
-
-.maya-auth-warning {
-  margin: 0;
-  padding: var(--maya-space-2) var(--maya-space-4);
-  border-bottom: 1px solid var(--maya-border);
-  color: var(--maya-warning);
-  font-size: var(--maya-text-small);
-}
-
-.maya-history-skeleton {
-  display: grid;
-  gap: var(--maya-space-6);
-  width: min(100% - var(--maya-space-8), var(--maya-column));
-  margin: auto;
-}
-
-.maya-history-skeleton .maya-skeleton {
-  height: var(--maya-space-12);
-}
-
-.maya-home {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-}
-
-.maya-home::before {
-  position: absolute;
-  z-index: -1;
-  top: -25%;
-  right: -15%;
-  width: 70%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, var(--maya-ambient), transparent 68%);
-  content: "";
-  animation: maya-ambient var(--maya-dur-ambient) var(--maya-ease-in-out)
-    infinite alternate;
-  pointer-events: none;
-}
-
-.maya-app[data-page-hidden="true"] .maya-home::before {
-  animation-play-state: paused;
-}
-
-.maya-home__header,
-.maya-home__main,
-.maya-home__footer {
-  position: relative;
-  z-index: 1;
-  width: min(100%, var(--maya-column-wide));
-  margin: 0 auto;
-  padding-right: var(--maya-space-6);
-  padding-left: var(--maya-space-6);
-}
-
-.maya-home__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--maya-space-4);
-  min-height: var(--maya-touch);
-  border-bottom: 1px solid var(--maya-border);
-}
-
-.maya-home__nav {
-  display: flex;
-  align-items: center;
-  gap: var(--maya-space-3);
-}
-
-.maya-home__main {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(16rem, 0.8fr);
-  align-items: center;
-  gap: var(--maya-space-12);
-  min-height: 70vh;
-  padding-top: var(--maya-space-12);
-  padding-bottom: var(--maya-space-12);
-  animation: maya-rise var(--maya-dur-slow) var(--maya-ease-emphasized)
-    backwards;
-}
-
-.maya-home__eyebrow {
-  color: var(--maya-accent);
-  font-size: var(--maya-text-caption);
-  font-weight: 700;
-  letter-spacing: var(--maya-tracking-wide);
-  text-transform: uppercase;
-}
-
-.maya-home__title {
-  max-width: var(--maya-home-measure);
-  margin: var(--maya-space-4) 0;
-  font-size: var(--maya-text-display);
-  font-weight: 600;
-  line-height: var(--maya-leading-display);
-  letter-spacing: var(--maya-tracking-tight);
-}
-
-.maya-home__intro {
-  max-width: var(--maya-measure);
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-heading);
-}
-
-.maya-home__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--maya-space-3);
-  margin-top: var(--maya-space-6);
-}
-
-.maya-home__list {
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--maya-border-strong);
-  list-style: none;
-}
-
-.maya-home__item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--maya-space-3);
-  min-height: var(--maya-touch);
-  padding: var(--maya-space-3) 0;
-  border-bottom: 1px solid var(--maya-border);
-}
-
-.maya-home__number {
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-  font-variant-numeric: tabular-nums;
-}
-
-.maya-home__status {
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-caption);
-  font-weight: 600;
-  letter-spacing: var(--maya-tracking-caps);
-  text-transform: uppercase;
-}
-
-.maya-home__status[data-state="available"] {
-  color: var(--maya-accent);
-}
-
-.maya-home__footer {
-  padding-top: var(--maya-space-4);
-  padding-bottom: var(--maya-space-4);
-  border-top: 1px solid var(--maya-border);
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-small);
-}
-
-@media (max-width: 760px) {
-  .maya-workspace {
-    position: relative;
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .maya-sidebar {
-    position: fixed;
-    z-index: var(--maya-z-float);
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: min(var(--maya-sidebar-mobile-width), var(--maya-sidebar-width));
-    border-right: 1px solid var(--maya-glass-border);
-    background: var(--maya-glass-surface);
-    box-shadow: var(--maya-shadow-3);
-    backdrop-filter: blur(var(--maya-glass-blur));
-    opacity: 0;
-    pointer-events: none;
-    transform: translateX(-100%);
-    transition:
-      transform var(--maya-dur-slow) var(--maya-ease-emphasized),
-      opacity var(--maya-dur-fast) var(--maya-ease-standard);
-  }
-
-  .maya-sidebar.is-open {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
-  }
-
-  .maya-sidebar__close,
-  .maya-sidebar__trigger {
-    display: inline-flex;
-    min-width: var(--maya-touch);
-    min-height: var(--maya-touch);
-    align-items: center;
-    justify-content: center;
-  }
-
-  .maya-sidebar__scrim {
-    position: fixed;
-    z-index: calc(var(--maya-z-float) - 1);
-    inset: 0;
-    display: block;
-    border: 0;
-    background: var(--maya-state-layer);
-    opacity: var(--maya-state-scrim-opacity);
-  }
-
-  .maya-chat--embedded .maya-sidebar,
-  .maya-chat--embedded .maya-workspace--drawer .maya-sidebar {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    height: 100%;
-    z-index: 30;
-  }
-
-  .maya-chat--embedded .maya-sidebar__scrim,
-  .maya-chat--embedded .maya-workspace--drawer .maya-sidebar__scrim {
-    position: absolute;
-    inset: 0;
-    z-index: 25;
-  }
-
-  .maya-conversation__topbar {
-    position: sticky;
-    top: 0;
-    z-index: var(--maya-z-base);
-  }
-
-  .maya-home__main {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--maya-space-8);
-    min-height: auto;
-    padding-top: var(--maya-space-8);
-  }
-}
-
-@media (max-width: 40rem) {
-  .maya-home__header,
-  .maya-home__main,
-  .maya-home__footer {
-    padding-right: var(--maya-space-4);
-    padding-left: var(--maya-space-4);
-  }
-}
-
-@supports not (backdrop-filter: blur(1px)) {
-  .maya-sidebar.is-open {
-    background: var(--maya-raised);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .maya-sidebar.is-open {
-    background: var(--maya-raised);
-    backdrop-filter: none;
-  }
-}
-.maya-signin__form {
-  display: grid;
-  gap: var(--maya-space-4);
-  margin-top: var(--maya-space-6);
-}
-
-.maya-signin__field {
-  display: grid;
-  gap: var(--maya-space-2);
-  color: var(--maya-text);
-  font-size: var(--maya-text-small);
-  font-weight: 500;
-}
-
-.maya-signin__field input {
-  width: 100%;
-  min-height: var(--maya-touch);
-  padding: 0 var(--maya-space-3);
-  border: 1px solid var(--maya-control-border);
-  border-radius: var(--maya-radius-md);
-  background: var(--maya-raised);
-  color: var(--maya-text);
-  font: inherit;
-}
-
-.maya-signin__field input:focus-visible {
-  outline: 2px solid var(--maya-focus);
-  outline-offset: 2px;
-}
-
-.maya-signin__error {
-  margin: 0;
-  color: var(--maya-danger);
-  font-size: var(--maya-text-small);
-}
-
-.maya-signin__submit {
-  justify-content: center;
-  min-height: var(--maya-touch);
-}
-
-@media (hover: hover) {
-  .maya-signedout__link:hover {
-    text-decoration-thickness: 2px;
-  }
-}
-
-.maya-empty {
+.maya-chat-empty {
   max-width: 34rem;
   padding: clamp(var(--maya-space-6), 10vh, 5rem) 0 var(--maya-space-4);
 }
 
-.maya-empty__title {
+.maya-chat-empty__title {
   margin: 0 0 var(--maya-space-3);
   font-size: var(--maya-text-title);
   font-weight: 600;
   line-height: var(--maya-leading-title);
-  letter-spacing: var(--maya-tracking-tight);
+  letter-spacing: var(--maya-tracking-display);
 }
 
-.maya-empty__body {
+.maya-chat-empty__body {
   margin: 0 0 var(--maya-space-4);
   color: var(--maya-text-muted);
 }
 
-.maya-empty__planned {
-  display: flex;
-  flex-wrap: wrap;
+/* ---------------------------------------------------------------- voice orb */
+
+/* Nine-bar level meter (the motion-orb class animates the bars). Resting height is --h. */
+.maya-orb {
+  display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: var(--maya-space-3);
-  margin: 0;
-  color: var(--maya-text-muted);
-  font-size: var(--maya-text-small);
+  justify-content: center;
+  gap: 2px;
+  height: 1.75rem;
+}
+
+.maya-orb[data-size="sm"] {
+  gap: 1px;
+  height: 1rem;
+}
+
+.maya-orb > i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform: scaleY(var(--h, 1));
+}
+
+.maya-orb[data-size="sm"] > i {
+  width: 2px;
+}
+
+/* Voice unavailable or failed: an icon in the same box, no bars. */
+.maya-orb--icon {
+  width: 1.75rem;
+}
+
+.maya-orb--icon[data-size="sm"] {
+  width: 1rem;
 }
 
 /* ------------------------------------------------------------- responsive */
 
 @media (max-width: 30rem) {
-  .maya-composer__hint {
-    display: none;
-  }
-
   .maya-chat__divider {
     display: none;
   }
@@ -2095,8 +1444,8 @@
   }
 
   .maya-thread__inner {
-    gap: var(--maya-space-6);
-    padding-top: var(--maya-space-6);
+    gap: var(--maya-space-5);
+    padding-top: var(--maya-space-4);
   }
 
   .maya-msg--user {
@@ -2107,18 +1456,20 @@
 /* Touch targets are at least 44 px on touch layouts. */
 @media (pointer: coarse), (max-width: 40rem) {
   .maya-btn,
-  .maya-theme__option,
-  .maya-jump {
+  .maya-jump,
+  .maya-composer__mic,
+  .maya-composer__action {
     min-width: var(--maya-touch);
     min-height: var(--maya-touch);
   }
 
-  .maya-theme__option {
+  .maya-composer__action {
     width: var(--maya-touch);
     height: var(--maya-touch);
   }
 
-  .maya-code__copy {
+  .maya-code__copy,
+  .maya-msg__speak {
     min-width: var(--maya-touch);
     min-height: var(--maya-touch);
     justify-content: center;
@@ -2126,47 +1477,35 @@
 
   /* Stand-alone links and inline note actions: tall enough, width as written. */
   .maya-brand,
-  .maya-signedout__link,
-  .maya-account__links a,
   .maya-msg__action {
     min-height: var(--maya-touch);
   }
 
-  .maya-session,
-  .maya-sidebar__trigger,
-  .maya-sidebar__close {
+  .maya-msg__pill {
     min-height: var(--maya-touch);
   }
 }
 
 /* Windows high contrast: shadows are dropped, so state needs real outlines. */
 @media (forced-colors: active) {
-  .maya-chat__header,
-  .maya-chat__dock,
-  .maya-sidebar.is-open {
+  .maya-dropzone {
+    border-color: Highlight;
+  }
+
+  .maya-chat__header {
     border-color: CanvasText;
     background: Canvas;
-    backdrop-filter: none;
     box-shadow: none;
   }
 
-  .maya-sidebar__scrim {
-    background: Canvas;
-    opacity: 0.75;
-  }
-
-  .maya-session[aria-current="page"] {
-    outline: 1px solid Highlight;
-    background: Canvas;
+  .maya-composer__box,
+  .maya-codeblock,
+  .maya-chip {
+    border: 1px solid CanvasText;
   }
 
   .maya-composer__box:focus-within {
     outline: 2px solid Highlight;
-  }
-
-  .maya-theme__option[aria-pressed="true"] {
-    outline: 2px solid Highlight;
-    outline-offset: -2px;
   }
 
   .maya-composer__action:disabled,
@@ -2174,21 +1513,13 @@
     border-color: GrayText;
     color: GrayText;
   }
+
+  .maya-orb > i {
+    background: Highlight;
+  }
 }
 
 /* ----------------------------------------------------------------- motion */
-
-@keyframes maya-rise {
-  from {
-    opacity: 0;
-    transform: translateY(var(--maya-rise));
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 @keyframes maya-fade-in {
   from {
@@ -2212,6 +1543,7 @@
   }
 }
 
+/* The waiting dots: a loop next to a text label ("Thinking", "Sending"), so it is never alone. */
 @keyframes maya-pulse {
   0%,
   40%,
@@ -2219,33 +1551,6 @@
   100% {
     opacity: 0.3;
     transform: scale(0.85);
-  }
-}
-
-/* Shimmer keeps history loading legible without a spinner. */
-@keyframes maya-shimmer {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: translateX(0);
-  }
-
-  50% {
-    opacity: 1;
-    transform: translateX(0.25rem);
-  }
-}
-
-/* Ambient motion is only a subtle landing-page orientation cue. */
-@keyframes maya-ambient {
-  from {
-    opacity: 0.55;
-    transform: translate3d(-1%, 0, 0) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(1%, 1%, 0) scale(1.02);
   }
 }
 
@@ -2260,11 +1565,445 @@
   .maya-app *::after,
   .maya-chat *,
   .maya-chat *::before,
-  .maya-chat *::after,
-  .maya-home::before {
+  .maya-chat *::after {
     animation: none !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     transition-delay: 0s !important;
   }
+}
+
+/* Live step list under an assistant reply (ProgressSteps). Text wraps; nothing scrolls sideways. */
+.maya-steps {
+  min-width: 0;
+  max-width: 100%;
+  margin-top: var(--maya-space-2);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+}
+
+.maya-steps__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  max-width: 100%;
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  margin-left: calc(var(--maya-space-2) * -1);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-steps__toggle:focus-visible,
+.maya-steps__more:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+.maya-steps__summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) {
+  .maya-steps__toggle:hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--maya-space-2);
+  margin: var(--maya-space-2) 0 0;
+  padding: 0 0 0 var(--maya-space-2);
+  border-left: 1px solid var(--maya-border);
+  list-style: none;
+}
+
+.maya-steps__children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--maya-space-2);
+  margin: var(--maya-space-2) 0 0;
+  padding: 0 0 0 var(--maya-space-3);
+  border-left: 1px solid var(--maya-border);
+  list-style: none;
+}
+
+.maya-steps__item {
+  min-width: 0;
+}
+
+.maya-steps__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-steps__icon {
+  flex: none;
+  margin-top: 0.2rem;
+}
+
+.maya-steps__icon--running {
+  color: var(--maya-accent);
+}
+
+.maya-steps__icon--done {
+  color: var(--maya-success);
+}
+
+.maya-steps__icon--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--maya-space-1);
+  min-width: 0;
+}
+
+.maya-steps__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--maya-space-1) var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-steps__label {
+  min-width: 0;
+  color: var(--maya-text);
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__meta {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.maya-steps__status--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__detail {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__detail--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__thought {
+  margin: 0;
+}
+
+.maya-steps__thought-text {
+  margin: 0;
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__more {
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-steps__toggle {
+    transition: none;
+  }
+}
+
+/* The model's reasoning summary as a dropdown inside the step list (ProgressSteps). */
+.maya-steps__timer {
+  color: var(--maya-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.maya-think {
+  min-width: 0;
+}
+
+.maya-think__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  max-width: 100%;
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  margin-left: calc(var(--maya-space-2) * -1);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-think__toggle:disabled {
+  cursor: default;
+}
+
+.maya-think__toggle:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .maya-think__toggle:not(:disabled):hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-think__icon {
+  flex: none;
+}
+
+/* Live state is colour only: no loop runs next to the reasoning text. */
+.maya-think__icon--live {
+  color: var(--maya-accent);
+}
+
+.maya-think__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-think__body {
+  max-height: 14rem;
+  margin: var(--maya-space-1) 0 var(--maya-space-1) var(--maya-space-2);
+  padding: var(--maya-space-2) var(--maya-space-3);
+  overflow-y: auto;
+  border-left: 2px solid var(--maya-border);
+  color: var(--maya-text-muted);
+}
+
+.maya-think__caption {
+  margin: 0 0 var(--maya-space-1);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  color: var(--maya-text-muted);
+}
+
+.maya-think__text {
+  margin: 0;
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+  overflow-wrap: anywhere;
+}
+
+/* The summary is Markdown: bold lead-ins read as small headings, paragraphs are spaced. */
+.maya-think__text p {
+  margin: 0 0 var(--maya-space-2);
+}
+
+.maya-think__text p:last-child {
+  margin-bottom: 0;
+}
+
+.maya-think__text strong {
+  color: var(--maya-text-secondary);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-think__toggle {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------- composer voice toggle and modes */
+
+.maya-composer__voice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
+/* Voice on: soft accent fill plus the animated wave; glowing pill active state */
+.maya-composer__voice-toggle {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__voice-toggle[data-active="true"] {
+  background: var(--maya-accent-soft);
+  border-color: var(--maya-accent);
+  color: var(--maya-accent);
+}
+
+.maya-composer__voice-toggle[data-muted="true"] {
+  color: var(--maya-warning);
+}
+
+.maya-composer__mute {
+  border: 0;
+  background: transparent;
+}
+
+/* Deep research: active glowing pill */
+.maya-composer__research {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__research[aria-pressed="true"],
+.maya-composer__research[data-on="true"] {
+  background: var(--maya-accent-soft);
+  border-color: var(--maya-accent);
+  color: var(--maya-accent);
+}
+
+.maya-composer__research:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.maya-composer__mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin-bottom: var(--maya-space-2);
+}
+
+.maya-chip--accent {
+  background: var(--maya-accent-soft);
+  color: var(--maya-text);
+}
+
+.maya-composer__mode .maya-chip--accent {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__mode-x {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--maya-radius-full);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: transform var(--maya-dur-instant) var(--maya-ease-out);
+}
+
+.maya-composer__mode-x:hover {
+  transform: scale(1.1);
+}
+
+.maya-composer__mode-x:active {
+  transform: scale(0.92);
+}
+
+.maya-composer__mode-hint {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+.maya-chat__folder-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 var(--maya-space-2);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+/* Row of per-message tools ("..." button) under a user bubble; appears on hover or focus. */
+.maya-msg__tools {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 0;
+  margin-top: var(--maya-space-1);
+}
+
+/* Your own message is only its bubble: the time and actions sit just below it, out of the flow,
+   so they never make the bubble taller. */
+.maya-msg--user > .maya-msg__tools {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  z-index: 1;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin-top: 2px;
+}
+
+.maya-msg__footer {
+  display: flex;
+  align-items: center;
+  min-height: var(--maya-control);
+  margin-top: var(--maya-space-1);
+}
+
+.maya-msg__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
+.maya-msg__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+.maya-msg__pill:active:not(:disabled) {
+  transform: scale(var(--maya-press-scale-small));
+}
+
+.maya-msg__pill[data-active="true"],
+.maya-msg__pill[aria-pressed="true"] {
+  border-color: var(--maya-border);
+  background: var(--maya-accent-soft);
+  color: var(--maya-accent);
+}
+
+/* A scheduled report fills its box; the reading measure is for the conversation column. */
+.maya-report-preview .maya-md > p,
+.maya-report-preview .maya-md > ul,
+.maya-report-preview .maya-md > ol,
+.maya-report-preview .maya-md > blockquote,
+.maya-report-preview .maya-md > .maya-md__h {
+  max-width: none;
 }

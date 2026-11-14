@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, NetworkError } from "./api-client";
 import { getAccessToken, refreshSession, setAccessToken } from "./auth-session";
 import {
+  bootstrapOwner,
+  getBootstrapStatus,
+  safeRedirectPath,
   completeSignup,
   identifyUser,
   registerAccount,
@@ -417,5 +420,60 @@ describe("account requests", () => {
     } finally {
       locks.restore();
     }
+  });
+});
+
+describe("bootstrap client", () => {
+  it("reads bootstrap status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ available: false, reason: "owner_exists" }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(getBootstrapStatus()).resolves.toEqual({
+      available: false,
+      reason: "owner_exists",
+    });
+  });
+
+  it("posts snake_case fields and stores the token", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "boot-token",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await bootstrapOwner({
+      fullName: "Own Er",
+      email: "o@example.com",
+      password: "pw-placeholder-1",
+    });
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toContain("/bootstrap");
+    expect(JSON.parse(call[1].body as string)).toEqual({
+      full_name: "Own Er",
+      email: "o@example.com",
+      password: "pw-placeholder-1",
+    });
+    expect(getAccessToken()).toBe("boot-token");
+  });
+
+  it("accepts only same-origin relative redirect paths", () => {
+    expect(safeRedirectPath("/chat?x=1")).toBe("/chat?x=1");
+    expect(safeRedirectPath("//evil.com")).toBe("/");
+    expect(safeRedirectPath("https://evil.com", "/home")).toBe("/home");
+    expect(safeRedirectPath("/\\evil.com")).toBe("/");
+    expect(safeRedirectPath(null)).toBe("/");
   });
 });

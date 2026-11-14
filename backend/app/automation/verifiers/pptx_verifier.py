@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+from app.automation.pptx_fit import estimate_shape_text, overflows
 from app.automation.verifiers.schemas import VerificationReport, compute_file_sha256
 
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -25,13 +27,18 @@ def verify_pptx(
     1. File existence and size constraint (<= 50 MB).
     2. File extension must be .pptx.
     3. Presentation opens cleanly via python-pptx.
-    4. Slide count assertion (if expected_slides provided).
+    4. Slide count comparison (if expected_slides provided): a mismatch is a WARNING, not an
+       error (count policy: the file is delivered and the true count is stated).
     5. 16:9 widescreen canvas aspect ratio confirmation.
     6. All shape bounding boxes (left, top, right, bottom) remain strictly inside canvas boundaries.
+    7. Editable text exists (not only pictures) and no text box is estimated to overflow.
+       The overflow check is a conservative character-count estimate, not a font measurement.
+    8. Speaker-note and picture counts are recorded for the proof.
     """
     path = Path(file_path).resolve()
     checks_passed: list[str] = []
     errors: list[str] = []
+    warnings: list[str] = []
 
     if not path.is_file():
         return VerificationReport(
@@ -57,6 +64,10 @@ def verify_pptx(
 
     total_slides = 0
     total_shapes_checked = 0
+    text_shapes = 0
+    picture_shapes = 0
+    table_shapes = 0
+    slides_with_notes = 0
 
     try:
         prs = Presentation(str(path))
@@ -69,7 +80,8 @@ def verify_pptx(
 
         if expected_slides is not None:
             if total_slides != expected_slides:
-                errors.append(
+                # Count policy: a count that differs is a warning, never a failed file.
+                warnings.append(
                     f"Slide count mismatch: expected {expected_slides}, got {total_slides}"
                 )
             else:
@@ -96,7 +108,22 @@ def verify_pptx(
 
         # Inspect all shape bounding boxes across all slides
         for s_idx, slide in enumerate(prs.slides, start=1):
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
+                slides_with_notes += 1
             for shp_idx, shape in enumerate(slide.shapes, start=1):
+                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    picture_shapes += 1
+                if getattr(shape, "has_table", False) and shape.has_table:
+                    table_shapes += 1
+                if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+                    text_shapes += 1
+                    if overflows(shape):
+                        estimate = estimate_shape_text(shape)
+                        needed, available = estimate if estimate else (0.0, 0.0)
+                        errors.append(
+                            f"Slide #{s_idx} Shape #{shp_idx} text may overflow its box "
+                            f"(estimated {needed:.2f} in needed, {available:.2f} in available)"
+                        )
                 if (
                     shape.left is None
                     or shape.top is None
@@ -133,8 +160,18 @@ def verify_pptx(
                         f"bottom edge {s_bottom} exceeds canvas height {canvas_h}"
                     )
 
-        if not any("overflow" in e or "position negative" in e for e in errors):
+        if not any(
+            ("overflow" in e and "text may overflow" not in e) or "position negative" in e
+            for e in errors
+        ):
             checks_passed.append(f"verified_{total_shapes_checked}_shapes_within_canvas_bounds")
+
+        if not any("text may overflow" in e for e in errors):
+            checks_passed.append("no_text_overflow_estimated")
+        if total_slides > 0 and text_shapes == 0 and table_shapes == 0:
+            errors.append("No editable text found; the deck appears to contain only pictures")
+        else:
+            checks_passed.append(f"editable_text_in_{text_shapes}_shapes")
 
     except Exception as exc:
         errors.append(f"Failed to parse PPTX presentation: {exc}")
@@ -148,9 +185,14 @@ def verify_pptx(
         size_bytes=size,
         checks_passed=checks_passed,
         errors=errors,
+        warnings=warnings,
         metadata={
             "total_slides": total_slides,
             "total_shapes_checked": total_shapes_checked,
+            "text_shapes": text_shapes,
+            "table_shapes": table_shapes,
+            "picture_shapes": picture_shapes,
+            "slides_with_notes": slides_with_notes,
             "slide_width_emu": canvas_w if "canvas_w" in locals() else 0,
             "slide_height_emu": canvas_h if "canvas_h" in locals() else 0,
         },

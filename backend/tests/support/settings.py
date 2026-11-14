@@ -14,6 +14,8 @@ def make_settings(**overrides: Any) -> Settings:
         "redis_url": REDIS_URL,
         "jwt_signing_key": JWT_KEY,
         "otp_hmac_key": OTP_KEY,
+        # Tests never start a real headless browser at app startup (warm-up tests opt in).
+        "browser_pdf_warm_up": False,
     }
     values.update(overrides)
     return Settings(**values)

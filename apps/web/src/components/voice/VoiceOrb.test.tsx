@@ -1,48 +1,67 @@
-import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 
-import { VoiceOrb } from "./VoiceOrb";
+import type { LiveVoiceState } from "../../hooks/useLiveVoice";
+import { ORB_LABELS, VoiceOrb } from "./VoiceOrb";
+
+const STATES: LiveVoiceState[] = [
+  "idle",
+  "connecting",
+  "listening",
+  "thinking",
+  "speaking",
+  "interrupted",
+  "unavailable",
+  "error",
+];
 
 describe("VoiceOrb", () => {
-  it("renders in standby idle state by default", () => {
-    render(<VoiceOrb />);
-    expect(screen.getByText("Voice Standby")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText(
-        "Voice Assistant: Voice Standby. Click to start voice interaction.",
-      ),
-    ).toBeInTheDocument();
+  it.each(STATES)("shows a text label for %s", (state) => {
+    render(<VoiceOrb state={state} />);
+    expect(screen.getByText(ORB_LABELS[state])).toBeTruthy();
+    expect(screen.getByTestId("voice-orb").dataset.state).toBe(state);
   });
 
-  it("renders controlled listening state and triggers barge-in when speaking", () => {
-    const onBargeIn = vi.fn();
-    const { rerender } = render(
-      <VoiceOrb state="speaking" onBargeIn={onBargeIn} />,
-    );
-
-    expect(screen.getByText("Speaking")).toBeInTheDocument();
-    const button = screen.getByRole("button", {
-      name: /Voice Assistant: Speaking/i,
-    });
-    fireEvent.click(button);
-    expect(onBargeIn).toHaveBeenCalledTimes(1);
-
-    rerender(<VoiceOrb state="listening" />);
-    expect(screen.getByText("Listening")).toBeInTheDocument();
+  it("keeps the label for assistive technology when visually hidden", () => {
+    render(<VoiceOrb state="listening" showLabel={false} />);
+    expect(screen.getByText("Listening").className).toContain("sr-only");
   });
 
-  it("handles mute toggle button", () => {
-    const onToggleMute = vi.fn();
-    const { rerender } = render(
-      <VoiceOrb isMuted={false} onToggleMute={onToggleMute} />,
-    );
-
-    const muteBtn = screen.getByRole("button", { name: "Audio On" });
-    fireEvent.click(muteBtn);
-    expect(onToggleMute).toHaveBeenCalledTimes(1);
-
-    rerender(<VoiceOrb isMuted={true} onToggleMute={onToggleMute} />);
-    expect(screen.getByRole("button", { name: "Muted" })).toBeInTheDocument();
+  it("does not touch the microphone", () => {
+    const original = navigator.mediaDevices;
+    render(<VoiceOrb state="listening" />);
+    expect(navigator.mediaDevices).toBe(original);
   });
+});
+
+describe("VoiceOrb level meter", () => {
+  it.each([
+    ["idle", "idle"],
+    ["connecting", "thinking"],
+    ["listening", "listening"],
+    ["thinking", "thinking"],
+    ["speaking", "speaking"],
+    ["interrupted", "listening"],
+  ] as const)(
+    "draws nine bars for %s with motion state %s",
+    (state, visual) => {
+      render(<VoiceOrb state={state} />);
+      const meter = screen
+        .getByTestId("voice-orb")
+        .querySelector(".motion-orb") as HTMLElement;
+      expect(meter.dataset.state).toBe(visual);
+      expect(meter.querySelectorAll("i")).toHaveLength(9);
+    },
+  );
+
+  it.each(["unavailable", "error"] as const)(
+    "shows an icon instead of bars when voice is %s, with the state in words",
+    (state) => {
+      render(<VoiceOrb state={state} />);
+      expect(
+        screen.getByTestId("voice-orb").querySelector(".motion-orb"),
+      ).toBeNull();
+      expect(screen.getByText(ORB_LABELS[state])).toBeTruthy();
+    },
+  );
 });

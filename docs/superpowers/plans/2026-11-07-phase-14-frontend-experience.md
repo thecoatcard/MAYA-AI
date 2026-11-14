@@ -42,8 +42,8 @@
 ### Task 2: Integrate Browser Takeover into Task Center and Approval Flow
 
 **Files:**
-- Modify: `apps/web/src/components/tasks/TaskCenterDrawer.tsx`
-- Modify: `apps/web/src/components/approvals/ApprovalCenterModal.tsx`
+- Modify: WorkPanel.tsx (removed 2026-11-10; its task progress now lives in the chat TaskCard)
+- Modify: ApprovalCenterModal (removed; approvals are now inline on the task card)
 
 - [ ] **Step 1: Wire `human_browser_takeover` action type into TaskCenterDrawer and ApprovalCenterModal to open BrowserTakeoverModal**
 - [ ] **Step 2: Run Vitest suite to verify components pass**

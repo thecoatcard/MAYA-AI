@@ -69,7 +69,6 @@ class VendorRateLimiter:
 
     DEFAULT_PROFILES: dict[str, tuple[float, float]] = {
         # vendor: (capacity, leak_rate)
-        "brave": (5.0, 1.0),
         "github": (10.0, 0.5),
         "notion": (5.0, 3.0),
         "google": (10.0, 5.0),

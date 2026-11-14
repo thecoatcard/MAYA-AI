@@ -3,7 +3,8 @@
  */
 
 import { getAccessToken, refreshSession } from "./auth-session";
-import { ApiError } from "./api-client";
+import { apiErrorFromResponse } from "./api-client";
+import { getArtifactOpener, type OpenArtifactResult } from "./desktop-bridge";
 
 export interface ArtifactMetadata {
   readonly id: string;
@@ -17,6 +18,11 @@ export interface ArtifactMetadata {
   readonly verification_status: "verified" | "failed" | "unverified" | string;
   readonly verification_report: Record<string, unknown> | null;
   readonly created_at: string;
+  /**
+   * True when the file lives in the user's connected folder rather than MAYA's own storage. MAYA
+   * never deletes such a file from disk, so the UI offers no Delete for it.
+   */
+  readonly in_connected_folder?: boolean;
 }
 
 async function authenticatedFetch(
@@ -48,16 +54,7 @@ async function authenticatedFetch(
   }
 
   if (!response.ok) {
-    let errorCode = "unknown_error";
-    try {
-      const body = (await response.json()) as { error?: string };
-      if (body?.error) {
-        errorCode = body.error;
-      }
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(response.status, errorCode);
+    throw await apiErrorFromResponse(response);
   }
 
   return response;
@@ -110,28 +107,143 @@ export function getArtifactDownloadUrl(
   return qs ? `${base}?${qs}` : base;
 }
 
-export async function downloadArtifactFile(
-  artifactId: string,
-  fileName: string,
-): Promise<void> {
+export async function fetchArtifactBlob(artifactId: string): Promise<Blob> {
   const response = await authenticatedFetch(
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
     {
       method: "GET",
     },
   );
+  return await response.blob();
+}
 
-  if (!response.ok) {
-    throw new ApiError(response.status, "download_failed");
+/**
+ * The text of a stored Markdown or text artifact (the Notion approval card reads the book this
+ * way). The server sends the file as it is; nothing is rendered here.
+ */
+export async function fetchArtifactText(artifactId: string): Promise<string> {
+  const response = await authenticatedFetch(
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "GET", headers: { Accept: "text/markdown, text/plain" } },
+  );
+  return await response.text();
+}
+
+/**
+ * The name a saved file gets: the stored name, with the type as extension when the name has none
+ * (zips included). Path separators are dropped so the browser never sees a folder.
+ */
+export function downloadFileName(fileName: string, fileType?: string): string {
+  const base = fileName.split(/[\\/]/).pop()?.trim() || "download";
+  const ext = (fileType ?? "").trim().replace(/^\./, "").toLowerCase();
+  if (
+    ext !== "" &&
+    /^[a-z0-9]{1,10}$/.test(ext) &&
+    !/\.[A-Za-z0-9]{1,10}$/.test(base)
+  ) {
+    return `${base}.${ext}`;
   }
+  return base;
+}
 
-  const blob = await response.blob();
+export async function downloadArtifact(
+  artifactId: string,
+  fileName: string,
+  fileType?: string,
+): Promise<void> {
+  const blob = await fetchArtifactBlob(artifactId);
   const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  window.URL.revokeObjectURL(url);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = downloadFileName(fileName, fileType);
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    window.URL.revokeObjectURL(url);
+  }
+}
+
+/** Deprecated alias for downloadArtifact for backward compatibility */
+export const downloadArtifactFile = downloadArtifact;
+
+/** Delete a stored artifact. The server removes MAYA's own copy only, never a file in the user's folder. */
+export async function deleteArtifact(artifactId: string): Promise<void> {
+  await authenticatedFetch(
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Most ids the server accepts in one bulk delete. */
+export const MAX_BULK_DELETE = 100;
+
+export interface BulkDeleteArtifactsResult {
+  readonly deleted: readonly string[];
+  readonly notFound: readonly string[];
+}
+
+/** Delete several files (in batches of 100). Ids already gone come back as `notFound`. */
+export async function deleteArtifacts(
+  ids: readonly string[],
+): Promise<BulkDeleteArtifactsResult> {
+  const deleted: string[] = [];
+  const notFound: string[] = [];
+  for (let start = 0; start < ids.length; start += MAX_BULK_DELETE) {
+    const response = await authenticatedFetch("/api/v1/artifacts/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids.slice(start, start + MAX_BULK_DELETE) }),
+    });
+    const body = (await response.json()) as {
+      deleted?: string[];
+      not_found?: string[];
+    };
+    deleted.push(...(body.deleted ?? []));
+    notFound.push(...(body.not_found ?? []));
+  }
+  return { deleted, notFound };
+}
+
+/** True when this page runs in the desktop app and can open files with the PC's default app. */
+export function canOpenNatively(): boolean {
+  return getArtifactOpener() !== null;
+}
+
+/**
+ * Open an artifact with the PC's default app (desktop app only). The renderer sends the artifact
+ * id and the file name, never a path; the desktop shell downloads it to a MAYA temp folder and
+ * opens it. Resolves `{ ok: false, reason: "no-desktop" }` in a plain browser.
+ */
+export async function openArtifactNatively(
+  artifact: Pick<ArtifactMetadata, "id" | "file_name" | "file_type">,
+): Promise<OpenArtifactResult | { ok: false; reason: "no-desktop" }> {
+  const open = getArtifactOpener();
+  if (open === null) return { ok: false, reason: "no-desktop" };
+  let token = getAccessToken();
+  if (!token) {
+    const refreshed = await refreshSession();
+    token = refreshed ? getAccessToken() : null;
+  }
+  if (!token) return { ok: false, reason: "open-failed" };
+  return open({
+    artifactId: artifact.id,
+    fileName: downloadFileName(artifact.file_name, artifact.file_type),
+    token,
+  });
+}
+
+/** The artifact as a File, so it can be attached to a chat message ("Ask AI"). */
+export async function artifactToFile(
+  artifact: Pick<ArtifactMetadata, "id" | "file_name" | "file_type">,
+): Promise<File> {
+  const blob = await fetchArtifactBlob(artifact.id);
+  return new File(
+    [blob],
+    downloadFileName(artifact.file_name, artifact.file_type),
+    {
+      type: blob.type,
+    },
+  );
 }

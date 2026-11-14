@@ -23,6 +23,7 @@ async function request(
     "/refresh",
     "/logout",
     "/signup/complete",
+    "/bootstrap",
   ].includes(path);
   const send = async (): Promise<Response> => {
     let response: Response;
@@ -231,6 +232,70 @@ export async function completeSignup(body: {
   });
 }
 
+export async function getBootstrapStatus(): Promise<{
+  available: boolean;
+  reason?: string;
+}> {
+  const response = await request("/bootstrap/status", {
+    method: "GET",
+  });
+  const data = (await response.json()) as {
+    available: boolean;
+    reason?: string;
+  };
+  return {
+    available: Boolean(data.available),
+    reason: data.reason ?? undefined,
+  };
+}
+
+export async function bootstrapOwner(input: {
+  fullName: string;
+  email: string;
+  password: string;
+}): Promise<AuthTokens> {
+  return withAuthCookieLock(async () => {
+    const response = await request(
+      "/bootstrap",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          full_name: input.fullName,
+          email: input.email,
+          password: input.password,
+        }),
+      },
+      true,
+    );
+    const tokens = await readTokens(response);
+    setAccessToken(tokens.accessToken, tokens.expiresIn);
+    return tokens;
+  });
+}
+
+/**
+ * Validates a post-login or redirect target.
+ * Only allows same-origin relative paths (e.g. "/chat" or "/workspace"),
+ * rejecting absolute URLs, protocol-relative URLs ("//"), or scheme injections.
+ */
+export function safeRedirectPath(
+  raw: string | null | undefined,
+  fallback = "/",
+): string {
+  if (!raw) return fallback;
+  const trimmed = raw.trim();
+  if (
+    !trimmed.startsWith("/") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("/\\") ||
+    trimmed.includes("\\") ||
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
 export interface UserMe {
   user_id: string;
   workspace_id: string;
@@ -240,14 +305,31 @@ export interface UserMe {
 export type UserPrincipal = UserMe;
 
 export async function getMe(accessToken?: string): Promise<UserMe | null> {
-  const token = accessToken ?? getAccessToken();
+  let token = accessToken ?? getAccessToken();
+  if (!token) {
+    const refreshed = await refreshSession();
+    token = refreshed ? getAccessToken() : null;
+  }
   if (!token) return null;
   try {
-    const res = await fetch("/api/v1/auth/me", {
+    let res = await fetch("/api/v1/auth/me", {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
+    if (res.status === 401 && accessToken === undefined) {
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        const retryToken = getAccessToken();
+        if (retryToken) {
+          res = await fetch("/api/v1/auth/me", {
+            headers: {
+              Authorization: `Bearer ${retryToken}`,
+            },
+          });
+        }
+      }
+    }
     if (!res.ok) return null;
     return (await res.json()) as UserMe;
   } catch {

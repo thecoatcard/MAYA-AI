@@ -5,6 +5,20 @@
 import { ApiError } from "./api-client";
 import { getAccessToken, refreshSession } from "./auth-session";
 
+/** Status vocabulary written by the backend audit writer. */
+export const AUDIT_STATUSES = [
+  "success",
+  "failed",
+  "denied",
+  "pending",
+  "rejected",
+  "warning",
+  "aborted",
+  "timeout",
+  "expired",
+] as const;
+export type AuditStatus = (typeof AUDIT_STATUSES)[number];
+
 export interface AuditEvent {
   readonly id: string;
   readonly timestamp: string;
@@ -12,7 +26,7 @@ export interface AuditEvent {
   readonly category: "auth" | "task" | "tool" | "approval" | "security";
   readonly actor: string;
   readonly details: string;
-  readonly status: "success" | "pending" | "rejected" | "warning";
+  readonly status: AuditStatus;
   readonly taskId?: string;
   readonly subtaskId?: string;
   readonly approvalId?: string;
@@ -32,6 +46,12 @@ export interface AuditListResponse {
   readonly limit: number;
   readonly offset: number;
   readonly chain_valid: boolean;
+  /** Id of the first row that failed hash verification, or null. */
+  readonly chain_first_bad_id: string | null;
+  /** Number of rows verified. */
+  readonly chain_length: number;
+  /** Status vocabulary the server accepts as filter values. */
+  readonly statuses: readonly string[];
 }
 
 interface BackendAuditEventItem {
@@ -61,6 +81,9 @@ interface BackendAuditListResponse {
   readonly limit: number;
   readonly offset: number;
   readonly chain_valid: boolean;
+  readonly chain_first_bad_id?: string | null;
+  readonly chain_length?: number;
+  readonly statuses?: readonly string[];
 }
 
 async function authenticatedFetch(
@@ -94,12 +117,20 @@ async function authenticatedFetch(
   if (!response.ok) {
     let errorCode = "unknown_error";
     try {
-      const body = (await response.json()) as { error?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+      };
       if (body?.error) {
         errorCode = body.error;
       }
-    } catch {
-      // not JSON
+      if (body?.message) {
+        throw new ApiError(response.status, errorCode, {
+          message: body.message,
+        });
+      }
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
     }
     throw new ApiError(response.status, errorCode);
   }
@@ -123,20 +154,14 @@ function normalizeCategory(
   return "security";
 }
 
-function normalizeStatus(
-  stat: string,
-): "success" | "pending" | "rejected" | "warning" {
+function normalizeStatus(stat: string): AuditStatus {
   const lower = stat.toLowerCase();
-  if (
-    lower === "success" ||
-    lower === "pending" ||
-    lower === "rejected" ||
-    lower === "warning"
-  ) {
-    return lower;
+  if ((AUDIT_STATUSES as readonly string[]).includes(lower)) {
+    return lower as AuditStatus;
   }
-  if (lower === "failed" || lower === "error") return "rejected";
-  return "success";
+  if (lower === "error") return "failed";
+  // Unknown vocabulary must never read as success.
+  return "warning";
 }
 
 export async function listAuditEvents(params?: {
@@ -193,5 +218,8 @@ export async function listAuditEvents(params?: {
     limit: data.limit,
     offset: data.offset,
     chain_valid: data.chain_valid,
+    chain_first_bad_id: data.chain_first_bad_id ?? null,
+    chain_length: data.chain_length ?? 0,
+    statuses: data.statuses ?? AUDIT_STATUSES,
   };
 }

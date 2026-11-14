@@ -29,6 +29,24 @@ class SubTask(BaseModel):
     error_message: str | None = None
     retry_count: int = 0
     requires_approval: bool = False
+    # Optional explicit MCP tool step. Every tool call is gated by the permission registry.
+    tool: str | None = None
+    tool_args: dict[str, Any] = Field(default_factory=dict)
+
+
+def persisted_input_data(subtask: SubTask) -> dict[str, Any]:
+    """The ``subtasks.input_data`` JSON for a planned node.
+
+    ``requires_approval``/``tool``/``tool_args`` have no columns of their own; the worker reads
+    them from ``input_data`` (no migration needed).
+    """
+    data = dict(subtask.input_data or {})
+    if subtask_requires_approval(subtask):
+        data["requires_approval"] = True
+    if subtask.tool:
+        data["tool"] = subtask.tool
+        data["tool_args"] = dict(subtask.tool_args or {})
+    return data
 
 
 def subtask_requires_approval(subtask: SubTask) -> bool:

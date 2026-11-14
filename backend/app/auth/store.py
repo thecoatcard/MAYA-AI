@@ -50,6 +50,10 @@ class AuthTransaction(Protocol):
         """Insert the workspace and its first user; raise ``AccountConflict`` if either exists."""
         ...
 
+    async def any_account_exists(self) -> bool:
+        """True if any user exists in any workspace (needs the definer function; see ADR-0014)."""
+        ...
+
     async def latest_challenge_created_at(self, user_id: UUID, purpose: str) -> datetime | None: ...
 
     async def invalidate_live_challenges(
@@ -120,6 +124,10 @@ class AuthTransaction(Protocol):
         now: datetime,
     ) -> RotatedRefresh | None:
         """Swap the live refresh id atomically and raise the generation; None if not allowed."""
+        ...
+
+    async def get_profile(self, user_id: UUID) -> tuple[str, str] | None:
+        """The user's own (email, full name) inside the transaction's workspace, or None."""
         ...
 
     async def refresh_generation_of(self, session_id: UUID, user_id: UUID) -> int | None:

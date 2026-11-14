@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from uuid import UUID
 
+from app.agents.model_policy import agent_alias
 from app.agents.schemas import SpecialistAgentResult, SpecialistAgentRole
 from app.mcp.client_manager import MCPClientManager
 from app.mcp.permissions import (
@@ -31,9 +32,12 @@ class BaseSpecialistAgent(ABC):
     """Abstract base class for all specialist agents enforcing strict boundaries."""
 
     role: SpecialistAgentRole
-    model_alias: str = "orchestrator"
     permission_ceiling: ToolTier = ToolTier.READ
     assigned_tools: frozenset[str] = frozenset()
+    # Per-agent wall-clock budget for ``execute_subtask`` (seconds). ``None`` keeps the worker
+    # default; a job's own ``timeout_seconds`` always wins. Set it low for agents that only make
+    # a couple of HTTP calls so a hung provider fails fast with a clear message.
+    execution_timeout_seconds: float | None = None
 
     def __init__(
         self,
@@ -49,6 +53,19 @@ class BaseSpecialistAgent(ABC):
             if name in self.__dict__:
                 raise AttributeError(f"Cannot mutate immutable agent guardrail '{name}'")
         super().__setattr__(name, value)
+
+    @property
+    def model_alias(self) -> str:
+        """The one model alias every agent uses (``MAYA_AGENT_MODEL_ALIAS``, default lite)."""
+        return agent_alias()
+
+    def availability_error(self) -> str | None:
+        """Why this agent cannot run in this deployment, or ``None`` when it can.
+
+        The worker checks this before asking a model for input or a human for approval, so a
+        missing credential is reported up front instead of after the user approved an action.
+        """
+        return None
 
     async def invoke_tool(
         self,

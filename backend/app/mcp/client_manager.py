@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import UUID
 
+from app.decisions.screen import MODEL_FLAG, screen_instructions
 from app.gateway.schemas import ToolDefinition
 from app.mcp.limiter import VendorRateLimiter
 from app.mcp.normalizer import (
@@ -226,4 +227,14 @@ class MCPClientManager:
             raw_text = str(response)
 
         # 5. Sanitize and wrap untrusted output
-        return sanitize_tool_output(raw_text, tool_name=tool_name)
+        result = sanitize_tool_output(raw_text, tool_name=tool_name)
+        if not result.has_injection_suspicions and await screen_instructions(
+            result.clean_text, tool_name
+        ):
+            # ADR-0029: the decision model flagged instructions the regex scan missed. Additive.
+            result = replace(
+                result,
+                has_injection_suspicions=True,
+                suspicions=(*result.suspicions, MODEL_FLAG),
+            )
+        return result

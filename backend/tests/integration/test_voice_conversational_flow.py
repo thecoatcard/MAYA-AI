@@ -1,70 +1,34 @@
-"""Integration tests for conversational AI turn and task submission over Voice WebSocket."""
+"""Conversational turns and task submission over the Voice WebSocket (fake Live provider).
 
-from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+Updated: these used to pass through a built-in simulator that fabricated replies and tasks when
+no key was configured. They now script a fake provider session instead (audit C2).
+"""
 
-from fastapi.testclient import TestClient
+from typing import Any
 
-from app.auth.models import Principal
-from app.main import create_app
-from tests.support.settings import make_settings
+from tests.support import fake_live as fl
+from tests.support.voice_app import FakePersistence, recv, recv_until, voice_client
+
+
+def script(session: fl.FakeLiveSession, kind: str, kwargs: dict[str, Any]) -> None:
+    text = kwargs.get("text", "")
+    if "research" in text:
+        session.push_turn(fl.tool_call("submit_task", {"intent": text}, "call-r"))
+    else:
+        session.push_turn(fl.audio_msg(), fl.out_tx("I can help."), fl.turn_complete())
 
 
 def test_voice_conversational_turn_and_task_execution() -> None:
-    ws_id = uuid4()
-    u_id = uuid4()
-    session_uuid = uuid4()
-    principal = Principal(user_id=u_id, workspace_id=ws_id, role="user", session_id=session_uuid)
+    live = fl.FakeLive(on_send=script)
+    with voice_client(live=live, persistence=FakePersistence()) as client:
+        with client.websocket_connect("/api/v1/voice/live?token=valid-jwt&protocol=2") as ws:
+            recv(ws)
+            ws.send_json({"type": "USER_TEXT", "text": "Hello MAYA, what can you do?"})
+            assert len(recv_until(ws, "_audio")["data"]) > 0
+            assert recv_until(ws, "TURN_STATE")["state"] in ("speaking", "listening")
 
-    with patch("app.main.Resources") as factory:
-        resources = factory.return_value
-        resources.check = AsyncMock(return_value=None)
-        resources.close = AsyncMock()
-        resources.verify_runtime_role = AsyncMock(return_value=None)
-        resources.engine = None
-        resources.redis = None
-
-        auth_service = AsyncMock()
-        auth_service.warm_up = AsyncMock()
-        auth_service.aclose = AsyncMock()
-        auth_service.authenticate = AsyncMock(return_value=principal)
-
-        app = create_app(make_settings(), auth_service=auth_service)
-        with TestClient(app) as client:
-            with client.websocket_connect("/api/v1/voice/live?token=valid-jwt") as websocket:
-                # 1. Send conversational user text
-                websocket.send_json({"type": "USER_TEXT", "text": "Hello MAYA, what can you do?"})
-
-                # Expect TRANSCRIPT_USER frame
-                resp1 = websocket.receive_json()
-                assert resp1.get("type") == "TRANSCRIPT_USER"
-                assert "Hello MAYA" in resp1.get("text", "")
-
-                # Expect TRANSCRIPT_MODEL frame
-                resp2 = websocket.receive_json()
-                assert resp2.get("type") == "TRANSCRIPT_MODEL"
-                assert "MAYA" in resp2.get("text", "") or "assist" in resp2.get("text", "")
-
-                # Expect audio bytes frame
-                audio_bytes = websocket.receive_bytes()
-                assert len(audio_bytes) > 0
-
-                # 2. Send instruction triggering submit_task background tool
-                websocket.send_json(
-                    {"type": "USER_TEXT", "text": "Please research enterprise pricing models"}
-                )
-
-                # Read user transcript
-                resp_tx = websocket.receive_json()
-                assert resp_tx.get("type") == "TRANSCRIPT_USER"
-
-                # Read tool execution task status frame
-                resp_task = websocket.receive_json()
-                assert resp_task.get("type") == "TASK_STATUS"
-                assert resp_task.get("status") == "pending"
-                assert resp_task.get("task_id") is not None
-
-                # Read model reply transcript acknowledging the task
-                resp_model = websocket.receive_json()
-                assert resp_model.get("type") == "TRANSCRIPT_MODEL"
-                assert "task" in resp_model.get("text", "").lower()
+            # Without a task database the tool reports an honest error; no task id is invented.
+            ws.send_json({"type": "USER_TEXT", "text": "Please research enterprise pricing"})
+            err = recv_until(ws, "ERROR")
+            assert err["code"] == "tasks_unavailable"
+        assert "task_id" not in live.session.tool_responses[0].response

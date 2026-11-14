@@ -60,10 +60,10 @@ async def test_handle_429_applies_backoff_and_jitter() -> None:
     limiter = VendorRateLimiter()
 
     # Handling 429 sets vendor into backoff
-    delay = limiter.record_429("brave", retry_after="1")
+    delay = limiter.record_429("github", retry_after="1")
     assert 1.0 <= delay <= 2.0
-    assert limiter.is_backoff_active("brave") is True
+    assert limiter.is_backoff_active("github") is True
 
     # Sleep past backoff
     await asyncio.sleep(delay + 0.1)
-    assert limiter.is_backoff_active("brave") is False
+    assert limiter.is_backoff_active("github") is False

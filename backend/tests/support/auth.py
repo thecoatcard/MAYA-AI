@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from app.auth.events import AuthEvents
 from app.auth.models import TokenPair
+from app.auth.pending import PendingSignupStore
 from app.auth.policy import AuthPolicy, RateLimits
 from app.auth.service import AuthService, RegisterCommand
 from app.auth.store import AuthStore
@@ -134,6 +135,8 @@ def build_harness(
     passwords: PasswordService | None = None,
     limits: RateLimits | None = None,
     events: AuthEvents | None = None,
+    local_owner_bootstrap: bool = False,
+    pending_signups: PendingSignupStore | None = None,
 ) -> Harness:
     clock = ManualClock()
     sender = FakeEmailSender()
@@ -157,5 +160,7 @@ def build_harness(
         events=events or recording,
         email_sender=sender if email else None,
         policy=policy,
+        pending_signups=pending_signups,
+        local_owner_bootstrap=local_owner_bootstrap,
     )
     return Harness(service, store, clock, sender, limiter, recording, tokens, hasher, policy)

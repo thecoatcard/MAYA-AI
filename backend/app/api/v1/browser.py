@@ -121,9 +121,15 @@ async def dispatch_browser_action(
         )
 
         try:
-            secret_key = (
-                settings.jwt_signing_key.get_secret_value() if settings is not None else "0" * 32
-            )
+            if settings is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error": "server_misconfigured",
+                        "message": "Signing keys are not configured.",
+                    },
+                )
+            secret_key = settings.jwt_signing_key.get_secret_value()
             verify_approval_token(
                 request.approval_token,
                 secret_key,

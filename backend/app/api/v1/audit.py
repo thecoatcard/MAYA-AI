@@ -142,6 +142,6 @@ async def list_audit_logs(
         chain_first_bad_id=(
             f"audit-{verification.first_bad_row_id}" if verification.first_bad_row_id else None
         ),
-        chain_length=verification.count,
+        chain_length=verification.row_count,
         statuses=sorted(AUDIT_STATUSES),
     )

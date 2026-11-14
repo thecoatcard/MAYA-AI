@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, NetworkError } from "../../lib/api-client";
+import {
+  ApiError,
+  BackendUnreachableError,
+  NetworkError,
+} from "../../lib/api-client";
 import * as authClient from "../../lib/auth-client";
 import * as authSession from "../../lib/auth-session";
 import { UnifiedAuthForm } from "./UnifiedAuthForm";
@@ -17,6 +21,9 @@ vi.mock("next/navigation", () => ({
 describe("UnifiedAuthForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(authClient, "getBootstrapStatus").mockResolvedValue({
+      available: false,
+    });
   });
 
   afterEach(() => {
@@ -240,5 +247,87 @@ describe("UnifiedAuthForm", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "That verification code is invalid or has expired. Request a new code or try again.",
     );
+  });
+
+  it("never offers hard-coded development credentials", async () => {
+    render(<UnifiedAuthForm />);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.queryByText(/Fill Admin/i)).toBeNull();
+    expect(screen.queryByText(/AdminPassword/)).toBeNull();
+    expect(screen.queryByText(/Local Development Account/i)).toBeNull();
+  });
+
+  it("shows the first-run owner form when bootstrap is available and signs in on submit", async () => {
+    vi.mocked(authClient.getBootstrapStatus).mockResolvedValue({
+      available: true,
+    });
+    const bootstrapSpy = vi
+      .spyOn(authClient, "bootstrapOwner")
+      .mockResolvedValueOnce({
+        accessToken: "fake-access-token-placeholder",
+        expiresIn: 900,
+      });
+
+    render(<UnifiedAuthForm />);
+
+    expect(
+      await screen.findByText("Create your local owner account"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Ada Owner" },
+    });
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "ada@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "fake-password-placeholder" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create owner account" }),
+    );
+
+    await waitFor(() => {
+      expect(bootstrapSpy).toHaveBeenCalledWith({
+        fullName: "Ada Owner",
+        email: "ada@example.com",
+        password: "fake-password-placeholder",
+      });
+      expect(replaceMock).toHaveBeenCalledWith("/chat");
+    });
+  });
+
+  it("shows can't-reach with Retry instead of a login form when the backend is down", async () => {
+    vi.mocked(authClient.getBootstrapStatus)
+      .mockRejectedValueOnce(new BackendUnreachableError())
+      .mockResolvedValueOnce({ available: false });
+
+    render(<UnifiedAuthForm />);
+
+    expect(
+      await screen.findByText("Can't reach the MAYA backend"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Welcome to MAYA")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Welcome to MAYA")).toBeInTheDocument();
+  });
+
+  it("ignores an unsafe redirect query parameter after sign-in", async () => {
+    window.history.pushState({}, "", "/login?redirect=//evil.example/x");
+    vi.spyOn(authClient, "signIn").mockResolvedValueOnce({
+      accessToken: "fake-access-token-placeholder",
+      expiresIn: 900,
+    });
+    render(<UnifiedAuthForm />);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.change(screen.getByLabelText("Username or email"), {
+      target: { value: "someone" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "fake-password-placeholder" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/chat"));
+    window.history.pushState({}, "", "/");
   });
 });

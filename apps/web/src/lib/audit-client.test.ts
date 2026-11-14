@@ -56,4 +56,43 @@ describe("audit-client", () => {
       }),
     );
   });
+
+  it("keeps the full status vocabulary and reads chain fields", async () => {
+    setAccessToken("audit-test-token", 3600);
+    const base = {
+      timestamp: "2026-11-07T12:00:00Z",
+      event_type: "x",
+      category: "task",
+      actor: "a",
+      details: "d",
+      prev_hash: "0",
+      row_hash: "1",
+    };
+    const body = {
+      items: [
+        { ...base, id: "1", status: "denied" },
+        { ...base, id: "2", status: "timeout" },
+        { ...base, id: "3", status: "mystery" },
+      ],
+      total: 3,
+      limit: 50,
+      offset: 0,
+      chain_valid: false,
+      chain_first_bad_id: "2",
+      chain_length: 3,
+      statuses: ["success", "denied"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    );
+    const res = await listAuditEvents();
+    expect(res.items.map((i) => i.status)).toEqual([
+      "denied",
+      "timeout",
+      "warning",
+    ]);
+    expect(res.chain_first_bad_id).toBe("2");
+    expect(res.chain_length).toBe(3);
+  });
 });

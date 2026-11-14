@@ -176,7 +176,7 @@
   - apps/web/tests/e2e/approval_flow.spec.ts (planned artifact)
   - docs/architecture/FRONTEND_ARCHITECTURE.md (planned artifact)
 - **Files to Modify:**
-  - `apps/web/src/app/page.tsx`
+  - `apps/web/src/app/(app)/page.tsx`
   - `apps/web/src/app/layout.tsx`
   - apps/web/src/lib/api-client.ts (planned artifact)
 - **Files to Avoid Modifying:**

@@ -178,3 +178,36 @@ async def fresh_tenants(admin_engine: AsyncEngine) -> tuple[Any, Any]:
 
     async with admin_engine.begin() as connection:
         return await seed_tenant(connection, "a"), await seed_tenant(connection, "b")
+
+
+@pytest.fixture
+def nine_chapters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plan a 50-page document as 9 chapters (the pipeline tests were written for that shape).
+
+    ``plan_chapters`` sizes chapters at ``CHAPTER_CAPACITY_WORDS`` per call; this raises the
+    capacity so the pipeline tests keep exercising a 9-chapter run. The sizing formula itself is
+    tested in ``tests/unit/test_acceptance.py`` with the real constants.
+    """
+    import app.automation.acceptance as acceptance
+
+    monkeypatch.setattr(acceptance, "CHAPTER_CAPACITY_WORDS", 1500)
+
+
+@pytest.fixture(autouse=True)
+def _no_grounding_cooldown_leaks() -> Iterator[None]:
+    """The Gemini grounding cooldown is process-wide: a test that trips it must not slow others."""
+    from app.agents import grounding_cooldown
+
+    grounding_cooldown.shared.reset()
+    yield
+    grounding_cooldown.shared.reset()
+
+
+@pytest.fixture(autouse=True)
+def _no_decision_service_leaks() -> Iterator[None]:
+    """ADR-0029: no test may inherit a decision service from another; None means no opinion."""
+    from app.decisions import runtime as decision_runtime
+
+    decision_runtime.set_current(None)
+    yield
+    decision_runtime.set_current(None)

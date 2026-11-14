@@ -4,8 +4,9 @@
 - **Engines:**
   - `backend/app/automation/xlsx_engine.py` (Excel generation via `openpyxl`)
   - `backend/app/automation/docx_engine.py` (Word document generation via `python-docx`)
-  - `backend/app/automation/pptx_engine.py` (PowerPoint presentation generation via `python-pptx`)
-  - `backend/app/automation/pdf_engine.py` (PDF document generation via `reportlab`)
+  - `backend/app/automation/pptx_engine.py` (native, themed PowerPoint generation via `python-pptx`)
+  - `backend/app/automation/pdf_engine.py` (themed HTML printed by Edge/Chrome through Playwright; ReportLab fallback)
+  - Shared model, themes and HTML renderer: see [Document generation](../architecture/DOCUMENT_GENERATION.md) and [ADR-0017](../adr/0017-themed-document-generation.md)
 - **Deterministic Verifiers:**
   - `backend/app/automation/verifiers/xlsx_verifier.py`
   - `backend/app/automation/verifiers/docx_verifier.py`

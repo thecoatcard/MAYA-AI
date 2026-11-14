@@ -27,6 +27,9 @@ class TaskEventType(StrEnum):
     TASK_PAUSED_APPROVAL = "task_paused_approval"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
+    TASK_CANCELLED = "task_cancelled"
+    # Progress step of a task (app.services.progress.ProgressStep). Clients only, never spoken.
+    TASK_PROGRESS = "task_progress"
 
     # Backward-compatible aliases
     PLANNING_STARTED = "planning_started"

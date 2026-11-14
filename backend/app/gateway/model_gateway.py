@@ -1,18 +1,21 @@
 """Centralized Model Gateway for LLM operations, resilience, metering, and budgeting."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
-from app.gateway.client_adapter import create_client_from_settings
+from app.core.metrics import SPEND_USD_TOTAL, TOKEN_USAGE_TOTAL
+from app.gateway.client_adapter import build_genai_client, create_client_from_settings
 from app.gateway.cost_tracker import BudgetTracker, calculate_cost, cost_to_micro_usd
 from app.gateway.exceptions import (
     BudgetExceededError,
@@ -20,14 +23,17 @@ from app.gateway.exceptions import (
     EmbeddingDimensionMismatchError,
     GatewayConfigurationError,
     GatewayError,
+    GatewayFallbackExhaustedError,
     StreamInterruptedError,
     StructuredOutputError,
 )
+from app.gateway.key_pool import TOOL_GENERATE, TOOL_GROUNDING, KeyPool
 from app.gateway.registry import ModelRegistry, ModelSpec
 from app.gateway.resilience import ResiliencePolicy, describe_error
 from app.gateway.sanitizer import sanitize_contents, sanitize_text
 from app.gateway.schemas import (
     EmbeddingResponse,
+    GatewayProgressEvent,
     GatewayResponse,
     GatewayStreamChunk,
     TokenCountResponse,
@@ -97,6 +103,156 @@ def raise_if_blocked(response: Any) -> None:
             )
 
 
+def _sdk_tools(tools: list[ToolDefinition] | None) -> list[types.Tool] | None:
+    """SDK tool declarations for ``tools`` (None when there are none).
+
+    Tool parameters are standard JSON Schema; ``parameters_json_schema`` accepts them as-is.
+    """
+    if not tools:
+        return None
+    return [
+        types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name=t.name,
+                    description=t.description,
+                    parameters_json_schema=t.parameters or None,
+                )
+                for t in tools
+            ]
+        )
+    ]
+
+
+def _forced_tool_config(
+    names: frozenset[str] | None, tools: list[types.Tool] | None
+) -> types.ToolConfig | None:
+    """Function calling mode ANY for the declared tools in ``names`` (None when none apply).
+
+    The model must answer with a call to one of the allowed functions, so it cannot reply in text.
+    """
+    if not names or not tools:
+        return None
+    declared = {
+        decl.name
+        for tool in tools
+        for decl in (tool.function_declarations or [])
+        if decl.name is not None
+    }
+    allowed = sorted(names & declared)
+    if not allowed:
+        return None
+    return types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(
+            mode=types.FunctionCallingConfigMode.ANY,
+            allowed_function_names=allowed,
+        )
+    )
+
+
+def _request_http_options(timeout_seconds: float | None) -> types.HttpOptions | None:
+    """Per-request SDK HTTP options carrying a longer timeout (None keeps the client default).
+
+    ``GenerateContentConfig.http_options`` is merged over the client's options by the SDK
+    (``patch_http_options``), so only the timeout changes; retries stay disabled.
+    """
+    if timeout_seconds is None:
+        return None
+    return types.HttpOptions(timeout=int(timeout_seconds * 1000))
+
+
+def _chunk_text(chunk: Any) -> str:
+    """Text of a stream chunk, read from its text parts only.
+
+    ``chunk.text`` logs a warning when a chunk also holds function-call parts, so parts are read
+    directly when there are any. Thought parts are not text.
+    """
+    candidates = getattr(chunk, "candidates", None) or []
+    content = getattr(candidates[0], "content", None) if candidates else None
+    parts = getattr(content, "parts", None)
+    if not parts:
+        return str(chunk.text or "")
+    return "".join(
+        p.text for p in parts if isinstance(getattr(p, "text", None), str) and not p.thought
+    )
+
+
+def _thought_text(parts: Any) -> str:
+    """Summary text of the thought parts (``thought=True``) among ``parts``."""
+    return "".join(
+        p.text
+        for p in parts or []
+        if getattr(p, "thought", None) is True and isinstance(getattr(p, "text", None), str)
+    )
+
+
+def _chunk_thought(chunk: Any) -> str:
+    """Thought-summary text of a stream chunk. Empty unless thought summaries were requested."""
+    candidates = getattr(chunk, "candidates", None) or []
+    content = getattr(candidates[0], "content", None) if candidates else None
+    return _thought_text(getattr(content, "parts", None))
+
+
+def _response_thought(response: Any) -> str:
+    """Thought-summary text of a whole (non-streamed) response."""
+    candidates = getattr(response, "candidates", None) or []
+    content = getattr(candidates[0], "content", None) if candidates else None
+    return _thought_text(getattr(content, "parts", None))
+
+
+def _thinking_kwargs(enabled: bool) -> dict[str, Any]:
+    """The thinking config of a request. Off sends nothing, so the request is unchanged."""
+    if not enabled:
+        return {}
+    return {"thinking_config": types.ThinkingConfig(include_thoughts=True)}
+
+
+def _chunk_tool_calls(chunk: Any) -> list[ToolCallRequest]:
+    """Function calls carried by a stream chunk, in order."""
+    candidates = getattr(chunk, "candidates", None) or []
+    content = getattr(candidates[0], "content", None) if candidates else None
+    calls: list[ToolCallRequest] = []
+    for part in getattr(content, "parts", None) or []:
+        fc = getattr(part, "function_call", None)
+        if fc is None or not fc.name:
+            continue
+        calls.append(
+            ToolCallRequest(
+                call_id=fc.id or f"call_{len(calls)}_{fc.name}",
+                tool_name=fc.name,
+                arguments=dict(fc.args or {}),
+                thought_signature=getattr(part, "thought_signature", None),
+            )
+        )
+    return calls
+
+
+def tool_call_content(call: ToolCallRequest) -> dict[str, Any]:
+    """The model turn that records ``call``; first of the two items that continue after a call."""
+    part: dict[str, Any] = {
+        "function_call": {"id": call.call_id, "name": call.tool_name, "args": call.arguments}
+    }
+    if call.thought_signature is not None:
+        part["thought_signature"] = call.thought_signature
+    return {"role": "model", "parts": [part]}
+
+
+def tool_response_content(call: ToolCallRequest, response: dict[str, Any]) -> dict[str, Any]:
+    """The user turn that answers ``call`` with ``response``; second item to continue after it."""
+    return {
+        "role": "user",
+        "parts": [
+            {
+                "function_response": {
+                    "id": call.call_id,
+                    "name": call.tool_name,
+                    "response": response,
+                }
+            }
+        ],
+    }
+
+
 @dataclass
 class _OpenedStream:
     """A provider stream whose first chunk has been received (retry/fallback no longer allowed)."""
@@ -125,41 +281,123 @@ class ModelGateway:
     def __init__(
         self,
         registry: ModelRegistry,
-        settings: "Settings",
+        settings: Settings,
         client: Any = None,
         budget_tracker: BudgetTracker | None = None,
         resilience_policy: ResiliencePolicy | None = None,
+        key_pool: KeyPool | None = None,
+        client_factory: Callable[[SecretStr], Any] | None = None,
     ) -> None:
         self._registry = registry
         self._settings = settings
-        self._client = client or create_client_from_settings(settings)
         self._budget_tracker = budget_tracker
-        self._resilience = resilience_policy or ResiliencePolicy()
+        self._client_factory = client_factory
+        self._clients: dict[str, Any] = {}
+
+        if key_pool is not None:
+            self._key_pool: KeyPool | None = key_pool
+        else:
+            effective = getattr(settings, "effective_gemini_api_keys", [])
+            self._key_pool = KeyPool(effective) if effective else None
+
+        self._injected_client = client
+        self._client = client or create_client_from_settings(settings)
+
+        if resilience_policy is not None:
+            self._resilience = resilience_policy
+            if self._resilience.key_pool is None and self._key_pool is not None:
+                self._resilience.key_pool = self._key_pool
+        else:
+            self._resilience = ResiliencePolicy(
+                key_pool=self._key_pool,
+                max_key_attempts=getattr(settings, "gemini_max_key_attempts", 4),
+                max_quota_key_attempts=getattr(settings, "gemini_max_quota_key_attempts", 8),
+                attempt_timeout_seconds=getattr(settings, "gemini_request_timeout_seconds", None),
+            )
+
         self._pending_partial_usage: set[asyncio.Task[None]] = set()
+
+    @property
+    def key_pool(self) -> KeyPool | None:
+        """The key pool if configured."""
+        return self._key_pool
+
+    @property
+    def budget_tracker(self) -> BudgetTracker | None:
+        """The budget tracker (per-task spend counters), or None when none is wired."""
+        return self._budget_tracker
 
     @property
     def client(self) -> Any:
         """The provider client, or None when no API key is configured."""
-        return self._client
+        if self._client is not None:
+            return self._client
+        try:
+            return self._get_client_for_key(None)
+        except GatewayConfigurationError:
+            return None
 
     async def aclose(self) -> None:
-        """Release the provider client's HTTP resources (best effort, safe without a client)."""
-        aio = getattr(self._client, "aio", None)
-        aclose = getattr(aio, "aclose", None)
-        if aclose is None:
-            return
-        try:
-            await aclose()
-        except Exception:  # shutdown must not fail because the client was already closed
-            logger.debug("gateway_client_close_failed")
+        """Release the provider clients' HTTP resources (best effort, safe without clients)."""
+        all_clients = list(self._clients.values())
+        if self._client is not None:
+            all_clients.append(self._client)
+        for c in all_clients:
+            aio = getattr(c, "aio", None)
+            aclose = getattr(aio, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    logger.debug("gateway_client_close_failed")
+
+    def _get_client_for_key(self, key: SecretStr | None = None) -> Any:
+        if self._client_factory is not None and key is not None:
+            return self._client_factory(key)
+        # An injected client is mirrored in ``_client``; clearing ``_client`` means "no client".
+        if self._injected_client is not None and self._client is not None:
+            return self._injected_client
+        if key is None:
+            if self._client is not None:
+                return self._client
+            if self._key_pool and not self._key_pool.is_empty:
+                try:
+                    key, _ = self._key_pool.get_next()
+                except ValueError:
+                    key = None
+            if key is None:
+                if (
+                    self._settings.gemini_api_key is not None
+                    and self._settings.gemini_api_key.get_secret_value().strip()
+                ):
+                    key = self._settings.gemini_api_key
+                else:
+                    raise GatewayConfigurationError(
+                        "Cannot perform model operations: Gemini client is not initialized "
+                        "(MAYA_GEMINI_API_KEY is unset or blank)."
+                    )
+        secret_val = key.get_secret_value()
+        if (
+            self._client is not None
+            and self._settings.gemini_api_key is not None
+            and secret_val == self._settings.gemini_api_key.get_secret_value().strip()
+        ):
+            return self._client
+        if secret_val not in self._clients:
+            self._clients[secret_val] = build_genai_client(
+                api_key=secret_val,
+                timeout_seconds=self._settings.gemini_request_timeout_seconds,
+            )
+        return self._clients[secret_val]
 
     def _get_client(self) -> Any:
-        if self._client is None:
-            raise GatewayConfigurationError(
-                "Cannot perform model operations: Gemini client is not initialized "
-                "(MAYA_GEMINI_API_KEY is unset or blank)."
-            )
-        return self._client
+        return self._get_client_for_key(None)
+
+    def _key_label(self, key: SecretStr | None) -> str | None:
+        """The ``key#N`` label of ``key`` (never the key text), or None without a pool."""
+        if key is None or self._key_pool is None:
+            return None
+        return self._key_pool.label_for(key)
 
     def _validate_scope(self, task_id: UUID | None, workspace_id: UUID | None) -> None:
         if task_id is not None and workspace_id is None:
@@ -170,6 +408,16 @@ class ModelGateway:
         cost, is_complete = calculate_cost(spec, usage)
         usage.estimated_cost_usd = cost
         usage.is_estimated_cost_complete = is_complete
+        # Every priced provider usage is counted once here (provider-reported or estimated).
+        for token_type, count in (
+            ("prompt", usage.prompt_tokens),
+            ("candidates", usage.candidates_tokens),
+            ("cached", usage.cached_content_token_count),
+        ):
+            if count > 0:
+                TOKEN_USAGE_TOTAL.inc(
+                    float(count), labels={"alias": spec.alias, "type": token_type}
+                )
         return usage
 
     def _extract_usage(
@@ -347,7 +595,14 @@ class ModelGateway:
         usage: TokenUsage,
         is_tool_turn: bool = False,
         reservation_token: str | None = None,
+        count_spend: bool = True,
     ) -> None:
+        if count_spend and usage.estimated_cost_usd is not None and workspace_id is not None:
+            # Real provider usage with a known price. An unpriced call adds nothing (the cost
+            # is unknown, never zero); a failed attempt's reservation is not spend.
+            SPEND_USD_TOTAL.inc(
+                float(usage.estimated_cost_usd), labels={"workspace_id": str(workspace_id)}
+            )
         if self._budget_tracker is not None:
             kwargs: dict[str, Any] = {
                 "workspace_id": workspace_id,
@@ -370,17 +625,30 @@ class ModelGateway:
         workspace_id: UUID | None = None,
         allow_fallback: bool = True,
         enable_google_search: bool = False,
+        affinity: str | None = None,
+        fallback_alias: str | None = None,
+        attempt_timeout_seconds: float | None = None,
+        thought_summaries: bool = False,
     ) -> GatewayResponse:
-        """Generate text from a model role alias with fallback resilience and cost metering."""
+        """Generate text from a model role alias with fallback resilience and cost metering.
+
+        ``affinity`` (an agent role or ``chapter:{i}``) keeps the call on that role's API key
+        while the key is healthy. ``fallback_alias`` (with ``allow_fallback``) replaces the
+        registry fallback chain with that single alias. ``attempt_timeout_seconds`` overrides
+        the per-attempt cap for this call at both layers: the asyncio cap and the SDK's own HTTP
+        timeout (per-request ``http_options``).
+        """
         self._validate_scope(task_id, workspace_id)
         spec = self._registry.get(alias)
         spec.check_supported_transport()
 
         sanitized_contents = sanitize_contents(contents)
-        client = self._get_client()
         prompt_estimate = estimate_tokens(sanitized_contents)
 
-        async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> GatewayResponse:
+        async def _call_model(
+            attempt_spec: ModelSpec, was_fallback: bool, key: SecretStr | None = None
+        ) -> GatewayResponse:
+            client = self._get_client_for_key(key)
             output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
             reservation = self._reservation_micro_usd(attempt_spec, output_tokens=output_limit or 0)
             reserved_usage = self._reserved_usage(attempt_spec, output_tokens=output_limit or 0)
@@ -403,6 +671,8 @@ class ModelGateway:
                         sanitize_text(system_instruction) if system_instruction else None
                     ),
                     tools=tools_list if tools_list else None,
+                    http_options=_request_http_options(attempt_timeout_seconds),
+                    **_thinking_kwargs(thought_summaries),
                 )
                 response = await client.aio.models.generate_content(
                     model=attempt_spec.model_id,
@@ -452,6 +722,8 @@ class ModelGateway:
                     was_fallback=was_fallback,
                     usage=usage,
                     citations=citations,
+                    key_label=self._key_label(key),
+                    thought_summary=_response_thought(response) if thought_summaries else "",
                 )
             except BaseException:
                 if token is not None and not accounting_attempted:
@@ -467,6 +739,12 @@ class ModelGateway:
             alias,
             _call_model,
             allow_fallback=allow_fallback,
+            affinity=affinity,
+            fallback_alias=fallback_alias,
+            attempt_timeout_seconds=attempt_timeout_seconds,
+            tool=TOOL_GROUNDING if enable_google_search else TOOL_GENERATE,
+            # The last-resort model is not asked for thought summaries (not guaranteed there).
+            last_resort=not thought_summaries,
         )
         return result
 
@@ -480,8 +758,31 @@ class ModelGateway:
         task_id: UUID | None = None,
         workspace_id: UUID | None = None,
         allow_fallback: bool = True,
+        tools: list[ToolDefinition] | None = None,
+        affinity: str | None = None,
+        fallback_alias: str | None = None,
+        attempt_timeout_seconds: float | None = None,
+        thought_summaries: bool = False,
+        forced_tool_names: frozenset[str] | None = None,
+        interactive: bool = False,
+        emit_progress: bool = False,
+        still_working_after_seconds: float = 15.0,
     ) -> AsyncGenerator[GatewayStreamChunk, None]:
-        """Stream generated text chunks.
+        """Stream generated text chunks, and function-call requests when ``tools`` is given.
+
+        ``interactive`` (a live chat turn) fails fast: each attempt is capped at the first-chunk
+        timeout, the whole failover chain at the total deadline (both from settings), and a
+        service-wide 5xx or repeated timeout moves to the next alias at once. With
+        ``emit_progress`` the stream also yields notice chunks (empty text, ``progress`` set)
+        while it retries, switches model or has waited ``still_working_after_seconds`` for output.
+
+        With ``tools`` the declarations are sent to the model and any function call it makes is
+        surfaced on ``GatewayStreamChunk.tool_calls``; the gateway never executes a tool. The
+        attempt is admitted as a tool turn and counted as one when a call is made. To continue
+        after a call, the caller opens a new stream whose ``contents`` end with
+        ``tool_call_content`` and ``tool_response_content`` items. With ``tools=None`` nothing
+        about the request or the behaviour changes. ``forced_tool_names`` (with ``tools``) sets
+        function calling mode ANY, so the model must call one of those declared functions.
 
         Retry and fallback are permitted only until the first chunk has been received: the
         stream is opened and its first chunk awaited inside the resilience policy. After that,
@@ -496,10 +797,13 @@ class ModelGateway:
         spec.check_supported_transport()
 
         sanitized_contents = sanitize_contents(contents)
-        client = self._get_client()
         prompt_estimate = estimate_tokens(sanitized_contents)
+        sdk_tools = _sdk_tools(tools)
 
-        async def _open(attempt_spec: ModelSpec, was_fallback: bool) -> _OpenedStream:
+        async def _open(
+            attempt_spec: ModelSpec, was_fallback: bool, key: SecretStr | None = None
+        ) -> _OpenedStream:
+            client = self._get_client_for_key(key)
             output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
             reservation = self._reservation_micro_usd(attempt_spec, output_tokens=output_limit or 0)
             reserved_usage = self._reserved_usage(attempt_spec, output_tokens=output_limit or 0)
@@ -507,6 +811,7 @@ class ModelGateway:
                 workspace_id,
                 task_id,
                 attempt_spec,
+                for_tool_call=sdk_tools is not None,
                 reservation_micro_usd=reservation,
             )
             stream: Any = None
@@ -518,6 +823,10 @@ class ModelGateway:
                     system_instruction=(
                         sanitize_text(system_instruction) if system_instruction else None
                     ),
+                    tools=cast(list[Any] | None, sdk_tools),
+                    tool_config=_forced_tool_config(forced_tool_names, sdk_tools),
+                    http_options=_request_http_options(attempt_timeout_seconds),
+                    **_thinking_kwargs(thought_summaries),
                 )
                 # The SDK method is a coroutine that resolves to an async iterator; HTTP status
                 # errors (429, 5xx) are raised here, before any chunk exists.
@@ -557,19 +866,77 @@ class ModelGateway:
                 await self._release_budget_call(workspace_id, task_id, token)
                 raise
 
-        opened, _, _ = await self._resilience.execute(
-            self._registry, alias, _open, allow_fallback=allow_fallback
+        events: asyncio.Queue[GatewayProgressEvent] = asyncio.Queue()
+        execution = asyncio.ensure_future(
+            self._resilience.execute(
+                self._registry,
+                alias,
+                _open,
+                allow_fallback=allow_fallback,
+                affinity=affinity,
+                fallback_alias=fallback_alias,
+                attempt_timeout_seconds=attempt_timeout_seconds,
+                interactive=interactive,
+                first_chunk_timeout_seconds=getattr(
+                    self._settings, "gateway_first_chunk_timeout_seconds", None
+                ),
+                total_deadline_seconds=getattr(
+                    self._settings, "gateway_total_deadline_seconds", None
+                ),
+                on_progress=events.put_nowait if emit_progress else None,
+                last_resort=not thought_summaries,
+            )
         )
+        getter: asyncio.Future[GatewayProgressEvent] | None = None
+        waiting_sent = not (interactive and emit_progress)
+        try:
+            while True:
+                if getter is None:
+                    getter = asyncio.ensure_future(events.get())
+                watched: set[asyncio.Future[Any]] = {execution, getter}
+                await asyncio.wait(
+                    watched,
+                    timeout=None if waiting_sent else still_working_after_seconds,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if getter.done():
+                    event, getter = getter.result(), None
+                    yield self._notice_chunk(spec, event)
+                    continue
+                if execution.done():
+                    break
+                waiting_sent = True
+                yield self._notice_chunk(
+                    spec,
+                    GatewayProgressEvent(
+                        kind="waiting",
+                        alias=alias,
+                        elapsed_seconds=still_working_after_seconds,
+                    ),
+                )
+            while not events.empty():
+                yield self._notice_chunk(spec, events.get_nowait())
+            opened, _, _ = execution.result()
+        finally:
+            if getter is not None and not getter.done():
+                getter.cancel()
+            if not execution.done():
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
 
         accumulated_text: list[str] = []
         chunks_yielded = 0
         latest_usage: TokenUsage | None = None
+        made_tool_call = False
 
         try:
             try:
                 chunk = opened.first_chunk
                 while chunk is not None:
-                    chunk_text = chunk.text or ""
+                    chunk_text = _chunk_text(chunk)
+                    chunk_calls = _chunk_tool_calls(chunk) if sdk_tools is not None else []
+                    chunk_thought = _chunk_thought(chunk) if thought_summaries else ""
+                    made_tool_call = made_tool_call or bool(chunk_calls)
                     accumulated_text.append(chunk_text)
                     chunks_yielded += 1
 
@@ -585,6 +952,8 @@ class ModelGateway:
 
                     yield GatewayStreamChunk(
                         text=chunk_text,
+                        thought=chunk_thought,
+                        tool_calls=chunk_calls,
                         model_id=opened.spec.model_id,
                         alias_used=opened.spec.alias,
                         was_fallback=opened.was_fallback,
@@ -648,11 +1017,16 @@ class ModelGateway:
                 workspace_id,
                 task_id,
                 latest_usage,
-                is_tool_turn=False,
+                is_tool_turn=made_tool_call,
                 reservation_token=opened.admission_token,
             )
         finally:
             await self._release_budget_call(workspace_id, task_id, opened.admission_token)
+
+    @staticmethod
+    def _notice_chunk(spec: ModelSpec, event: GatewayProgressEvent) -> GatewayStreamChunk:
+        """A text-less chunk that only carries a retry, switch or still-waiting notice."""
+        return GatewayStreamChunk(model_id=spec.model_id, alias_used=spec.alias, progress=event)
 
     def _partial_stream_usage(
         self,
@@ -679,7 +1053,13 @@ class ModelGateway:
     ) -> None:
         """Best-effort accounting without masking the original stream failure."""
         task = asyncio.create_task(
-            self._record_budget(workspace_id, task_id, usage, reservation_token=reservation_token)
+            self._record_budget(
+                workspace_id,
+                task_id,
+                usage,
+                reservation_token=reservation_token,
+                count_spend=False,
+            )
         )
         try:
             await asyncio.shield(task)
@@ -718,28 +1098,50 @@ class ModelGateway:
         task_id: UUID | None = None,
         workspace_id: UUID | None = None,
         allow_fallback: bool = True,
+        affinity: str | None = None,
+        fallback_alias: str | None = None,
+        max_output_tokens: int | None = None,
+        attempt_timeout_seconds: float | None = None,
     ) -> T:
         """Generate validated structured output with exactly one self-repair retry turn.
 
         The model is instructed through the prompt only; provider-side JSON mode
-        (``response_schema``) is not used, so output is always parsed and validated here.
+        (``response_schema``) is not used, so output is always parsed and validated here. That
+        makes every REST alias (lite included) behave the same: no per-model schema parameters.
+        When every key failed for an alias, the next alias of the candidate chain is tried.
         """
         self._validate_scope(task_id, workspace_id)
-        candidate_aliases = (
-            self._registry.resolve_fallback_chain(alias) if allow_fallback else [alias]
+        candidate_aliases = self._registry.candidate_chain(
+            alias,
+            allow_fallback=allow_fallback,
+            fallback_alias=fallback_alias,
+            last_resort=True,
         )
         last_error: str | None = None
 
-        for current_alias in candidate_aliases:
+        for position, current_alias in enumerate(candidate_aliases):
             # Attempt 1: Standard generation
-            response = await self.generate_text(
-                alias=current_alias,
-                contents=contents,
-                system_instruction=system_instruction,
-                task_id=task_id,
-                workspace_id=workspace_id,
-                allow_fallback=False,
-            )
+            try:
+                response = await self.generate_text(
+                    alias=current_alias,
+                    contents=contents,
+                    system_instruction=system_instruction,
+                    task_id=task_id,
+                    workspace_id=workspace_id,
+                    allow_fallback=False,
+                    affinity=affinity,
+                    max_output_tokens=max_output_tokens,
+                    attempt_timeout_seconds=attempt_timeout_seconds,
+                )
+            except GatewayFallbackExhaustedError:
+                if position + 1 >= len(candidate_aliases):
+                    raise
+                logger.warning(
+                    "structured_alias_exhausted alias=%s fallback_next=%s",
+                    current_alias,
+                    candidate_aliases[position + 1],
+                )
+                continue
 
             model, error = parse_and_validate_json(response.text, response_schema)
             if model is not None:
@@ -762,6 +1164,9 @@ class ModelGateway:
                 task_id=task_id,
                 workspace_id=workspace_id,
                 allow_fallback=False,
+                affinity=affinity,
+                max_output_tokens=max_output_tokens,
+                attempt_timeout_seconds=attempt_timeout_seconds,
             )
 
             repaired_model, second_error = parse_and_validate_json(
@@ -804,16 +1209,7 @@ class ModelGateway:
         client = self._get_client()
         prompt_estimate = estimate_tokens(sanitized_contents)
 
-        # Tool parameters are standard JSON Schema; parameters_json_schema accepts them as-is.
-        sdk_functions = [
-            types.FunctionDeclaration(
-                name=t.name,
-                description=t.description,
-                parameters_json_schema=t.parameters or None,
-            )
-            for t in tools
-        ]
-        sdk_tools = [types.Tool(function_declarations=sdk_functions)] if sdk_functions else None
+        sdk_tools = _sdk_tools(tools)
 
         async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> ToolGatewayResponse:
             output_limit = self._effective_output_limit(attempt_spec, max_output_tokens)
@@ -916,12 +1312,14 @@ class ModelGateway:
         sanitized = (
             sanitize_text(contents) if isinstance(contents, str) else sanitize_contents(contents)
         )
-        client = self._get_client()
 
         config = types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
         embedding_items = max(1, len(sanitized)) if isinstance(sanitized, list) else 1
 
-        async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> Any:
+        async def _call_model(
+            attempt_spec: ModelSpec, was_fallback: bool, key: SecretStr | None = None
+        ) -> Any:
+            client = self._get_client_for_key(key)
             reservation = self._reservation_micro_usd(attempt_spec, embedding_items=embedding_items)
             reserved_usage = self._reserved_usage(attempt_spec, embedding_items=embedding_items)
             token = await self._acquire_budget_call(
@@ -1019,9 +1417,11 @@ class ModelGateway:
         sanitized = (
             sanitize_text(contents) if isinstance(contents, str) else sanitize_contents(contents)
         )
-        client = self._get_client()
 
-        async def _call_model(attempt_spec: ModelSpec, was_fallback: bool) -> TokenCountResponse:
+        async def _call_model(
+            attempt_spec: ModelSpec, was_fallback: bool, key: SecretStr | None = None
+        ) -> TokenCountResponse:
+            client = self._get_client_for_key(key)
             response = await client.aio.models.count_tokens(
                 model=attempt_spec.model_id,
                 contents=sanitized,

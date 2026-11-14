@@ -132,6 +132,33 @@ _DELETE_MEMORY_ITEM = text(
     """
 )
 
+_HAS_ITEMS = text(
+    """
+    SELECT EXISTS (
+        SELECT 1 FROM memory_items
+        WHERE workspace_id = :workspace_id AND user_id = :user_id
+          AND embedding IS NOT NULL
+          AND (expires_at IS NULL OR expires_at > now())
+    )
+    """
+)
+
+_UPDATE_CONTENT = text(
+    """
+    UPDATE memory_items
+    SET content = :content,
+        metadata = CAST(:metadata AS jsonb),
+        embedding = CAST(:embedding AS text)::vector,
+        embedding_model = :embedding_model,
+        access_count = access_count + 1,
+        last_accessed_at = now()
+    WHERE workspace_id = :workspace_id AND user_id = :user_id AND id = :id
+    RETURNING id, workspace_id, user_id, category, content, metadata,
+              embedding, embedding_model, permanent, access_count,
+              last_accessed_at, expires_at, created_at
+    """
+)
+
 _UPDATE_ACCESS = text(
     """
     UPDATE memory_items
@@ -298,6 +325,43 @@ class MemoryRepository:
         )
         row = res.mappings().one_or_none()
         return row is not None
+
+    async def has_items(self, workspace_id: UUID, user_id: UUID) -> bool:
+        """True when the user has at least one searchable (embedded, unexpired) memory.
+
+        A single indexed existence probe, so a caller can skip the embedding call for an empty
+        memory.
+        """
+        res = await self._executor.execute(
+            _HAS_ITEMS, {"workspace_id": workspace_id, "user_id": user_id}
+        )
+        return bool(res.scalar())
+
+    async def update_item_content(
+        self,
+        workspace_id: UUID,
+        user_id: UUID,
+        item_id: UUID,
+        content: str,
+        embedding: list[float],
+        metadata: dict[str, Any] | None = None,
+        embedding_model: str = "gemini-embedding-2",
+    ) -> MemoryItemRecord | None:
+        """Replace the text, vector and metadata of one memory; ``None`` when it is not found."""
+        res = await self._executor.execute(
+            _UPDATE_CONTENT,
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "id": item_id,
+                "content": content,
+                "metadata": json.dumps(metadata or {}),
+                "embedding": _format_vector(embedding),
+                "embedding_model": embedding_model,
+            },
+        )
+        row = res.mappings().one_or_none()
+        return None if row is None else self._to_record(row)
 
     async def update_access(self, workspace_id: UUID, user_id: UUID, ids: list[UUID]) -> int:
         """Increment access count and touch last_accessed_at for listed IDs."""

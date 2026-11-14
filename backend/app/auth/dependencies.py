@@ -30,16 +30,18 @@ def client_address(request: Request) -> str:
     return request.client.host if request.client is not None else "unknown"
 
 
-async def get_principal(
+async def _authenticated_principal(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    service: Annotated[AuthService, Depends(get_auth_service)],
+    credentials: HTTPAuthorizationCredentials | None,
+    service: AuthService,
+    *,
+    allow_query_token: bool,
 ) -> Principal:
-    """The caller behind a valid bearer token whose session is still live."""
     token: str | None = None
     if credentials is not None:
         token = credentials.credentials
-    elif "token" in request.query_params:
+    elif allow_query_token and request.method == "GET":
+        # The query value is never logged here: the caller must not add it to any log line.
         query_token = request.query_params.get("token", "").strip()
         if query_token:
             token = query_token
@@ -47,6 +49,31 @@ async def get_principal(
     if not token or service is None:
         raise NotAuthenticated
     return await service.authenticate(token)
+
+
+async def get_principal(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> Principal:
+    """The caller behind a valid bearer token whose session is still live.
+
+    Only the ``Authorization`` header is accepted. A ``?token=`` query value is ignored.
+    """
+    return await _authenticated_principal(request, credentials, service, allow_query_token=False)
+
+
+async def get_file_link_principal(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> Principal:
+    """Like ``get_principal``, but also accepts ``?token=`` on GET.
+
+    Use only on GET routes that a browser opens as a plain link (a file download), where it
+    cannot send an ``Authorization`` header. Any other method ignores the query value.
+    """
+    return await _authenticated_principal(request, credentials, service, allow_query_token=True)
 
 
 @dataclass(frozen=True)
@@ -64,10 +91,21 @@ class TenantDatabase:
         return tenant_transaction(self.engine, self.workspace_id)
 
 
-async def get_tenant_database(
-    principal: Annotated[Principal, Depends(get_principal)], request: Request
-) -> TenantDatabase:
+async def _tenant_database_for(request: Request, principal: Principal) -> TenantDatabase:
     res = getattr(request.app.state, "resources", None)
     if res is not None and hasattr(res, "register_workspace"):
         await res.register_workspace(principal.workspace_id)
     return TenantDatabase(request.app.state.resources.engine, principal.workspace_id)
+
+
+async def get_tenant_database(
+    principal: Annotated[Principal, Depends(get_principal)], request: Request
+) -> TenantDatabase:
+    return await _tenant_database_for(request, principal)
+
+
+async def get_file_link_tenant_database(
+    principal: Annotated[Principal, Depends(get_file_link_principal)], request: Request
+) -> TenantDatabase:
+    """Tenant database for the GET file-link routes (see ``get_file_link_principal``)."""
+    return await _tenant_database_for(request, principal)

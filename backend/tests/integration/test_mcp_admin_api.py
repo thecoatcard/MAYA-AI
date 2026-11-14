@@ -117,9 +117,9 @@ def test_mcp_admin_api_lifecycle(test_principal: Principal) -> None:
         create_resp = client.post(
             "/api/v1/mcp/servers",
             json={
-                "name": "brave-search",
+                "name": "docs-search",
                 "transport": "http",
-                "url": "https://api.search.brave.com/res/v1/web/search",
+                "url": "https://search.example.test/v1/search",
                 "pinned_version": "1.0.0",
                 "schema_hash": computed_hash,
                 "tools_manifest": raw_tools,
@@ -128,7 +128,7 @@ def test_mcp_admin_api_lifecycle(test_principal: Principal) -> None:
         assert create_resp.status_code == 201
         created_data = create_resp.json()
         srv_id = created_data["id"]
-        assert created_data["name"] == "brave-search"
+        assert created_data["name"] == "docs-search"
         assert created_data["tool_count"] == 1
         assert created_data["health_status"] == "healthy"
 

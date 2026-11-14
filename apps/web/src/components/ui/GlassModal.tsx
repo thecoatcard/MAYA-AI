@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export type GlassModalSize = "sm" | "md" | "lg" | "xl" | "full";
 
@@ -19,7 +20,7 @@ export interface GlassModalProps {
 }
 
 const sizeStyles: Record<GlassModalSize, string> = {
-  sm: "max-w-md",
+  sm: "max-w-[min(440px,92vw)]",
   md: "max-w-lg",
   lg: "max-w-2xl",
   xl: "max-w-4xl",
@@ -27,9 +28,8 @@ const sizeStyles: Record<GlassModalSize, string> = {
 };
 
 /**
- * GlassModal - Accessible high-polish glassmorphism dialog modal.
- * Features backdrop blur (backdrop-blur-xl bg-black/60), smooth transitions,
- * ESC key dismissal, focus trapping, and WAI-ARIA compliance.
+ * GlassModal: accessible dialog on a vibrancy sheet over a blurred scrim (ui-surfaces.css; opaque fallback). ESC dismissal,
+ * focus trap, focus restore and WAI-ARIA labelling.
  */
 export function GlassModal({
   isOpen,
@@ -78,7 +78,12 @@ export function GlassModal({
         const firstElement = focusable[0];
         const lastElement = focusable[focusable.length - 1];
 
-        if (e.shiftKey && document.activeElement === firstElement) {
+        if (
+          e.shiftKey &&
+          (document.activeElement === firstElement ||
+            document.activeElement === modalRef.current ||
+            document.activeElement?.getAttribute("role") === "dialog")
+        ) {
           e.preventDefault();
           lastElement.focus();
         } else if (!e.shiftKey && document.activeElement === lastElement) {
@@ -92,9 +97,15 @@ export function GlassModal({
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // Auto-focus container or first element
+    // Auto-focus container or first element (do not steal focus if a child already focused something)
     requestAnimationFrame(() => {
       if (modalRef.current) {
+        if (
+          modalRef.current.contains(document.activeElement) &&
+          document.activeElement !== modalRef.current
+        ) {
+          return;
+        }
         const firstFocusable = modalRef.current.querySelector<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
         );
@@ -125,27 +136,30 @@ export function GlassModal({
 
   const sizeClass = sizeStyles[size];
 
-  return (
+  // Portalled to <body>: an ancestor with backdrop-filter or transform (the vibrancy sidebar) would
+  // otherwise become the containing block of `position: fixed` and squeeze the dialog into it.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby={title ? titleId : undefined}
       aria-describedby={description ? descId : undefined}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xl transition-all duration-200"
+      className="maya-sheet-scrim maya-vib-scrim fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
     >
       <div
         ref={modalRef}
         tabIndex={-1}
-        className={`w-full ${sizeClass} rounded-2xl border border-white/10 bg-zinc-950/85 backdrop-blur-2xl shadow-2xl shadow-black/60 text-zinc-100 flex flex-col relative overflow-hidden transition-all duration-200 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)] focus:outline-none ${className}`.trim()}
+        className={`maya-sheet maya-vib-sheet w-full ${sizeClass} text-maya-text flex flex-col relative overflow-hidden focus:outline-none ${className}`.trim()}
       >
         {(title || showCloseButton) && (
-          <div className="flex items-start justify-between gap-4 p-5 sm:p-6 border-b border-white/5">
+          <div className="flex items-start justify-between gap-4 p-5 sm:p-6 border-b border-maya-border">
             <div className="flex flex-col gap-1">
               {title && (
                 <h2
                   id={titleId}
-                  className="text-lg font-semibold text-zinc-100 tracking-tight"
+                  className="text-lg font-semibold text-maya-text tracking-tight"
                 >
                   {title}
                 </h2>
@@ -153,7 +167,7 @@ export function GlassModal({
               {description && (
                 <p
                   id={descId}
-                  className="text-xs text-zinc-400 leading-relaxed"
+                  className="text-xs text-maya-muted leading-relaxed"
                 >
                   {description}
                 </p>
@@ -165,9 +179,9 @@ export function GlassModal({
                 type="button"
                 onClick={onClose}
                 aria-label="Close modal"
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                className="p-1.5 rounded-maya-md text-maya-muted hover:text-maya-text hover:bg-maya-hover motion-interactive focus-visible:outline-2 focus-visible:outline-maya-focus"
               >
-                <X className="w-4 h-4" />
+                <X size={16} strokeWidth={1.75} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -177,7 +191,8 @@ export function GlassModal({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -188,7 +203,7 @@ export function GlassModalHeader({
 }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   return (
     <div
-      className={`flex items-start justify-between gap-4 pb-4 border-b border-white/5 ${className}`.trim()}
+      className={`flex items-start justify-between gap-4 pb-4 border-b border-maya-border ${className}`.trim()}
       {...props}
     >
       {children}
@@ -203,7 +218,7 @@ export function GlassModalTitle({
 }: React.HTMLAttributes<HTMLHeadingElement>): React.JSX.Element {
   return (
     <h2
-      className={`text-lg font-semibold text-zinc-100 tracking-tight ${className}`.trim()}
+      className={`text-lg font-semibold text-maya-text tracking-tight ${className}`.trim()}
       {...props}
     >
       {children}
@@ -218,7 +233,7 @@ export function GlassModalDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>): React.JSX.Element {
   return (
     <p
-      className={`text-xs text-zinc-400 leading-relaxed mt-1 ${className}`.trim()}
+      className={`text-xs text-maya-muted leading-relaxed mt-1 ${className}`.trim()}
       {...props}
     >
       {children}
@@ -245,7 +260,7 @@ export function GlassModalFooter({
 }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   return (
     <div
-      className={`flex items-center justify-end gap-3 pt-4 border-t border-white/5 mt-4 ${className}`.trim()}
+      className={`flex items-center justify-end gap-3 pt-4 border-t border-maya-border mt-4 ${className}`.trim()}
       {...props}
     >
       {children}

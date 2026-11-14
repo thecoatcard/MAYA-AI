@@ -265,3 +265,23 @@ async def test_artifacts_api_full_lifecycle(
         res_cross_list = await client.get("/api/v1/artifacts", headers=headers_b)
         assert res_cross_list.status_code == 200
         assert len(res_cross_list.json()) == 0
+
+        # 7. Delete: another tenant cannot, the owner can, and the stored copy goes with the record
+        stored = art_service.storage_root / str(ws_a) / str(task_id_a) / "invoice.xlsx"
+        assert stored.is_file()
+        res_del_cross = await client.delete(f"/api/v1/artifacts/{art_id_xlsx}", headers=headers_b)
+        assert res_del_cross.status_code == 404
+        assert stored.is_file()
+
+        res_meta = await client.get(f"/api/v1/artifacts/{art_id_xlsx}/metadata", headers=headers_a)
+        assert res_meta.json()["in_connected_folder"] is False
+
+        res_del = await client.delete(f"/api/v1/artifacts/{art_id_xlsx}", headers=headers_a)
+        assert res_del.status_code == 204
+        assert not stored.exists()
+        res_gone = await client.get(f"/api/v1/artifacts/{art_id_xlsx}/metadata", headers=headers_a)
+        assert res_gone.status_code == 404
+        res_again = await client.delete(f"/api/v1/artifacts/{art_id_xlsx}", headers=headers_a)
+        assert res_again.status_code == 404
+        res_left = await client.get("/api/v1/artifacts", headers=headers_a)
+        assert len(res_left.json()) == 3

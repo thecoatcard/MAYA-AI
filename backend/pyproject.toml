@@ -7,12 +7,16 @@ dependencies = [
     "alembic==1.20.1",
     "argon2-cffi==25.1.0",
     "asyncpg==0.32.0",
+    "cryptography==50.0.2",
+    "ddgs==9.16.1",
     "fastapi==0.162.0",
     "google-genai==2.34.0",
     "langgraph>=1.2.0",
     "langgraph-checkpoint-postgres>=3.2.0",
     "lxml>=6.1.0",
+    "mcp==2.3.0",
     "openpyxl>=3.1.5",
+    "playwright==1.64.1",
     "psycopg[binary]>=3.2.0",
     "pydantic==2.14.2",
     "pydantic-settings==2.16.2",
@@ -73,11 +77,13 @@ plugins = ["pydantic.mypy"]
 # Isolated worker/SDK projects have their own locked dependencies and strict checks.
 # Host orchestration, metrics, offline CLIs and deterministic tests remain checked here.
 # arq_worker.py imports ARQ-only SDKs and is checked through the S1 spike environment.
-exclude = ['^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
+# storage/ holds generated user documents and artifacts at runtime, not source code.
+exclude = ['^storage/', '^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
 
 [[tool.mypy.overrides]]
 module = [
     "app.automation.pptx_engine",
+    "app.automation.deck_pptx_scene",
     "docx",
     "docx.*",
     "pptx",

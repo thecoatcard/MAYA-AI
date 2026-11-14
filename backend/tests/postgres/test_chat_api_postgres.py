@@ -46,6 +46,7 @@ from tests.support.auth import Harness, build_harness
 from tests.support.clock import START, ManualClock
 from tests.support.fake_gemini_client import FakeAsyncModels, FakeGeminiClient
 from tests.support.gateway_factory import make_gateway
+from tests.support.models import ORCH
 from tests.support.settings import make_settings
 
 pytestmark = [pytest.mark.postgres, pytest.mark.redis]
@@ -257,8 +258,9 @@ def events(response: httpx.Response) -> list[Frame]:
     return parse_sse(response.text)
 
 
-def names(frames: list[Frame]) -> list[str]:
-    return [frame.event for frame in frames]
+def names(frames: list[Frame], *, with_progress: bool = False) -> list[str]:
+    """Event names. The additive live step list (``progress``) is left out unless asked for."""
+    return [frame.event for frame in frames if with_progress or frame.event != "progress"]
 
 
 def new_key() -> str:
@@ -364,7 +366,7 @@ async def test_a_conversation_over_two_messages_is_stored_and_the_history_reache
         await stack.client.get(f"{CHAT}/sessions/{session_id}/messages", headers=alice.headers)
     ).json()
     assert [item["role"] for item in thread["items"]] == ["user", "assistant", "user", "assistant"]
-    assert thread["items"][1]["model_id"] == "gemini-3.8-flash"
+    assert thread["items"][1]["model_id"] == ORCH
     assert thread["items"][1]["finish_reason"] == "stop"
 
 
@@ -535,7 +537,10 @@ async def test_a_stream_cut_midway_is_stored_interrupted_and_replayed(stack: Sta
     assert assistant.metadata["usage"]["is_estimate"] is True
     calls = model_calls(stack)
 
-    again = events(await post(stack, alice, "cut me", key=key))
+    # The stored steps ("Reply stopped") are replayed too; the other events are checked as before.
+    again = [
+        f for f in events(await post(stack, alice, "cut me", key=key)) if f.event != "progress"
+    ]
     assert names(again) == ["message.accepted", "delta", "done"]
     assert (
         again[1].data == {"text": "Fake model "} and again[2].data["finish_reason"] == "interrupted"

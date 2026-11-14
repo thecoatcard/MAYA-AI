@@ -17,11 +17,23 @@ from app.services.audit_service import (
     record_audit,
     verify_chain,
 )
-from tests.support.postgres import SeededTenant
+from tests.support.postgres import SeededTenant, seed_tenant
 
 pytestmark = pytest.mark.postgres
 
 Tenants = tuple[SeededTenant, SeededTenant]
+
+
+@pytest.fixture
+async def fresh_tenants(admin_engine: AsyncEngine) -> Tenants:
+    """Two new workspaces whose unchained seed audit rows are removed (admin connection)."""
+    async with admin_engine.begin() as connection:
+        a, b = await seed_tenant(connection, "a"), await seed_tenant(connection, "b")
+        await connection.execute(
+            text("DELETE FROM audit_log WHERE workspace_id IN (:a, :b)"),
+            {"a": a.workspace_id, "b": b.workspace_id},
+        )
+    return a, b
 
 
 async def _write(engine: AsyncEngine, tenant: SeededTenant, n: int) -> None:
@@ -51,7 +63,7 @@ async def test_concurrent_writers_form_one_linear_chain(
     result = await _verify(app_engine, tenant)
     assert result.valid is True
     assert result.first_bad_row_id is None
-    assert result.count == 12
+    assert result.row_count == 12
     async with tenant_session(app_engine, tenant.workspace_id, tenant.user_id) as session:
         rows = (
             await session.execute(text("SELECT prev_hash, row_hash FROM audit_log ORDER BY id"))
@@ -67,8 +79,8 @@ async def test_chain_is_per_workspace_and_isolated(
 ) -> None:
     a, b = fresh_tenants
     await asyncio.gather(*(_write(app_engine, t, i) for i in range(3) for t in (a, b)))
-    assert (await _verify(app_engine, a)).count == 3
-    assert (await _verify(app_engine, b)).count == 3
+    assert (await _verify(app_engine, a)).row_count == 3
+    assert (await _verify(app_engine, b)).row_count == 3
     async with tenant_session(app_engine, a.workspace_id, a.user_id) as session:
         other = await session.execute(
             text("SELECT count(*) FROM audit_log WHERE workspace_id = :w"), {"w": b.workspace_id}
@@ -109,7 +121,7 @@ async def test_runtime_role_cannot_update_or_delete(
         with pytest.raises(DBAPIError):
             async with tenant_session(app_engine, tenant.workspace_id, tenant.user_id) as session:
                 await session.execute(text(sql))
-    assert (await _verify(app_engine, tenant)).count == 1
+    assert (await _verify(app_engine, tenant)).row_count == 1
 
 
 @pytest.mark.asyncio
@@ -166,7 +178,7 @@ async def test_bad_input_raises_typed_error_without_poisoning_transaction(
             status="denied",
         )
         await session.commit()
-    assert (await _verify(app_engine, tenant)).count == 1
+    assert (await _verify(app_engine, tenant)).row_count == 1
 
 
 @pytest.mark.asyncio

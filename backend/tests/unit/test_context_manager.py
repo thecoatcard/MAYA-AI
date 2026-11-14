@@ -9,6 +9,7 @@ import pytest
 
 from app.services.context_manager import (
     CHAT_SYSTEM_INSTRUCTION,
+    CHAT_TOOLS_SYSTEM_INSTRUCTION,
     PER_TURN_OVERHEAD_TOKENS,
     ContextManager,
     ContextTooLarge,
@@ -452,6 +453,17 @@ def test_chat_system_instruction_states_the_no_tools_limit() -> None:
     assert "no tools" in lowered
     assert "language" in lowered
     assert "uncertain" in lowered
+
+
+def test_tools_instruction_names_the_tool_and_limits_its_use() -> None:
+    lowered = CHAT_TOOLS_SYSTEM_INSTRUCTION.lower()
+    assert CHAT_TOOLS_SYSTEM_INSTRUCTION.isascii()
+    assert len(CHAT_TOOLS_SYSTEM_INSTRUCTION) < 2400  # grew for the ask-first rules (Task V)
+    assert "submit_task" in lowered
+    assert "do not call the tool" in lowered  # simple questions are answered directly
+    assert "at most once" in lowered
+    assert "no tools" not in lowered
+    assert "language" in lowered and "uncertain" in lowered
 
 
 def test_chat_system_instruction_fits_a_minimal_budget() -> None:

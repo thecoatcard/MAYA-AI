@@ -4,7 +4,7 @@
 - **Authentication:** none for the first eight endpoints; `Authorization: Bearer <access token>` for `GET /me`
 - **Status:** Implemented locally. The web client uses cookie transport for refresh tokens; deterministic API tests cover cookie and legacy JSON modes.
 
-Bodies are JSON with unknown fields rejected. Errors are `{"error": "<code>"}`; validation errors
+Bodies are JSON with unknown fields rejected. Errors are `{"error": "<code>"}` (a generic `http_error` also carries a server-written `"message"` for 4xx); validation errors
 are `{"error": "validation_error", "fields": ["<field>"]}` and never repeat submitted values.
 The password and one-time code appear only in documented requests. Refresh tokens appear in JSON only for callers using legacy transport; cookie-mode responses never include one.
 Design rationale and limits: [authentication security](../security/AUTHENTICATION.md).
@@ -30,6 +30,20 @@ Response `200` for any valid identifier:
 ```
 
 No account lookup is performed. Invalid identifier syntax still returns `422 validation_error`.
+
+## GET /bootstrap/status and POST /bootstrap
+
+First-run owner creation for the desktop app, with no e-mail ([ADR-0014](../adr/0014-local-owner-bootstrap.md)).
+Available only when `MAYA_LOCAL_OWNER_BOOTSTRAP` is true, the direct peer is loopback (forwarded headers are ignored)
+and the database has no users. It needs a database function that a pending migration adds; until then it reports `not_ready`.
+
+`GET /bootstrap/status` returns `200 {"available": true}` or `{"available": false, "reason": "disabled" | "already_initialised" | "not_ready"}`.
+Flag-off and non-local peers always get `disabled`.
+
+`POST /bootstrap` takes `{"full_name": "...", "email": "...", "password": "..."}` (the registration password policy applies; the username is derived
+from the e-mail), creates the workspace and an admin user with a verified address, and returns the same body as `/token`
+(cookie mode with `X-Maya-Refresh-Transport: cookie`). Every refusal is `404 {"error": "bootstrap_unavailable"}`; `422` for a
+weak password or malformed body; `429` when rate limited (5 per hour per address, 20 per hour overall).
 
 ## POST /signup/otp
 
@@ -145,8 +159,12 @@ With `X-Maya-Refresh-Transport: cookie`, the endpoint revokes the cookie's sessi
 
 ## GET /me
 
-Returns `{"user_id": "<uuid>", "workspace_id": "<uuid>", "role": "admin"}` for a bearer token whose session
-is live. Used by clients and tests to confirm the principal.
+Returns `{"user_id": "<uuid>", "workspace_id": "<uuid>", "role": "admin", "email": "<address or null>",
+"display_name": "<name or null>"}` for a bearer token whose session is live. Used by clients and tests to
+confirm the principal. `email` and `display_name` are the caller's own details, for display only (the shell
+footer); they are `null` when the lookup is unavailable, and the endpoint never fails because of it. They
+are read inside the caller's own workspace under row-level security, so another tenant's details are never
+returned.
 
 ## Errors
 
@@ -156,6 +174,7 @@ is live. Used by clients and tests to confirm the principal.
 | 401       | `invalid_credentials`                        | Login failed                                                                                               |
 | 401       | `invalid_token` / `not_authenticated`        | Bad, expired, revoked or missing token (`WWW-Authenticate: Bearer`)                                        |
 | 404 / 405 | `not_found` / `method_not_allowed`           | Unknown route or method                                                                                    |
+| 404       | `bootstrap_unavailable`                      | Local-owner bootstrap is off, not local, or already used                                                   |
 | 413       | `payload_too_large`                          | Request body over 64 KiB                                                                                   |
 | 422       | `validation_error` or a password-policy code | Malformed input                                                                                            |
 | 429       | `rate_limited`                               | Includes `Retry-After` seconds                                                                             |

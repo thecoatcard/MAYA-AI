@@ -1,7 +1,9 @@
 "use client";
 
+import { FileCode, Minus, Plus } from "lucide-react";
 import React from "react";
-import { Plus, Minus, FileCode } from "lucide-react";
+
+import { ScrollArea } from "../ui";
 
 export interface GitDiffViewerProps {
   diffText: string;
@@ -9,6 +11,11 @@ export interface GitDiffViewerProps {
   className?: string;
 }
 
+/**
+ * A unified diff. Added and removed lines carry their "+" and "-" characters
+ * and a tinted background, so they never rely on colour alone. Long lines
+ * scroll inside the diff box; the page never widens.
+ */
 export function GitDiffViewer({
   diffText,
   filePath = "code.patch",
@@ -25,51 +32,62 @@ export function GitDiffViewer({
 
   return (
     <div
-      className={`flex flex-col border rounded-lg overflow-hidden border-zinc-800 bg-zinc-950 text-xs font-mono ${className}`}
+      className={`flex min-w-0 max-w-full flex-col rounded-maya-md overflow-hidden border border-maya-border bg-maya-code font-mono text-maya-mono ${className}`.trim()}
     >
-      {/* File Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800 text-zinc-300">
-        <div className="flex items-center gap-2">
-          <FileCode className="w-4 h-4 text-zinc-400" />
-          <span className="font-semibold">{filePath}</span>
-        </div>
-        <div className="flex items-center gap-2 font-medium">
-          <span className="flex items-center text-emerald-400">
-            <Plus className="w-3 h-3" />
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-maya-border bg-maya-raised px-3 py-2 text-maya-text">
+        <span className="flex min-w-0 items-center gap-2">
+          <FileCode
+            aria-hidden="true"
+            size={16}
+            className="shrink-0 text-maya-secondary"
+          />
+          <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">
+            {filePath}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-3 font-medium">
+          <span
+            className="flex items-center gap-0.5 text-maya-success"
+            title="Added lines"
+          >
+            <Plus aria-hidden="true" size={14} />
             {additions}
           </span>
-          <span className="flex items-center text-rose-400">
-            <Minus className="w-3 h-3" />
+          <span
+            className="flex items-center gap-0.5 text-maya-danger"
+            title="Removed lines"
+          >
+            <Minus aria-hidden="true" size={14} />
             {deletions}
           </span>
+        </span>
+      </div>
+
+      <ScrollArea label="Diff lines" axis="both" className="max-h-96 p-2">
+        <div className="min-w-max">
+          {lines.map((line, idx) => {
+            let lineClass = "text-maya-secondary";
+            if (line.startsWith("@@")) {
+              lineClass = "bg-maya-info-soft text-maya-info";
+            } else if (line.startsWith("+") && !line.startsWith("+++")) {
+              lineClass = "bg-maya-success-soft text-maya-text";
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              lineClass = "bg-maya-danger-soft text-maya-text";
+            }
+            return (
+              <div
+                key={idx}
+                className={`flex px-1 leading-5 whitespace-pre ${lineClass}`}
+              >
+                <span className="inline-block w-14 shrink-0 pr-3 text-right text-maya-muted select-none">
+                  {idx + 1}
+                </span>
+                <span className="flex-1">{line || " "}</span>
+              </div>
+            );
+          })}
         </div>
-      </div>
-
-      {/* Diff Lines */}
-      <div className="p-2 overflow-x-auto max-h-96 text-zinc-200">
-        {lines.map((line, idx) => {
-          let lineClass = "text-zinc-400";
-          if (line.startsWith("@@")) {
-            lineClass = "text-cyan-400 bg-cyan-950/30 px-1 rounded";
-          } else if (line.startsWith("+") && !line.startsWith("+++")) {
-            lineClass = "text-emerald-300 bg-emerald-950/40 px-1";
-          } else if (line.startsWith("-") && !line.startsWith("---")) {
-            lineClass = "text-rose-300 bg-rose-950/40 px-1";
-          }
-
-          return (
-            <div
-              key={idx}
-              className={`leading-5 whitespace-pre flex ${lineClass}`}
-            >
-              <span className="w-8 select-none text-zinc-600 text-right pr-3 inline-block">
-                {idx + 1}
-              </span>
-              <span className="flex-1">{line || " "}</span>
-            </div>
-          );
-        })}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

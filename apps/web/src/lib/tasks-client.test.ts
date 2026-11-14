@@ -179,7 +179,7 @@ describe("tasks-client", () => {
     );
 
     await expect(submitTask({ instruction: "Will fail" })).rejects.toThrow(
-      "The API answered 500 (Database constraint violated).",
+      "Database constraint violated",
     );
   });
 });

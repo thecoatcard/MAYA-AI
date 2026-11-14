@@ -25,10 +25,10 @@ The MCP Gateway acts as the secure intermediary between MAYA AI specialist agent
    - Read operations: `github_get_issue`, `github_search_issues` (READ).
    - Mutating operations: `github_create_pull_request` (APPROVAL_REQUIRED, requires valid signed token).
 
-4. **Brave Search Connector (`backend/app/mcp/connectors/brave.py`):**
-   - Web search API integration with leaky-bucket rate limiting (1 req/sec).
-   - Sanitizes search queries and wraps snippet outputs in `<untrusted_external_content>`.
-   - Extracts structured verifiable citations (`title`, `url`, `snippet`).
+4. **Google Search Connector (`backend/app/mcp/connectors/google_search.py`):**
+   - Web search through Gemini's built-in Google Search grounding; no separate search API key. Brave Search was removed on 2026-11-09.
+   - Wraps results in `<<<UNTRUSTED_EXTERNAL_INPUT>>>` markers and scans them for prompt injection.
+   - Extracts citations (`title`, `url`) from the grounding metadata only; an empty result raises `GoogleSearchError` instead of inventing findings.
 
 5. **Notion Connector (`backend/app/mcp/connectors/notion.py`):**
    - Strictly read-only connector: `notion_get_page`, `notion_query_database` (READ).
@@ -52,7 +52,7 @@ The MCP Gateway acts as the secure intermediary between MAYA AI specialist agent
 | `git_push`                                    | APPROVAL_REQUIRED | Yes             | Single-use JWT, CAS consumed |
 | `github_get_issue` / `github_search_issues`   | READ              | No              | None                         |
 | `github_create_pull_request`                  | APPROVAL_REQUIRED | Yes             | Single-use JWT, CAS consumed |
-| `brave_search`                                | READ              | No              | Rate-limited (1 req/s)       |
+| `web_search`                                  | READ              | No              | Gemini Google Search grounding |
 | `notion_get_page` / `notion_query_database`   | READ              | No              | None                         |
 | `gmail_search` / `gmail_read_thread`          | READ              | No              | None                         |
 | `gmail_create_draft`                          | WRITE             | No              | Saved as Gmail draft         |
@@ -85,6 +85,6 @@ Comprehensive test suites in `backend/tests/`:
 - `tests/unit/test_mcp_transports.py`: Stdio and Streamable HTTP transports.
 - `tests/unit/test_mcp_supervisor.py`: Heartbeat ping, exponential backoff, health status transitions.
 - `tests/integration/test_mcp_client_manager.py`: Tool discovery, poisoning defense, tool execution with permission checks.
-- `tests/integration/test_core_connectors.py`: Filesystem traversal blocks, local Git, GitHub mocks, Brave Search, Notion.
+- `tests/integration/test_core_connectors.py`: Filesystem traversal blocks, local Git, GitHub mocks, Google Search grounding, Notion.
 - `tests/integration/test_google_adapter.py`: Gmail search/draft/send, Calendar list/events.
 - `tests/integration/test_mcp_admin_api.py`: REST API for MCP server registration and health monitoring.

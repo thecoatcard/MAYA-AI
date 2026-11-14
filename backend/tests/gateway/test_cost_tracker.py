@@ -346,7 +346,7 @@ def test_gateway_schemas_contracts() -> None:
     # GatewayResponse syncs usage bidirectionally
     resp1 = GatewayResponse(
         text="Hello world",
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
         alias_used="orchestrator",
         was_fallback=False,
         usage=usage,
@@ -357,7 +357,7 @@ def test_gateway_schemas_contracts() -> None:
 
     resp2 = GatewayResponse(
         text="From flat tokens",
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
         alias_used="orchestrator",
         input_tokens=300,
         output_tokens=70,
@@ -373,7 +373,7 @@ def test_gateway_schemas_contracts() -> None:
     # GatewayStreamChunk
     chunk = GatewayStreamChunk(
         text="chunk-text",
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
         alias_used="orchestrator",
         is_final=True,
         usage=usage,
@@ -399,7 +399,7 @@ def test_gateway_schemas_contracts() -> None:
     # ToolGatewayResponse
     tool_resp = ToolGatewayResponse(
         call_requests=[call_req],
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
         alias_used="orchestrator",
         usage=usage,
     )
@@ -416,7 +416,7 @@ def test_gateway_schemas_contracts() -> None:
 
     tc_resp = TokenCountResponse(
         total_tokens=123,
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
     )
     assert tc_resp.total_tokens == 123
 

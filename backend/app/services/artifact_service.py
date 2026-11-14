@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import mimetypes
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -30,7 +32,28 @@ MIME_TYPE_MAP = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "pdf": "application/pdf",
+    "zip": "application/zip",
 }
+
+
+# The values file_artifacts_file_type_check allows (migration 0002). Anything else (a website's
+# zip, html, css, js ...) is stored as "other": the real extension stays in file_name and the
+# MIME type is resolved from it.
+DB_FILE_TYPES = frozenset({"pdf", "xlsx", "docx", "pptx", "md", "csv", "other"})
+
+
+def db_file_type(file_type: str | None, file_name: str | None = None) -> str:
+    """Map any produced file type to one the ``file_artifacts`` CHECK constraint accepts."""
+    ft = str(file_type or "").lower().strip().lstrip(".")
+    if ft in DB_FILE_TYPES:
+        return ft
+    if ft in ("markdown",):
+        return "md"
+    if not ft and file_name and "." in file_name:
+        ext = file_name.rpartition(".")[2].lower()
+        if ext in DB_FILE_TYPES:
+            return ext
+    return "other"
 
 
 def resolve_mime_type(file_name: str, file_type: str) -> str:
@@ -39,6 +62,16 @@ def resolve_mime_type(file_name: str, file_type: str) -> str:
         return MIME_TYPE_MAP[file_type.lower()]
     guessed, _ = mimetypes.guess_type(file_name)
     return guessed or "application/octet-stream"
+
+
+@dataclass(frozen=True, slots=True)
+class StoredChatFile:
+    """A chat file written by ``ArtifactService.store_chat_file``. ``path`` is server-side only."""
+
+    name: str
+    path: Path
+    size_bytes: int
+    sha256: str
 
 
 class ArtifactService:
@@ -135,7 +168,7 @@ class ArtifactService:
             task_id=task_id,
             user_id=user_id,
             file_name=clean_name,
-            file_type=file_type.lower().strip().lstrip("."),
+            file_type=db_file_type(file_type, clean_name),
             storage_uri=str(dest_path),
             size_bytes=size_bytes,
             sha256=sha256,
@@ -146,6 +179,43 @@ class ArtifactService:
         session.add(artifact)
         await session.flush()
         return artifact
+
+    def store_chat_file(
+        self,
+        *,
+        workspace_id: UUID,
+        session_id: UUID,
+        file_name: str,
+        data: bytes,
+    ) -> StoredChatFile:
+        """Write a small chat-created file under the workspace's chat folder.
+
+        Chat files have no task, so they get no ``file_artifacts`` row (that table requires a task
+        and a migration would be needed to change it). Files are created exclusively: a name that
+        exists is kept and the new file gets `` (2)``, `` (3)`` ... before its extension.
+        """
+        directory = self.storage_root / str(workspace_id) / "chat" / str(session_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        base = Path(file_name).name
+        stem, dot, ext = base.rpartition(".")
+        if not dot or not stem:
+            stem, ext = base, ""
+        suffix = f".{ext}" if ext else ""
+        for number in range(1, 501):
+            name = f"{stem}{suffix}" if number == 1 else f"{stem} ({number}){suffix}"
+            target = directory / name
+            try:
+                with open(target, "xb") as handle:
+                    handle.write(data)
+            except FileExistsError:
+                continue
+            return StoredChatFile(
+                name=name,
+                path=target,
+                size_bytes=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+        raise FileExistsError("No free file name in the chat folder.")
 
     async def get_artifact(
         self,

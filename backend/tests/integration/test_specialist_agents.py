@@ -14,7 +14,6 @@ from app.agents.specialized.document import DocumentAgent
 from app.agents.specialized.email import EmailAgent
 from app.agents.specialized.pm import PMAgent
 from app.agents.specialized.research import ResearchAgent
-from app.mcp.connectors.brave import BraveSearchResult
 from app.mcp.sanitizer import SanitizationResult
 from app.sandbox.runner import SandboxRunner
 from app.tasks.queue import SubtaskJob
@@ -22,51 +21,6 @@ from app.tasks.queue import SubtaskJob
 # ============================================================================
 # 1. ResearchAgent Tests
 # ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_research_agent_workflow() -> None:
-    brave_connector = MagicMock()
-    brave_connector.search = AsyncMock(
-        return_value=BraveSearchResult(
-            citations=[
-                {
-                    "title": "PostgreSQL 17 Release Notes",
-                    "url": "https://postgresql.org/docs/17",
-                    "snippet": "New JSON_TABLE features and performance optimizations.",
-                }
-            ],
-            sanitized_result=SanitizationResult(
-                clean_text="PostgreSQL 17 Release Notes",
-                wrapped_output=(
-                    "<<<UNTRUSTED_EXTERNAL_INPUT>>>PostgreSQL 17 Release Notes"
-                    "<<<END_UNTRUSTED_EXTERNAL_INPUT>>>"
-                ),
-                has_injection_suspicions=False,
-                suspicions=(),
-            ),
-        )
-    )
-
-    agent = ResearchAgent(brave_connector=brave_connector)
-    job = SubtaskJob(
-        workspace_id=uuid4(),
-        user_id=uuid4(),
-        task_id=uuid4(),
-        subtask_id=uuid4(),
-        assigned_agent="research",
-    )
-
-    result = await agent.execute_subtask(
-        job=job,
-        context={"query": "PostgreSQL 17 features"},
-    )
-
-    assert result.agent_role == SpecialistAgentRole.RESEARCH
-    assert result.status == AgentExecutionStatus.SUCCESS
-    assert len(result.citations) == 1
-    assert result.citations[0]["url"] == "https://postgresql.org/docs/17"
-    assert result.verification_proof["citations_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -121,9 +75,9 @@ async def test_research_agent_google_search_grounding() -> None:
 
 
 @pytest.mark.asyncio
-async def test_research_agent_deterministic_offline_google_search() -> None:
-    # ResearchAgent without external keys automatically produces verified Google research synthesis
-    agent = ResearchAgent(google_search_connector=None, brave_connector=None)
+async def test_research_agent_without_backend_fails_instead_of_fabricating() -> None:
+    # No search backend: the agent must report failure, never canned findings or fake sources.
+    agent = ResearchAgent(google_search_connector=None)
     job = SubtaskJob(
         workspace_id=uuid4(),
         user_id=uuid4(),
@@ -137,11 +91,9 @@ async def test_research_agent_deterministic_offline_google_search() -> None:
         context={"description": "Java Programming Fundamentals and Concurrency"},
     )
 
-    assert result.agent_role == SpecialistAgentRole.RESEARCH
-    assert result.status == AgentExecutionStatus.SUCCESS
-    assert len(result.citations) >= 1
-    assert any("java" in c.get("url", "").lower() for c in result.citations)
-    assert result.verification_proof["search_engine"] == "google_search"
+    assert result.status == AgentExecutionStatus.FAILED
+    assert result.citations == []
+    assert result.verification_proof["error"] == "no_results"
 
 
 # ============================================================================
@@ -248,6 +200,10 @@ async def test_document_agent_workflow(tmp_path: Path) -> None:
     assert len(result.artifact_paths) == 1
     assert "file_checksum" in result.verification_proof
     assert result.verification_proof["size_bytes"] > 0
+    # Regression (live smoke): the task dispatcher requires status == "verified" on artifacts,
+    # so a plain-text deliverable must carry it or every .md document subtask fails.
+    assert result.verification_proof["status"] == "verified"
+    assert result.verification_proof["file_type"] == "md"
 
     # Verify physical file existence in /artifacts/{workspace_id}
     artifact = tmp_path / str(workspace_id) / "quarterly_analysis.md"
@@ -337,7 +293,11 @@ async def test_pm_agent_workflow_1() -> None:
         ]
     )
 
-    agent = PMAgent(calendar_service=calendar_service, notion_connector=notion_connector)
+    agent = PMAgent(
+        calendar_service=calendar_service,
+        notion_connector=notion_connector,
+        notion_database_id="tasks-db",
+    )
     job = SubtaskJob(
         workspace_id=uuid4(),
         user_id=uuid4(),
@@ -470,7 +430,11 @@ async def test_pm_agent_handles_notion_outage_gracefully() -> None:
         side_effect=RuntimeError("Notion 503 Service Unavailable")
     )
 
-    agent = PMAgent(calendar_service=calendar_service, notion_connector=notion_connector)
+    agent = PMAgent(
+        calendar_service=calendar_service,
+        notion_connector=notion_connector,
+        notion_database_id="tasks-db",
+    )
     job = SubtaskJob(
         workspace_id=uuid4(),
         user_id=uuid4(),

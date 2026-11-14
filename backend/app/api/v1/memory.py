@@ -11,6 +11,8 @@ from app.auth.dependencies import TenantDatabase, get_principal, get_tenant_data
 from app.auth.models import Principal
 from app.db.repositories.memory import MemoryRepository
 from app.db.tenant import tenant_session
+from app.gateway.exceptions import GatewayError
+from app.gateway.model_gateway import ModelGateway
 from app.memory.ingestion import MemoryIngestionService
 from app.memory.lifecycle import MemoryLifecycleManager
 from app.memory.rag_engine import HybridRagEngine
@@ -28,6 +30,21 @@ from app.schemas.memory import (
 router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
 
 
+def _model_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"error": "model_unavailable"},
+    )
+
+
+def _require_gateway(request: Request) -> ModelGateway:
+    """The gateway only when it can call the model (a Gemini key is configured)."""
+    gateway = getattr(request.app.state.resources, "model_gateway", None)
+    if gateway is None or getattr(gateway, "client", True) is None:
+        raise _model_unavailable()
+    return gateway  # type: ignore[no-any-return]
+
+
 @router.post(
     "/items",
     status_code=status.HTTP_201_CREATED,
@@ -40,20 +57,23 @@ async def ingest_memory_item(
     db: Annotated[TenantDatabase, Depends(get_tenant_database)],
 ) -> list[MemoryItemResponse]:
     """Ingest a new memory item, coordinating PII scrubbing, chunking, and embedding."""
-    gateway = getattr(request.app.state.resources, "model_gateway", None)
+    gateway = _require_gateway(request)
 
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
         repo = MemoryRepository(session)
         service = MemoryIngestionService(repository=repo, gateway=gateway)
 
-        records = await service.ingest_document(
-            workspace_id=principal.workspace_id,
-            user_id=principal.user_id,
-            category=payload.category,
-            content=payload.content,
-            metadata=payload.metadata,
-            permanent=payload.permanent,
-        )
+        try:
+            records = await service.ingest_document(
+                workspace_id=principal.workspace_id,
+                user_id=principal.user_id,
+                category=payload.category,
+                content=payload.content,
+                metadata=payload.metadata,
+                permanent=payload.permanent,
+            )
+        except GatewayError:
+            raise _model_unavailable() from None
         await session.commit()
 
         return [
@@ -118,25 +138,23 @@ async def search_memory(
     db: Annotated[TenantDatabase, Depends(get_tenant_database)],
 ) -> MemorySearchResponse:
     """Execute hybrid search with Defect #16 threshold gating and time decay ranking."""
-    gateway = getattr(request.app.state.resources, "model_gateway", None)
-    if gateway is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model Gateway is not configured for vector embeddings",
-        )
+    gateway = _require_gateway(request)
 
     async with tenant_session(db.engine, principal.workspace_id, principal.user_id) as session:
         repo = MemoryRepository(session)
         engine = HybridRagEngine(repository=repo, gateway=gateway)
 
-        citations = await engine.search(
-            workspace_id=principal.workspace_id,
-            user_id=principal.user_id,
-            query_text=payload.query,
-            categories=payload.categories,
-            limit=payload.limit,
-            raw_threshold=payload.raw_threshold,
-        )
+        try:
+            citations = await engine.search(
+                workspace_id=principal.workspace_id,
+                user_id=principal.user_id,
+                query_text=payload.query,
+                categories=payload.categories,
+                limit=payload.limit,
+                raw_threshold=payload.raw_threshold,
+            )
+        except GatewayError:
+            raise _model_unavailable() from None
         await session.commit()
 
         results = [

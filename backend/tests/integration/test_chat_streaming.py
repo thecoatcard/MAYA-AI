@@ -53,6 +53,7 @@ from app.db.repositories.chat import (
 from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import ModelRegistry, build_default_registry
 from app.main import create_app
+from app.services import stream_continuation
 from app.services.chat_idempotency import (
     IN_PROGRESS_TTL_SECONDS,
     TERMINAL_TTL_SECONDS,
@@ -69,6 +70,7 @@ from tests.support.clock import ManualClock
 from tests.support.fake_gemini_client import FakeAsyncModels, FakeGeminiClient
 from tests.support.fake_store import FakeAuthStore
 from tests.support.gateway_factory import make_gateway
+from tests.support.models import LITE, ORCH
 from tests.support.settings import make_settings
 
 AUTH = "/api/v1/auth"
@@ -245,6 +247,14 @@ class MemoryRepository:
 
     async def get_session(self, session_id: UUID) -> ChatSessionRecord | None:
         return self._mine(session_id)
+
+    async def rename_session(self, session_id: UUID, title: str) -> ChatSessionRecord | None:
+        record = self._mine(session_id)
+        if record is None:
+            return None
+        renamed = replace(record, title=title[:255])
+        self._chat.sessions[session_id] = renamed
+        return renamed
 
     async def lock_session(self, session_id: UUID) -> None:
         if self._mine(session_id) is None:
@@ -445,8 +455,12 @@ class ScriptedModels(FakeAsyncModels):
     def __init__(self) -> None:
         super().__init__()
         self.script: list[Any] = []
+        # One script per stream call, consumed in order; when empty ``script`` applies.
+        self.scripts: list[list[Any]] = []
 
     async def _stream_chunks(self, model: str) -> AsyncIterator[types.GenerateContentResponse]:
+        if self.scripts:
+            self.script = self.scripts.pop(0)
         if not self.script:  # unscripted: the stock fake streams its default text word by word
             async for item in super()._stream_chunks(model):
                 yield item
@@ -676,8 +690,10 @@ def events(response: httpx.Response) -> list[Frame]:
     return parse_sse(response.text)
 
 
-def names(frames: list[Frame]) -> list[str]:
-    return [frame.event for frame in frames]
+def names(frames: list[Frame], *, with_progress: bool = False) -> list[str]:
+    """The event names. The live step list (``progress``) is additive, so it is left out unless
+    ``with_progress`` asks for it: the event contract of the other events stays exactly the same."""
+    return [frame.event for frame in frames if with_progress or frame.event != "progress"]
 
 
 def reply_text(frames: list[Frame]) -> str:
@@ -832,25 +848,37 @@ async def test_a_validation_error_never_repeats_what_was_sent(world: World) -> N
     assert CONTENT_MARKER not in response.text
 
 
-async def test_content_longer_than_the_configured_maximum_is_refused() -> None:
-    async with make_world(chat_max_message_chars=20) as world:
+async def test_a_fifty_thousand_character_message_is_accepted() -> None:
+    async with make_world() as world:
         account = await sign_in(world)
-        ok = await send(world, account, "x" * 20)
-        assert ok.status_code == 200
-        too_long = await send(world, account, "x" * 21)
-        assert (too_long.status_code, too_long.json()) == (
-            422,
-            {"error": "validation_error", "fields": ["content"]},
+        response = await send(world, account, "x" * 50_000)
+        assert response.status_code == 200
+        assert len(world.chat.rows("user")) == 1  # stored in full
+
+
+async def test_a_five_mib_body_is_refused_with_a_413_and_nothing_is_stored() -> None:
+    async with make_world() as world:
+        account = await sign_in(world)
+        response = await send(
+            world, account, raw=b'{"content": "' + b"x" * (5 * 1024 * 1024) + b'"}'
         )
-        assert len(world.chat.rows("user")) == 1  # only the first message was stored
+        assert response.status_code == 413
+        assert response.json()["error"] == "payload_too_large"
+        assert "4096 KiB" in response.json()["message"]
+        nothing_happened(world)
 
 
 async def test_a_message_too_big_for_the_context_budget_is_refused_before_storing() -> None:
-    async with make_world(chat_max_message_chars=16_000, chat_context_token_budget=1_000) as world:
+    async with make_world(chat_context_token_budget=1_000) as world:
         account = await sign_in(world)
         response = await send(world, account, "word " * 3_000)  # about 5,000 estimated tokens
         assert response.status_code == 422
-        assert response.json() == {"error": "validation_error", "fields": ["content"]}
+        assert response.json() == {
+            "error": "message_too_long",
+            "message": (
+                "This message is too long for the model context. Shorten it or attach it as a file."
+            ),
+        }
         nothing_happened(world)
 
 
@@ -998,7 +1026,12 @@ async def test_a_message_without_a_session_creates_one_and_streams_the_reply(wor
         "total_tokens",
         "cost_usd",
         "is_estimate",
+        "cached_tokens",
+        # Added on purpose for the work-log footer: model calls and wall time of the reply.
+        "turns",
+        "elapsed_ms",
     }
+    assert usage["turns"] == 1 and usage["elapsed_ms"] >= 0
     assert (usage["prompt_tokens"], usage["candidates_tokens"], usage["total_tokens"]) == (
         100,
         50,
@@ -1026,7 +1059,7 @@ async def test_a_message_without_a_session_creates_one_and_streams_the_reply(wor
         "latency_ms",
         "status",
     }
-    assert assistant.metadata["model_id"] == "gemini-3.8-flash"
+    assert assistant.metadata["model_id"] == ORCH
     assert assistant.metadata["alias"] == "orchestrator"
     assert assistant.metadata["status"] == "completed"
     assert assistant.metadata["usage"] == usage
@@ -1060,6 +1093,20 @@ async def test_the_gateway_is_called_with_the_orchestrator_alias_the_workspace_a
     assert spy.call_args.kwargs["system_instruction"]
 
 
+async def test_chat_static_prompt_prefix_is_stable_across_requests(world: World) -> None:
+    account = await sign_in(world)
+    first = events(await send(world, account, "First request."))
+    session_id = first[0].data["session_id"]
+    events(await send(world, account, "A different second request.", session_id=session_id))
+
+    calls = stream_calls(world)
+    assert len(calls) == 2
+    first_config, second_config = calls[0]["config"], calls[1]["config"]
+    assert first_config.system_instruction == second_config.system_instruction
+    assert first_config.tools == second_config.tools
+    assert calls[0]["contents"] != calls[1]["contents"]
+
+
 async def test_the_history_reaches_the_model_on_the_second_message(world: World) -> None:
     account = await sign_in(world)
     first = events(await send(world, account, "My name is Priya."))
@@ -1091,7 +1138,8 @@ async def test_the_new_message_is_not_duplicated_in_its_own_history(world: World
 
 
 async def test_a_context_budget_trims_the_oldest_turns_but_deletes_nothing() -> None:
-    async with make_world(chat_context_token_budget=1_000, chat_max_message_chars=2_000) as world:
+    # Raised from 1_000 on purpose: the system instruction grew (code-language and LaTeX rules).
+    async with make_world(chat_context_token_budget=1_500) as world:
         account = await sign_in(world)
         session_id = events(await send(world, account, "first " * 150))[0].data["session_id"]
         for index in range(3):
@@ -1192,13 +1240,6 @@ async def test_a_stalled_live_turn_keeps_its_claim(world: World, stalled_at: str
     gate = SignallingEvent()
     world.models.script = [chunk("first "), gate]
     key = new_key()
-    turn = await begin(world, account, "stalled claim", key=key)
-    stream = turn.events()
-    await anext(stream)  # message.accepted
-    await anext(stream)  # first delta; the generator is suspended at the client write
-    scope = IdempotencyScope(account.workspace_id, account.user_id, key)
-    original = expiring.records[scope.redis_key]
-    successor = replace(original, user_message_id=uuid4(), assistant_message_id=uuid4())
     pending: asyncio.Future[str] | None = None
     wake, waiting = asyncio.Event(), asyncio.Event()
 
@@ -1207,7 +1248,18 @@ async def test_a_stalled_live_turn_keeps_its_claim(world: World, stalled_at: str
         await wake.wait()
         wake.clear()
 
+    # The refresh wait is replaced BEFORE the turn starts: the lease-refresh task begins its first
+    # (60 s) wait as soon as the event loop first yields after the turn is created, and a patch
+    # applied later would never reach it. Extra awaits in the start-up path made that order
+    # unreliable, so the patch must not depend on scheduling.
     with patch("app.services.chat_service._LiveTurn._wait_for_refresh", new=controlled_wait):
+        turn = await begin(world, account, "stalled claim", key=key)
+        stream = turn.events()
+        await anext(stream)  # message.accepted
+        await anext(stream)  # first delta; the generator is suspended at the client write
+        scope = IdempotencyScope(account.workspace_id, account.user_id, key)
+        original = expiring.records[scope.redis_key]
+        successor = replace(original, user_message_id=uuid4(), assistant_message_id=uuid4())
         try:
             if stalled_at == "provider_wait":
                 pending = asyncio.ensure_future(anext(stream))
@@ -1556,8 +1608,12 @@ async def test_a_second_request_while_the_first_is_streaming_gets_409() -> None:
 
 
 async def test_a_stream_cut_after_the_first_chunk_stores_the_partial_reply_as_interrupted(
-    world: World,
+    world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Changed on purpose: a cut stream is now continued up to MAX_INTERRUPTION_RECOVERIES times
+    # before it ends as interrupted (see the continuation tests below). This legacy case checks the
+    # last state, "every recovery failed", with the recoveries switched off.
+    monkeypatch.setattr(stream_continuation, "MAX_INTERRUPTION_RECOVERIES", 0)
     account = await sign_in(world)
     key = new_key()
     world.models.script = [chunk("Fake "), chunk("model "), ConnectionResetError(PROVIDER_MARKER)]
@@ -1580,7 +1636,10 @@ async def test_a_stream_cut_after_the_first_chunk_stores_the_partial_reply_as_in
 
     # Retrying with the same key replays the partial reply; nothing is billed again.
     calls = len(stream_calls(world))
-    again = events(await send(world, account, "go on", key=key))
+    # The stored steps ("Reply stopped") are replayed too; the other events are checked as before.
+    again = [
+        f for f in events(await send(world, account, "go on", key=key)) if f.event != "progress"
+    ]
     assert names(again) == ["message.accepted", "delta", "done"]
     assert again[0].data["replayed"] is True
     assert again[1].data == {"text": "Fake model "}
@@ -1590,8 +1649,10 @@ async def test_a_stream_cut_after_the_first_chunk_stores_the_partial_reply_as_in
 
 
 async def test_a_metadata_only_chunk_before_a_stream_error_stores_no_empty_reply(
-    world: World,
+    world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Changed on purpose: recoveries are switched off here (see the case above).
+    monkeypatch.setattr(stream_continuation, "MAX_INTERRUPTION_RECOVERIES", 0)
     account = await sign_in(world)
     key = new_key()
     world.models.script = [chunk("", tokens=(3, 0)), ConnectionResetError(PROVIDER_MARKER)]
@@ -1642,29 +1703,28 @@ async def test_a_blocked_prompt_ends_with_content_blocked_and_stores_no_reply(wo
 
 async def test_every_model_failing_before_a_chunk_ends_with_model_unavailable(world: World) -> None:
     account = await sign_in(world)
-    world.fake.aio.models.enqueue_errors("gemini-3.8-flash", [ServerError(503, {})])
-    world.fake.aio.models.enqueue_errors(
-        "gemini-3.5-flash-lite", [ConnectionResetError(PROVIDER_MARKER)]
-    )
+    world.fake.aio.models.enqueue_errors(ORCH, [ServerError(503, {})])
+    world.fake.aio.models.enqueue_errors(LITE, [ConnectionResetError(PROVIDER_MARKER)])
 
     response = await send(world, account, "anything")
 
     frames = events(response)
-    assert names(frames) == ["message.accepted", "error"]
-    assert frames[-1].data == {"code": "model_unavailable", "retryable": True}
+    # Changed on purpose: when every model fails the turn now ends with a plain overload message
+    # (stored as an interrupted reply, so the web shows Retry) instead of a bare error frame.
+    assert names(frames) == ["message.accepted", "delta", "error"]
+    assert "Gemini is overloaded right now" in reply_text(frames)
+    assert frames[-1].data == {"code": "stream_interrupted", "retryable": True}
     assert PROVIDER_MARKER not in response.text
-    assert world.chat.rows("orchestrator") == []
+    assert [m.content for m in world.chat.rows("orchestrator")] == [reply_text(frames)]
     record = world.store.only()
-    assert (record.state, record.error_code) == ("failed", "model_unavailable")
+    assert record.state == "interrupted"
 
 
 async def test_a_provider_rejection_is_reported_as_model_unavailable_without_its_text(
     world: World,
 ) -> None:
     account = await sign_in(world)
-    world.fake.aio.models.enqueue_errors(
-        "gemini-3.8-flash", [ClientError(401, {"error": PROVIDER_MARKER})]
-    )
+    world.fake.aio.models.enqueue_errors(ORCH, [ClientError(401, {"error": PROVIDER_MARKER})])
     response = await send(world, account)
     frames = events(response)
     assert frames[-1].data == {"code": "model_unavailable", "retryable": True}
@@ -1675,7 +1735,7 @@ async def test_an_unexpected_error_is_reported_as_internal_error_without_detail(
     world: World,
 ) -> None:
     account = await sign_in(world)
-    world.fake.aio.models.enqueue_errors("gemini-3.8-flash", [RuntimeError(PROVIDER_MARKER)])
+    world.fake.aio.models.enqueue_errors(ORCH, [RuntimeError(PROVIDER_MARKER)])
     response = await send(world, account)
     frames = events(response)
     assert names(frames) == ["message.accepted", "error"]
@@ -1839,11 +1899,101 @@ async def test_a_failed_user_message_write_frees_the_key_and_the_slot() -> None:
         assert world.stream_limiter.active() == 0 and world.store.records == {}
 
 
-async def test_chat_passes_the_approved_output_token_limit_to_the_gateway() -> None:
+async def test_chat_output_budget_is_the_model_maximum_not_a_smaller_setting() -> None:
+    # Changed on purpose: a configured value below the model's registered maximum (65,536) no
+    # longer caps a reply; a larger configured value is kept.
     async with make_world(chat_max_output_tokens=1024) as world:
         account = await sign_in(world)
         assert names(events(await send(world, account)))[-1] == "done"
-        assert stream_calls(world)[0]["config"].max_output_tokens == 1024
+        assert stream_calls(world)[0]["config"].max_output_tokens == 65_536
+    async with make_world(chat_max_output_tokens=100_000) as world:
+        account = await sign_in(world)
+        assert names(events(await send(world, account)))[-1] == "done"
+        assert stream_calls(world)[0]["config"].max_output_tokens == 100_000
+
+
+async def test_a_cut_stream_continues_seamlessly_and_the_overlap_is_trimmed(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    world.models.scripts = [
+        [chunk("The capital of France is Pa"), ConnectionResetError(PROVIDER_MARKER)],
+        [chunk("is Paris, a large city."), chunk("", finish=types.FinishReason.STOP)],
+    ]
+
+    response = await send(world, account, "capital?")
+
+    frames = events(response)
+    assert names(frames)[-1] == "done"
+    # "is Paris" restates the end of the first part; the stitched text has no repeat.
+    assert reply_text(frames) == "The capital of France is Paris, a large city."
+    assert world.chat.rows("orchestrator")[0].content == reply_text(frames)
+    assert world.chat.rows("orchestrator")[0].metadata["finish_reason"] == "stop"
+    second = stream_calls(world)[1]["contents"]
+    assert PROVIDER_MARKER not in response.text
+    assert "Continue exactly" in str(second[-1]) and "The capital of France" in str(second[-2])
+
+
+async def test_every_continuation_failing_keeps_the_honest_interrupted_state(
+    world: World,
+) -> None:
+    account = await sign_in(world)
+    world.models.scripts = [
+        [chunk("Part one. "), ConnectionResetError(PROVIDER_MARKER)],
+        [chunk("Part two. "), ConnectionResetError(PROVIDER_MARKER)],
+        [chunk("Part three. "), ConnectionResetError(PROVIDER_MARKER)],
+        [chunk("Part four. "), ConnectionResetError(PROVIDER_MARKER)],
+    ]
+
+    frames = events(await send(world, account, "long one"))
+
+    assert names(frames)[-1] == "error"
+    assert frames[-1].data == {"code": "stream_interrupted", "retryable": True}
+    assert len(stream_calls(world)) == 1 + stream_continuation.MAX_INTERRUPTION_RECOVERIES
+    assert (
+        world.chat.rows("orchestrator")[0].content == "Part one. Part two. Part three. Part four. "
+    )
+
+
+async def test_a_max_tokens_finish_is_continued_until_the_answer_ends(world: World) -> None:
+    account = await sign_in(world)
+    world.models.scripts = [
+        [chunk("First half of the answer, ", finish=types.FinishReason.MAX_TOKENS)],
+        [chunk("second half.", finish=types.FinishReason.STOP)],
+    ]
+
+    frames = events(await send(world, account, "write a lot"))
+
+    assert names(frames)[-1] == "done"
+    assert frames[-1].data["finish_reason"] == "stop"
+    assert reply_text(frames) == "First half of the answer, second half."
+    assert len(stream_calls(world)) == 2
+
+
+async def test_max_tokens_continuations_are_capped(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(stream_continuation, "MAX_TOKEN_CONTINUATIONS", 2)
+    account = await sign_in(world)
+    world.models.script = [chunk("more text. ", finish=types.FinishReason.MAX_TOKENS)]
+
+    frames = events(await send(world, account, "never ends"))
+
+    assert names(frames)[-1] == "done"
+    assert frames[-1].data["finish_reason"] == "max_tokens"
+    assert len(stream_calls(world)) == 3
+
+
+async def test_a_long_answer_is_stored_and_streamed_whole(world: World) -> None:
+    account = await sign_in(world)
+    big = "word " * 40_000  # 200,000 characters: no reply cap applies to the answer text
+    world.models.script = [chunk(big[:100_000]), chunk(big[100_000:])]
+
+    frames = events(await send(world, account, "huge"))
+
+    assert names(frames)[-1] == "done"
+    assert len(reply_text(frames)) == len(big)
+    assert len(world.chat.rows("orchestrator")[0].content) == len(big)
 
 
 async def test_user_message_history_and_inserts_are_serialized_per_session(world: World) -> None:
@@ -1948,7 +2098,10 @@ async def test_a_timeout_inside_the_provider_is_not_the_reply_deadline(world: Wo
 
     frames = events(await send(world, account))
 
-    assert names(frames) == ["message.accepted", "error"]
+    # Changed on purpose: an exhausted model chain now says so in a plain overload message (a
+    # delta) before the error frame, so the user never sees an empty reply or a spinner.
+    assert names(frames) == ["message.accepted", "delta", "error"]
+    assert "overloaded" in reply_text(frames)
     assert frames[-1].data["code"] != "reply_deadline_exceeded"
     assert world.stream_limiter.active() == 0
 
@@ -2322,7 +2475,15 @@ async def test_sessions_are_listed_newest_first_with_a_cursor(world: World) -> N
     assert page.status_code == 200
     body = page.json()
     assert [item["title"] for item in body["items"]] == ["third", "second"]
-    assert set(body["items"][0]) == {"id", "title", "channel", "status", "created_at"}
+    assert set(body["items"][0]) == {
+        "id",
+        "title",
+        "channel",
+        "status",
+        "created_at",
+        "pinned",  # additive: the caller's own flags (right-click menu)
+        "archived",
+    }
     assert body["items"][0]["channel"] == "web" and body["items"][0]["status"] == "active"
     assert body["items"][0]["created_at"].endswith("Z")
     assert body["next_cursor"] is not None
@@ -2346,10 +2507,22 @@ async def test_messages_are_listed_oldest_first_with_the_documented_fields(world
     assert page.status_code == 200
     items = page.json()["items"]
     assert [item["role"] for item in items] == ["user", "assistant"]
-    assert set(items[0]) == {"id", "role", "content", "created_at", "finish_reason", "model_id"}
+    assert set(items[0]) == {
+        "id",
+        "role",
+        "content",
+        "created_at",
+        "finish_reason",
+        "model_id",
+        "modality",
+        "turn_id",
+        "source",
+        "metadata",
+        "feedback",  # additive: the caller's own thumbs, null when none
+    }
     assert items[0]["finish_reason"] is None and items[0]["model_id"] is None
     assert items[1]["content"] == REPLY
-    assert (items[1]["finish_reason"], items[1]["model_id"]) == ("stop", "gemini-3.8-flash")
+    assert (items[1]["finish_reason"], items[1]["model_id"]) == ("stop", ORCH)
     assert page.json()["next_cursor"] is None
 
     first = await world.client.get(
@@ -2476,9 +2649,7 @@ async def test_nothing_the_user_or_the_model_wrote_ever_reaches_a_log(
             world.models.script = [chunk(REPLY_MARKER), ConnectionResetError(PROVIDER_MARKER)]
             events(await send(world, account, CONTENT_MARKER + "2"))  # interrupted
             world.models.script = []
-            world.fake.aio.models.enqueue_errors(
-                "gemini-3.8-flash", [RuntimeError(PROVIDER_MARKER)]
-            )
+            world.fake.aio.models.enqueue_errors(ORCH, [RuntimeError(PROVIDER_MARKER)])
             events(await send(world, account, CONTENT_MARKER + "3"))  # internal error
             world.chat.fail_assistant_insert = True
             events(await send(world, account, CONTENT_MARKER + "4"))  # not stored
@@ -2516,9 +2687,10 @@ async def test_the_default_dependencies_read_the_application_resources() -> None
     assert await get_chat_settings(cast(Any, request)) is settings
 
 
-async def test_the_public_surface_includes_exactly_the_three_documented_chat_routes(
+async def test_the_public_surface_includes_exactly_the_documented_chat_routes(
     world: World,
 ) -> None:
+    # The file download route (MAYA_CHAT_INLINE_FILES) is additive: one GET for a file made in chat.
     schema = world.app.openapi()
     chat = {
         (path, method.upper())
@@ -2530,7 +2702,16 @@ async def test_the_public_surface_includes_exactly_the_three_documented_chat_rou
         (f"{CHAT}/message", "POST"),
         (f"{CHAT}/sessions", "GET"),
         (f"{CHAT}/sessions/{{session_id}}", "DELETE"),
+        # additive, right-click menus: rename/pin/archive, branch, export, message feedback
+        (f"{CHAT}/sessions/{{session_id}}", "PATCH"),
+        (f"{CHAT}/sessions/{{session_id}}/duplicate", "POST"),
+        (f"{CHAT}/sessions/{{session_id}}/export", "GET"),
+        (f"{CHAT}/messages/{{message_id}}/feedback", "POST"),
         (f"{CHAT}/sessions/{{session_id}}/messages", "GET"),
+        # additive: the state of one reply by id (stored or pending), for a client that left
+        (f"{CHAT}/sessions/{{session_id}}/messages/{{message_id}}", "GET"),
+        (f"{CHAT}/sessions/{{session_id}}/messages/{{message_id}}/files/{{file_id}}", "GET"),
+        (f"{CHAT}/sessions/{{session_id}}/messages/{{message_id}}/files/{{file_id}}", "DELETE"),
     }
     post = schema["paths"][f"{CHAT}/message"]["post"]
     assert post["parameters"][0]["name"] == "Idempotency-Key"
@@ -2789,3 +2970,22 @@ async def test_redis_terminal_cache_failure_does_not_hide_the_durable_result(wor
     replay = events(await send(world, account, key=key))
     assert replay[0].data["replayed"] is True
     assert len(stream_calls(world)) == calls
+
+
+async def test_message_state_endpoint_reports_stored_or_pending(world: World) -> None:
+    account = await sign_in(world)
+    frames = events(await send(world, account, "hello there"))
+    session_id = frames[0].data["session_id"]
+    assistant_id = frames[0].data["assistant_message_id"]
+
+    stored = await world.client.get(
+        f"{CHAT}/sessions/{session_id}/messages/{assistant_id}", headers=account.headers
+    )
+    assert stored.status_code == 200
+    assert stored.json()["state"] == "stored"
+    assert stored.json()["message"]["content"] == reply_text(frames)
+
+    pending = await world.client.get(
+        f"{CHAT}/sessions/{session_id}/messages/{uuid4()}", headers=account.headers
+    )
+    assert pending.json() == {"state": "pending", "message": None}

@@ -163,7 +163,7 @@ async def test_supervisor_exponential_backoff_and_death() -> None:
 
 def test_supervisor_fallback_routing() -> None:
     assert FALLBACK_ROUTES.get("github") == "local_git"
-    assert FALLBACK_ROUTES.get("brave") == "gemini_search"
+    assert "brave" not in FALLBACK_ROUTES  # Brave Search was removed (2026-11-09)
 
     supervisor = ProcessSupervisor(
         server_id="test-srv-1",

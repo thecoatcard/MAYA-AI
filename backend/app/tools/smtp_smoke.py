@@ -22,11 +22,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.auth.identifiers import normalize_email
 from app.core.config import SENDER_ADDRESS
 from app.core.email import EmailDeliveryError, OutboundEmail, SmtpEmailSender
+from app.core.email_templates import EmailContent, render_html
 
 SUBJECT = "MAYA AI SMTP check"
 BODY = (
     "This is a one-off test message from the MAYA AI SMTP check.\n"
     "It contains no code and no account information; you can delete it.\n"
+)
+
+
+HTML = render_html(
+    EmailContent(
+        title="MAYA AI SMTP check",
+        preheader="A one-off test message. It contains no code.",
+        paragraphs=(
+            "This is a one-off test message from the MAYA AI SMTP check.",
+            "It contains no code and no account information; you can delete it.",
+        ),
+        footer_reason="You received this e-mail because the MAYA AI SMTP check was run.",
+    )
 )
 
 
@@ -102,7 +116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sender=settings.smtp_from_address,
     )
     try:
-        asyncio.run(sender.send(OutboundEmail(to=recipient, subject=SUBJECT, body=BODY)))
+        asyncio.run(sender.send(OutboundEmail(to=recipient, subject=SUBJECT, body=BODY, html=HTML)))
     except EmailDeliveryError as error:
         print(
             f"Delivery failed ({error.category}). Check host, port, security mode and credentials."

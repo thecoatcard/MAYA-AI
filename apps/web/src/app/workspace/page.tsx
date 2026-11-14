@@ -1,14 +1,10 @@
 import type { Metadata } from "next";
 import React from "react";
 
-import { AmbientWorkspace } from "../../components/chat/AmbientWorkspace";
+import { LegacyRedirect } from "../../components/layout/LegacyRedirect";
 
-export const metadata: Metadata = {
-  title: "Ambient Workspace | MAYA AI",
-  description:
-    "Voice-first digital employee ambient workspace with real-time deliverable canvas.",
-};
+export const metadata: Metadata = { title: "Moved | MAYA AI" };
 
-export default function WorkspacePage() {
-  return <AmbientWorkspace />;
+export default function WorkspaceRedirect() {
+  return <LegacyRedirect to="/" />;
 }

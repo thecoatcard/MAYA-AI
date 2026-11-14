@@ -107,6 +107,7 @@
   ```
 - **Error Codes:**
   - `404 Not Found`: If item does not exist or belongs to another user/tenant.
+- **Used by chat:** the "Saved to memory" chip's Undo calls this endpoint with the `memory_id` from the `memory.saved` chat event. Chat writes memories itself through the same repository (category `preference`, `project` or `knowledge`, `permanent`, `metadata.source = "chat"`); see [ADR-0018](../adr/0018-chat-memory.md).
 
 ---
 

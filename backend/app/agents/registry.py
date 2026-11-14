@@ -13,15 +13,15 @@ from app.agents.specialized.document import DocumentAgent
 from app.agents.specialized.email import EmailAgent
 from app.agents.specialized.pm import PMAgent
 from app.agents.specialized.research import ResearchAgent
+from app.mail.config import MailboxConfig
+from app.mail.service import MailService
 from app.mcp.client_manager import MCPClientManager
-from app.mcp.connectors.brave import BraveSearchConnector
 from app.mcp.connectors.github import GitHubConnector
 from app.mcp.connectors.google_search import GoogleSearchConnector
 from app.mcp.connectors.notion import NotionConnector
 from app.mcp.permissions import ToolPermissionRegistry
 from app.sandbox.runner import SandboxRunner
 from mcp_servers.google_adapter.calendar import GoogleCalendarService
-from mcp_servers.google_adapter.gmail import GoogleGmailService
 
 logger = logging.getLogger(__name__)
 
@@ -63,36 +63,47 @@ class AgentFleetRegistry:
         """List all registered agent keys."""
         return sorted(list(self._agents.keys()))
 
+    def unified_view(self) -> list[dict[str, Any]]:
+        """The three unified agents (ADR-0023) with whether any member is registered."""
+        from app.agents.unified import catalogue
+
+        return catalogue({key: True for key in self._agents})
+
 
 def create_default_fleet(
     client_manager: MCPClientManager | None = None,
     permission_registry: ToolPermissionRegistry | None = None,
     sandbox_runner: SandboxRunner | None = None,
     artifacts_base_dir: Path | str = "/artifacts",
-    brave_api_key: str | None = None,
     github_token: str | None = None,
     notion_token: str | None = None,
+    notion_database_id: str | None = None,
+    connections: Any | None = None,
     google_access_token: str | None = None,
     google_search_connector: GoogleSearchConnector | None = None,
     model_gateway: Any | None = None,
+    native_search: Any | None = None,
+    deep_research: Any | None = None,
+    mailbox: MailboxConfig | None = None,
+    research_backend: str = "native",
 ) -> AgentFleetRegistry:
     """Factory creating fully wired agent fleet with all 5 specialist agents."""
     fleet = AgentFleetRegistry()
     registry = permission_registry or ToolPermissionRegistry()
 
-    # 1. ResearchAgent - prefer Google Search / Gemini Live grounding over Brave
+    # 1. ResearchAgent - Gemini Google Search grounding is the only search backend
     g_search = google_search_connector
     if g_search is None and model_gateway is not None:
-        client = getattr(model_gateway, "client", None)
-        g_search = GoogleSearchConnector(client=client)
+        g_search = GoogleSearchConnector(gateway=model_gateway)
 
-    brave_connector = BraveSearchConnector(api_key=brave_api_key) if brave_api_key else None
     research_agent = ResearchAgent(
         google_search_connector=g_search,
-        brave_connector=brave_connector,
         model_gateway=model_gateway,
         permission_registry=registry,
         client_manager=client_manager,
+        native_search=native_search,
+        deep_research=deep_research,
+        research_backend=research_backend,
     )
     fleet.register_agent(SpecialistAgentRole.RESEARCH, research_agent)
 
@@ -102,6 +113,7 @@ def create_default_fleet(
     coding_agent = CodingAgent(
         sandbox_runner=runner,
         github_connector=gh_connector,
+        connections=connections,
         permission_registry=registry,
         client_manager=client_manager,
     )
@@ -115,12 +127,12 @@ def create_default_fleet(
     )
     fleet.register_agent(SpecialistAgentRole.DOCUMENT, document_agent)
 
-    # 4. EmailAgent
-    gmail_service = (
-        GoogleGmailService(access_token=google_access_token) if google_access_token else None
-    )
+    # 4. EmailAgent. Mail goes ONLY through the user's own mailbox (Settings > Connections, or the
+    # server's MAYA_MAIL_* mailbox): the Google access token is never used to draft or send mail.
     email_agent = EmailAgent(
-        gmail_service=gmail_service,
+        gmail_service=None,
+        mail_service=MailService(mailbox) if mailbox is not None else None,
+        connections=connections,
         permission_registry=registry,
         client_manager=client_manager,
     )
@@ -134,6 +146,8 @@ def create_default_fleet(
     pm_agent = PMAgent(
         calendar_service=calendar_service,
         notion_connector=notion_conn,
+        notion_database_id=notion_database_id,
+        connections=connections,
         permission_registry=registry,
         client_manager=client_manager,
     )

@@ -44,7 +44,7 @@ def test_bodies_up_to_the_limit_pass() -> None:
 
 def test_a_declared_oversize_body_is_refused_before_it_is_read() -> None:
     response = TestClient(echo_app()).post("/echo", content=b"x" * 101)
-    assert (response.status_code, response.json()) == (413, {"error": "payload_too_large"})
+    assert (response.status_code, response.json()["error"]) == (413, "payload_too_large")
 
 
 async def test_a_streamed_body_that_outgrows_the_limit_is_cut_off() -> None:
@@ -55,7 +55,7 @@ async def test_a_streamed_body_that_outgrows_the_limit_is_cut_off() -> None:
     transport = httpx.ASGITransport(app=echo_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/echo", content=chunks())
-    assert (response.status_code, response.json()) == (413, {"error": "payload_too_large"})
+    assert (response.status_code, response.json()["error"]) == (413, "payload_too_large")
 
 
 def test_the_application_applies_the_documented_limit(api: Api) -> None:
@@ -68,7 +68,7 @@ def test_the_application_applies_the_documented_limit(api: Api) -> None:
         content=b" " * (MAX_BODY_BYTES + 1),
         headers={"Content-Type": "application/json"},
     )
-    assert (big.status_code, big.json()) == (413, {"error": "payload_too_large"})
+    assert (big.status_code, big.json()["error"]) == (413, "payload_too_large")
 
 
 # ------------------------------------------------------------------- credential caching

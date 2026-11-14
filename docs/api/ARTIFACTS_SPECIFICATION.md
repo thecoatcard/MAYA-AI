@@ -66,3 +66,10 @@
 - **Query Parameters:**
   - `task_id` (optional UUID): Filter artifacts produced by a specific task.
 - **Success Response:** `200 OK` with JSON array of `ArtifactMetadataResponse` objects.
+
+### 4. Delete an Artifact
+
+- **Endpoint:** `DELETE /api/v1/artifacts/{artifact_id}`
+- **Success Response:** `204 No Content`. The record is removed; MAYA's own stored copy is removed with it.
+- **Errors:** `404 {"error": "artifact_not_found"}` when the artifact does not exist or belongs to another workspace.
+- **Connected folder:** a file whose path is outside MAYA's artifact storage (the user's connected folder) is never deleted from disk. Metadata reports it as `in_connected_folder: true` (a boolean on every `ArtifactMetadataResponse`, `false` for files in MAYA storage) and the web UI offers no Delete for it.

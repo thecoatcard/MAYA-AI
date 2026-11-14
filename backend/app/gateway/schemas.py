@@ -52,6 +52,8 @@ class GatewayResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str
+    # The model's thought summary for this call (empty unless thought summaries were requested).
+    thought_summary: str = ""
     model_id: str
     alias_used: str
     was_fallback: bool = False
@@ -61,6 +63,8 @@ class GatewayResponse(BaseModel):
     estimated_cost_usd: Decimal | None = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
     citations: list[dict[str, str]] = Field(default_factory=list)
+    # ``key#N`` label of the pool key that served the call (never the key text); None without one.
+    key_label: str | None = None
 
     @model_validator(mode="after")
     def _sync_usage(self) -> Self:
@@ -93,18 +97,56 @@ class GatewayResponse(BaseModel):
         return self
 
 
+class ToolCallRequest(BaseModel):
+    """Invocation request for a specific tool call returned by the model.
+
+    ``thought_signature`` carries the provider's opaque signature for the call (when present);
+    it must be echoed back with the call when the function response is sent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    thought_signature: bytes | None = Field(default=None, repr=False)
+
+
+class GatewayProgressEvent(BaseModel):
+    """A live notice from the failover chain (never error text): a retry, a switch to the next
+    model, or "still waiting" while no output has arrived yet."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str  # "retry" | "fallback" | "waiting"
+    alias: str
+    attempt: int = 1
+    limit: int = 1
+    reason: str = ""
+    elapsed_seconds: float = 0.0
+
+
 class GatewayStreamChunk(BaseModel):
-    """A streaming text chunk emitted during generation."""
+    """A streaming chunk emitted during generation: text, and/or function-call requests.
+
+    ``tool_calls`` is empty unless ``generate_stream`` was given ``tools`` and the model asked to
+    call one of them in this chunk. The gateway never executes a tool.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     text: str = ""
+    # A summary fragment of the model's reasoning (thought summaries on only). Never answer text.
+    thought: str = ""
+    tool_calls: list[ToolCallRequest] = Field(default_factory=list)
     model_id: str
     alias_used: str
     was_fallback: bool = False
     usage: TokenUsage | None = None
     is_final: bool = False
     finish_reason: str | None = None
+    # Set only on a notice chunk (empty text) and only when the caller asked for progress events.
+    progress: GatewayProgressEvent | None = None
 
 
 class ToolDefinition(BaseModel):
@@ -115,16 +157,6 @@ class ToolDefinition(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)
-
-
-class ToolCallRequest(BaseModel):
-    """Invocation request for a specific tool call returned by the model."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    call_id: str
-    tool_name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolGatewayResponse(BaseModel):

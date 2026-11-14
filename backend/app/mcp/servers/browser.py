@@ -151,7 +151,11 @@ class BrowserToolHandler:
     ) -> None:
         self.runner = runner or BrowserRunner()
         self.registry = registry or register_browser_tools()
-        self.secret_key = secret_key or "maya-default-secret-key-for-local-testing-hs256!"
+        # Approval tokens are verified with this key: there is no built-in default, because a
+        # key that is public in the source would let anyone forge an approval.
+        if not secret_key or not secret_key.strip():
+            raise ValueError("BrowserToolHandler requires an explicit approval-token signing key")
+        self.secret_key = secret_key
 
     async def dispatch_tool_call(
         self,

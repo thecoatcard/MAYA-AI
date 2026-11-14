@@ -19,6 +19,8 @@ IRREVERSIBLE_TOOLS = frozenset(
     {
         "gmail_send",
         "email_send",
+        "mail_send",
+        "mail_reply",
         "slack_post_message",
         "stripe_charge",
     }

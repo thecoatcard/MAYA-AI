@@ -1,9 +1,11 @@
 "use client";
 
-import { LogOut, Sparkles, UserCheck } from "lucide-react";
+import { LogOut } from "lucide-react";
 import Link from "next/link";
 import React, { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { Button } from "../ui/Button";
+import { Skeleton } from "../ui/Feedback";
 import { UnifiedAuthForm, type AuthStep } from "./UnifiedAuthForm";
 
 export interface AuthViewProps {
@@ -30,13 +32,12 @@ export function AuthView({
   if (isLoading) {
     return (
       <div
-        className="flex flex-col items-center justify-center py-10 gap-4 animate-pulse"
+        className="mx-auto grid w-full max-w-md min-w-0 gap-3"
         aria-busy="true"
         aria-label="Checking authentication state"
       >
-        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10" />
-        <div className="w-48 h-4 rounded-lg bg-white/5" />
-        <div className="w-32 h-3 rounded-lg bg-white/5" />
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton lines={3} />
       </div>
     );
   }
@@ -49,45 +50,36 @@ export function AuthView({
         : roleOrUser;
 
     return (
-      <div className="flex flex-col items-center text-center">
-        <div className="p-3.5 rounded-2xl bg-teal-500/10 border border-teal-500/30 text-teal-400 mb-5 shadow-lg shadow-teal-500/10">
-          <UserCheck className="w-8 h-8" />
-        </div>
-
-        <h1 className="text-xl font-bold tracking-tight text-white mb-2">
+      <div className="mx-auto grid w-full max-w-md min-w-0 gap-4">
+        <h1 className="m-0 text-maya-title font-semibold">
           Active Session Found
         </h1>
 
-        <p className="text-sm text-zinc-300 leading-relaxed mb-6">
+        <p className="m-0 text-maya-small text-maya-secondary [overflow-wrap:anywhere]">
           You are already signed in as{" "}
-          <span className="font-semibold text-teal-400 font-mono">
+          <span className="font-mono font-medium text-maya-text">
             {roleUserDetail}
           </span>
           .
         </p>
 
-        <div className="w-full flex flex-col gap-3">
+        <div className="grid gap-3">
           <Link
             href="/workspace"
-            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-zinc-950 font-bold text-sm shadow-lg shadow-teal-500/25 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            className="maya-button motion-interactive motion-press inline-flex min-h-9 w-full items-center justify-center rounded-maya-md border border-maya-accent bg-maya-accent px-4 text-maya-small font-medium text-maya-accent-text hover:border-maya-accent-hover hover:bg-maya-accent-hover pointer-coarse:min-h-11"
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Continue to Workspace</span>
+            Continue to Workspace
           </Link>
 
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            className="w-full"
             onClick={handleSignOut}
             disabled={signingOut}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-medium text-xs transition-colors disabled:opacity-50"
+            leftIcon={<LogOut size={14} aria-hidden="true" />}
           >
-            <LogOut className="w-3.5 h-3.5 text-zinc-400" />
-            <span>
-              {signingOut
-                ? "Signing out..."
-                : "Sign in with a different account"}
-            </span>
-          </button>
+            {signingOut ? "Signing out..." : "Sign in with a different account"}
+          </Button>
         </div>
       </div>
     );

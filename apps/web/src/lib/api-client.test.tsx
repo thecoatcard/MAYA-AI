@@ -12,7 +12,6 @@ import {
 } from "../components/chat/chat-test-utils";
 import {
   ApiError,
-  CHAT_MAX_MESSAGE_CHARS,
   DEFAULT_API_BASE_URL,
   NetworkError,
   countCodePoints,
@@ -207,6 +206,169 @@ describe("streamChatMessage events", () => {
         },
       },
     ]);
+  });
+
+  it("decodes task.created and ignores a malformed one", () => {
+    expect(
+      decodeChatEvent({
+        event: "task.created",
+        data: '{"task_id":"t1","title":"Do it","status":"executing"}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "task.created",
+      taskId: "t1",
+      title: "Do it",
+      status: "executing",
+      promoted: false,
+    });
+    expect(
+      decodeChatEvent({
+        event: "task.created",
+        data: '{"title":"x"}',
+        id: null,
+        retry: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("decodes promoted task.created", () => {
+    expect(
+      decodeChatEvent({
+        event: "task.created",
+        data: '{"task_id":"t2","title":"Long","status":"executing","promoted":true}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "task.created",
+      taskId: "t2",
+      title: "Long",
+      status: "executing",
+      promoted: true,
+    });
+  });
+
+  it("decodes tool.started and tool.finished and ignores malformed ones", () => {
+    expect(
+      decodeChatEvent({
+        event: "tool.started",
+        data: '{"call_id":"c1","name":"create_file_inline"}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "tool.started",
+      callId: "c1",
+      name: "create_file_inline",
+    });
+    expect(
+      decodeChatEvent({
+        event: "tool.finished",
+        data: '{"call_id":"c1","name":"create_file_inline","status":"skipped"}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "tool.finished",
+      callId: "c1",
+      name: "create_file_inline",
+      status: "skipped",
+    });
+    expect(
+      decodeChatEvent({
+        event: "tool.started",
+        data: '{"name":"create_file_inline"}',
+        id: null,
+        retry: null,
+      }),
+    ).toBeNull();
+    expect(
+      decodeChatEvent({
+        event: "tool.finished",
+        data: '{"call_id":"c1","name":"x","status":"maybe"}',
+        id: null,
+        retry: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("decodes file.created into a file card and ignores a malformed one", () => {
+    expect(
+      decodeChatEvent({
+        event: "file.created",
+        data: '{"file_id":"f1","name":"notes.md","file_type":"md","mime_type":"text/markdown","size_bytes":120,"sha256":"abc","action":"created","source_upload_id":null}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "file.created",
+      file: {
+        fileId: "f1",
+        name: "notes.md",
+        fileType: "md",
+        mimeType: "text/markdown",
+        sizeBytes: 120,
+        action: "created",
+        sourceUploadId: null,
+      },
+    });
+    expect(
+      decodeChatEvent({
+        event: "file.created",
+        data: '{"file_id":"f1","name":"notes.md","size_bytes":120,"action":"deleted"}',
+        id: null,
+        retry: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("decodes memory.saved and ignores a malformed one", () => {
+    expect(
+      decodeChatEvent({
+        event: "memory.saved",
+        data: '{"memory_id":"m1","text":"Favourite colour is blue","updated":true}',
+        id: null,
+        retry: null,
+      }),
+    ).toEqual({
+      type: "memory.saved",
+      memoryId: "m1",
+      text: "Favourite colour is blue",
+      updated: true,
+    });
+    for (const data of ['{"text":"x"}', '{"memory_id":"m1"}', "not json"]) {
+      expect(
+        decodeChatEvent({ event: "memory.saved", data, id: null, retry: null }),
+      ).toBeNull();
+    }
+  });
+
+  it("decodes agent.draft and ignores a malformed one", () => {
+    const data =
+      '{"name":"weekly-reporter","description":"d","path":".maya/agents/weekly-reporter.md","content":"---","capabilities":["read_files"],"instructions":"i"}';
+    expect(
+      decodeChatEvent({ event: "agent.draft", data, id: null, retry: null }),
+    ).toEqual({
+      type: "agent.draft",
+      name: "weekly-reporter",
+      description: "d",
+      path: ".maya/agents/weekly-reporter.md",
+      content: "---",
+      capabilities: ["read_files"],
+      instructions: "i",
+    });
+    for (const bad of ['{"name":"x"}', '{"path":"p","content":"c"}', "nope"]) {
+      expect(
+        decodeChatEvent({
+          event: "agent.draft",
+          data: bad,
+          id: null,
+          retry: null,
+        }),
+      ).toBeNull();
+    }
   });
 
   it("ignores event names it does not know (for example Phase 05 task events)", async () => {
@@ -692,11 +854,9 @@ describe("content validation and keys", () => {
   it("applies the documented content rules", () => {
     expect(validateChatContent("")).toBe("empty");
     expect(validateChatContent("   \n")).toBe("empty");
-    expect(validateChatContent("a".repeat(CHAT_MAX_MESSAGE_CHARS))).toBeNull();
-    expect(validateChatContent("a".repeat(CHAT_MAX_MESSAGE_CHARS + 1))).toBe(
-      "too_long",
-    );
-    expect(validateChatContent("😀".repeat(CHAT_MAX_MESSAGE_CHARS))).toBeNull();
+    expect(validateChatContent("a".repeat(50_000))).toBeNull();
+    expect(validateChatContent("a".repeat(1_000_000))).toBeNull();
+    expect(validateChatContent("😀".repeat(20_000))).toBeNull();
     expect(validateChatContent("line one\nline two\tTabbed")).toBeNull();
     expect(validateChatContent("bad\u0000char")).toBe("invalid_characters");
     expect(validateChatContent("bad\u001bescape")).toBe("invalid_characters");

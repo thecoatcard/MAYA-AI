@@ -4,10 +4,11 @@ import pytest
 from pydantic import SecretStr
 
 from app.core.config import Settings
-from app.gateway.exceptions import GatewayConfigurationError, GatewayStartupError
+from app.gateway.exceptions import GatewayConfigurationError
 from app.gateway.registry import ModelRegistry, ModelSpec, build_default_registry
 from app.gateway.startup import verify_gateway_at_startup
 from tests.support.fake_gemini_client import FakeGeminiClient
+from tests.support.models import HEAVY, LITE
 
 
 def make_startup_settings(**kwargs: object) -> Settings:
@@ -29,7 +30,7 @@ async def test_startup_offline_validation_catches_invalid_configuration() -> Non
     specs = {
         "broken": ModelSpec(
             alias="broken",
-            model_id="gemini-3.8-flash",
+            model_id="gemini-4-hydrogen",
             fallback_alias="non_existent",
             context_input_limit=1000,
             context_output_limit=1000,
@@ -77,25 +78,25 @@ async def test_startup_remote_check_success_when_models_present() -> None:
     settings = make_startup_settings(gemini_verify_models_on_startup=True)
     fake_client = FakeGeminiClient()
 
-    # Fake client has: gemini-3.8-flash, gemini-4-argon, gemini-3.5-flash-lite, gemini-embedding-2
+    # The fake client lists every model the default registry verifies at startup.
     await verify_gateway_at_startup(registry, settings, client=fake_client)
     assert any(c["method"] == "list" for c in fake_client.aio.models.calls)
 
 
 @pytest.mark.asyncio
-async def test_startup_remote_check_fails_when_required_model_missing() -> None:
+async def test_startup_remote_check_marks_missing_model_unavailable() -> None:
     registry = build_default_registry()
     settings = make_startup_settings(gemini_verify_models_on_startup=True)
     fake_client = FakeGeminiClient()
 
-    # Remove gemini-3.8-flash (orchestrator model)
+    # Remove the orchestrator model from the list
     fake_client.aio.models.available_models = [
-        "models/gemini-4-argon",
-        "models/gemini-3.5-flash-lite",
+        f"models/{HEAVY}",
+        f"models/{LITE}",
     ]
 
-    with pytest.raises(
-        GatewayStartupError,
-        match="required model 'gemini-3.8-flash' for alias 'orchestrator' was not found",
-    ):
-        await verify_gateway_at_startup(registry, settings, client=fake_client)
+    # Deliberate change: a missing model is logged and marked unavailable (fallback chains skip
+    # it); it no longer stops the application from starting.
+    await verify_gateway_at_startup(registry, settings, client=fake_client)
+    assert registry.is_unavailable("orchestrator")
+    assert registry.candidate_chain("heavy") == ["heavy", "lite"]

@@ -1,6 +1,6 @@
 # UI/UX standards: look, feel and motion
 
-- **Status:** Direction A — Quiet Instrument chosen by the owner on 2026-11-06. These standards remain the review gate for all web UI.
+- **Status:** Direction C "Console" chosen by the owner on 2026-11-09; it supersedes Direction A (Quiet Instrument, 2026-11-06). Dark first, ultramarine accent, tiled panes, IBM Plex. The tokens, themes, fonts and primitives are in [UI_DESIGN_SYSTEM.md](UI_DESIGN_SYSTEM.md). These standards remain the review gate for all web UI.
 - **Applies to:** every screen in `apps/web`, from the first sign-in page to the Phase 14 surfaces.
 - **Not in this document:** mock-ups, final colours or a chosen typeface. None exist yet. The first UI task produces a design brief and the owner picks a direction (see "Process").
 
@@ -35,11 +35,11 @@ Anti-goals: playful or cartoonish, neon "hacker" styling, bland corporate dashbo
 
 Nothing is styled with a raw value inside a component. Tokens come first and live in one place (Tailwind CSS v4 theme variables in `apps/web/src/app/globals.css` or a file it imports).
 
-- **Colour roles, not colours:** background, surface, surface-raised, border, text, text-muted, accent, accent-text, and the status roles in section 4. Light and dark themes are both defined from the start, and the theme follows the system with a manual switch.
+- **Colour roles, not colours:** background, surface, surface-raised, border, text, text-muted, accent, accent-text, and the status roles in section 4. There are exactly two themes, dark (default) and light, both defined from the start. There is no system mode: the choice is one icon toggle, stored per device, default dark.
 - **Type scale:** a fixed set of sizes with matched line heights and weights (display, title, heading, body, small, caption, mono).
 - **Spacing:** one scale on a 4 px base. **Radius:** two or three values, used consistently. **Elevation:** three levels at most. **Z-index:** a named list.
 - **Motion tokens:** durations and easings from section 6.
-- Starting point only, not a mandate: the foundation page uses a deep navy background and a teal accent with a visible focus ring. The design brief may keep, refine or replace them.
+- Palette: the Console tokens (near-black dark theme, ultramarine accent) in UI_DESIGN_SYSTEM.md replace the earlier navy and teal starting point.
 
 ## 4. Colour and state
 
@@ -92,22 +92,45 @@ Motion is a language, not a layer of sparkle. It must do at least one of these j
 
 Each state also shows a text label for assistive technology and for reduced motion. The orb is a visual of the real audio state and never fakes activity when nothing is happening.
 
+**Voice scopes and the mini mic switch (owner request 2026-11-13).** The title-bar voice chip is the **master** voice: one session owned by `ConversationRuntime` (mounted above the routes), so it survives conversation switches, Tasks/Artifacts/Settings and sidebar changes, and it tracks all tasks. The composer mic is the **conversation-bound** voice: it survives leaving to Tasks and returning to the same conversation, and ends with a short notice when a different conversation (or a new one) is opened. Master wins: while it is on, the composer mic reads "Voice is on (all conversations)" and starts nothing. Next to the chip a compact icon-only switch ("Mute microphone" / "Unmute microphone", `aria-pressed`, tooltip with state, MicOff icon plus the text "Muted" on the chip) turns the user's own microphone off without ending the session or the spoken updates; the choice is remembered per device (`localStorage`, try/catch).
+
+**Soft-native feel (owner request 2026-11-12).** The tokens live in `globals.css`; the recipes in `src/app/ui-surfaces.css`.
+
+- **Radius:** `--maya-radius-sm/md/lg/xl/full` = 8 / 12 / 18 / 24 px / pill (chips, controls, cards, sheets). Squircle corners via `corner-shape` where supported.
+- **Elevation:** `--maya-shadow-1/2/3` and `--maya-shadow-lift` are layered (hairline ring, ambient, key light); dark mode adds a top highlight.
+- **Vibrancy:** `--maya-vib-*` translucent colours plus blur and saturate, used only by `.maya-vib-bar/side/pop/sheet/scrim` (title bar, status bar, sidebar, popovers, sheets). Blur sits in `ui-surfaces.css` behind `@supports`; the opaque surface is the fallback and what `prefers-reduced-transparency` and forced colours get. Contrast is checked on the translucent colour blended over the surfaces behind it. This is a deliberate, owner-approved exception to the "blur on every card" ban: cards stay flat.
+- **Motion tokens (current values):** instant 90, fast 160, base 240, slow 360 ms; `--maya-ease-spring`, `--maya-ease-out-soft`, `--maya-ease-press`, `--maya-ease-overshoot` (switch thumb only); `--maya-stagger` 32 ms.
+- **State recipe:** hover tints (`--maya-hover`) and lifts 1 px (`.motion-lift`), pressed tints (`--maya-pressed`) and scales to 0.98 (`.motion-press`), selected uses `--maya-accent-soft` plus an accent bar (`.maya-row`), icon nudge `.maya-nudge-icon`, row actions on hover or focus (`.maya-reveal` with `data-reveal`). Movement is removed under reduced motion; colour changes stay.
+- **Entrances:** `.motion-page` (route change, fade plus 4 px) and `.motion-stagger` (first 8 children, 32 ms apart). Sheets scale from 0.97 (`.maya-sheet`), toasts slide in (`.maya-toast`).
+- **Sidebar fold:** the sidebar slides out with transform and opacity while the content gutter slides by the sidebar width (`data-fold`); width and margins are never animated.
+- **Icons:** `Icon` wrapper, sizes 14 / 16 / 20, stroke width from `--maya-icon-stroke` (1.75), decorative icons are `aria-hidden`.
+- **New components:** `Switch`, `SegmentedControl`, `Tabs`, `Select`, `Sheet`, `Progress` (see the design-system page).
+
+**Living empty state (conversation, owner request 2026-11-13).** The empty thread shows the startup-screen ring mark, three faint shuttle lanes with 28 tiny dots drifting along them (laps of 70 to 130 s, a few pixels of pointer parallax) and a static accent wash behind the heading. The continuous motion is one small canvas (`LivingBackdrop`), not CSS, so it needs no infinite keyframes: it draws at 30 fps, stops while the tab is hidden or the canvas is off screen, draws one static frame under `prefers-reduced-motion`, and is unmounted (loop cancelled) when a message arrives, the user types, or voice goes live. It is decoration: `aria-hidden`, pointer-transparent, behind the text, colours read from tokens (`--maya-accent`, `--maya-text-muted`). Heading, hint and chips enter with the shared `.motion-stagger`. Suggestion chips are real buttons that only fill the draft and focus the composer; they never send. Tests: `EmptyState.test.tsx`.
+
 **Where motion is restricted:** the approval centre. The exact payload (email, diff, property change) renders at once, complete and static. Nothing moves after render, so a button cannot shift under the pointer. Decorative animation never sits on or near Approve, Reject or step-up controls.
 
 ## 7. Typography
 
-- One family chosen for the brand (a second for code only), self-hosted. No external font service or CDN: the web app deliberately contacts nothing external today. The owner chose `system-ui` on 2026-11-06 as an explicit exception to the system-stack anti-goal.
-- Body at 16 px or larger with 1.5 line height; measure of 60 to 75 characters for reading text.
+- One family chosen for the brand (a second for code only), self-hosted. No external font service or CDN: the web app deliberately contacts nothing external today. The `system-ui` exception of 2026-11-06 is replaced by the IBM Plex decision of 2026-11-09 (below).
+- Body and form text at 16 px or larger with 1.5 line height; measure of 60 to 75 characters for reading text. **Chrome text (labels, nav, meta, timestamps) is never below 13 px; mono labels are never below 12 px and are uppercase only with letter-spacing.** Sizes are rem tokens so 200 percent zoom and OS text scaling work.
+- Owner-approved faces (2026-11-09): IBM Plex Sans, IBM Plex Mono and IBM Plex Sans Devanagari, self-hosted (SIL OFL 1.1, licences kept with the files), with a system fallback stack.
 - Numbers in tables, costs, timings and diffs use tabular figures. Code and payloads use a monospace face with clear distinction between similar characters.
 
 ## 8. Trust surfaces
 
 - Show the exact payload that will run, never a model's summary in its place. Truncation always has an explicit "show all".
 - Irreversible or high-impact actions need deliberate friction (clear wording, a distinct confirmation, the step-up prompt for RESTRICTED actions). Approve is never styled to invite accidental clicks and is not the default focus for RESTRICTED actions.
-- Voice cannot approve anything. The interface says so where voice is active.
+- Voice cannot approve anything. The interface says so where it matters: on the inline approval card while voice is on, and once as a notice when voice connects. There is no permanent voice panel; the composer waveform button is the single voice toggle (start/stop, states as icon + text + aria, never colour or motion alone) with a mic mute switch beside it only while voice is on. Per-message composer modes (Deep research, brain icon) are icon buttons with `aria-pressed`, a visible on-state and a dismissible chip, and reset after send.
+- The question card (`AskUserCard`, MAYA asking a choice or a missing detail) is never an approval and never looks like one: accent-soft tint and a question icon (approvals are warning-toned), the words "Not an approval", plain-text options (model text is never Markdown or a link), numbered options with keys 1 to 9, Up/Down, Enter to submit and Esc to skip, visible Submit and Skip buttons, a polite live announcement, and no focus taken from a composer that has text. Its answer is only a chat message; it can approve nothing.
+- The schedule draft card (`ScheduleDraftCard`) and the "Scheduled updates" notice follow the same rule as the question card: info-toned (calendar icon), never warning-toned like approvals, no animation at all. Creating a schedule is click-only: the card says "Not created until you click", has no key shortcut and no voice path, and announces its result in a polite live region. Reading an update aloud starts the voice listen-only: the microphone is never requested, the notice says "Your mic is muted" with an Unmute button, and nothing starts by itself when the browser blocks audio or microphone permission is denied. The wake-PC run mode is disabled with a plain reason outside the desktop app and asks first.
 - Errors are specific, calm and actionable. They never expose stack traces, secrets or another user's data.
 
 ## 9. Accessibility floor
+
+### Work log under a reply
+
+The step list (`ProgressSteps`, shared with the Task card) has a header that names the current phase in plain words (mapped in `lib/work-log.ts`, fallback "Working on it"), rows of one 14 px outline icon, a label and a muted "· detail", and while live one accent status line below a thin divider ("Searching the web for 2s …"; static text, only the phase is a polite live region, never the seconds). Finished, it folds to "Worked for X · N steps". Housekeeping steps and raw internal ids are hidden unless they failed; times under one second are never shown; figures that are not real are left out. Row motion is one short opacity and transform settle with a static equivalent under reduced motion; nothing animates near approval or question cards.
 
 WCAG 2.2 AA. Full keyboard operation with a visible focus indicator on every interactive element; logical focus order and focus management for drawers and modals; targets at least 44 px on touch layouts; semantic landmarks and headings; live regions for task progress and the orb state; text alternatives for non-text content; no information by colour or motion alone; zoom to 200 percent without loss.
 
@@ -131,6 +154,18 @@ The UI/UX role (`governance/roles/ui-ux-designer.md`) leads steps 1 to 4 and rev
 Governance still applies. Needing approval (Level 3): any new package (motion library, component primitives, table, PDF or graph viewers, font packages, accessibility test tooling), third-party icons, images or fonts (licence recorded), any external service, analytics or CDN. Phase 14 already names React Flow or SVG for the graph, TanStack Table and `pdfjs-dist`; those still need the dependency workflow. Ship nothing that sends data off the machine, and keep a content security policy compatible with the result.
 
 Performance budgets are **proposals**, to be confirmed by the owner with the brief: a fast first load on a typical laptop connection, animation libraries code-split off the critical path, and a stated JavaScript budget per route recorded in the frontend architecture document.
+
+## Context menus
+
+One component, `components/ui/ContextMenu.tsx` (`useContextMenu`, `MenuSurface`, `MenuButton`). Every right-click menu in the app is built on it; do not hand-roll another.
+
+- **Ways in (all open the same menu):** right-click, the Menu key or Shift+F10 on the focused element, a 450 ms long press on touch, and a visible "..." button (`aria-haspopup="menu"`, shown on hover and focus, always shown on touch). Right-click is never the only way.
+- **Native menu:** suppressed only on surfaces that have a menu, and only when the menu has entries. Text inputs and textareas keep the browser menu (Cut, Copy, Paste); the composer opts in (`allowEditable`) because it adds Attach and Clear draft. Selected text in a reply gets the selection menu.
+- **Roles and keys:** `role="menu"`, `menuitem`, `menuitemcheckbox`, `separator`, labelled `group`. Focus moves to the first item; arrows, Home, End and typeahead move; Enter or Space acts; ArrowRight opens and ArrowLeft closes the one allowed submenu level; Esc, Tab, a press outside, scroll, resize, window blur and a route change close it; focus returns to the trigger.
+- **Placement and look:** portal to `document.body`, flips and clamps to the viewport, one open at a time, vibrancy surface (`maya-popover maya-vib-pop`), tokens only, lucide icons at 14 px, scale and fade within `--maya-dur-instant`, no animation under reduced motion.
+- **Content rules:** items that do not apply are disabled with a plain reason, or hidden when the server does not offer them (404 or 501). Destructive items use the danger style and open `ConfirmDeleteDialog`; the menu never deletes by itself. Menus run no network call until an item is chosen, and are built from the data of the surface that opened them.
+- **Never in a menu:** Approve. Approval cards offer Copy exact payload and Reject only; approving stays on the button.
+- **Actions that send chat:** a menu item sends a short natural-language chat message (with `source_message_id` when it acts on a reply). It never runs a tool itself.
 
 ## 13. Review gate (pass or fail)
 

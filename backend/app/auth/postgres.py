@@ -29,10 +29,17 @@ FIND_BY_USERNAME = text(
     "SELECT user_id, workspace_id, username, email, email_verified_at, role, hashed_password, "
     "password_changed_at FROM public.auth_find_account_by_username(:value)"
 )
+PROFILE_OF_USER = text("SELECT email, full_name FROM users WHERE id = :user_id")
+
 FIND_BY_EMAIL = text(
     "SELECT user_id, workspace_id, username, email, email_verified_at, role "
     "FROM public.auth_find_account_by_email(:value)"
 )
+
+# Row-level security hides every tenant from an unscoped connection, so "is the database empty"
+# can only be answered by a SECURITY DEFINER function (added by a migration; ADR-0014). Until it
+# exists the call fails and the local-owner bootstrap stays unavailable (fail closed).
+ANY_ACCOUNT_EXISTS = text("SELECT public.auth_any_account_exists()")
 
 INSERT_WORKSPACE = text(
     "INSERT INTO workspaces (id, name, slug, created_at) VALUES (:id, :name, :slug, :now) "
@@ -156,6 +163,9 @@ class PostgresAuthTransaction:
     async def find_account_by_email(self, email: str) -> AccountIdentity | None:
         row = (await self._connection.execute(FIND_BY_EMAIL, {"value": email})).first()
         return None if row is None else _identity(row)
+
+    async def any_account_exists(self) -> bool:
+        return bool((await self._connection.execute(ANY_ACCOUNT_EXISTS)).scalar_one())
 
     async def create_account(
         self,
@@ -310,6 +320,11 @@ class PostgresAuthTransaction:
             },
         )
         return result.first() is not None
+
+    async def get_profile(self, user_id: UUID) -> tuple[str, str] | None:
+        # Row-level security scopes this to the transaction's workspace: the caller's own tenant.
+        row = (await self._connection.execute(PROFILE_OF_USER, {"user_id": user_id})).first()
+        return None if row is None else (str(row.email), str(row.full_name))
 
     async def get_live_session(
         self, session_id: UUID, user_id: UUID, now: datetime

@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import React, { forwardRef, useState } from "react";
+import React, { forwardRef } from "react";
 
 export type GlassButtonVariant =
   "primary" | "secondary" | "outline" | "ghost" | "danger";
@@ -18,30 +18,23 @@ export interface GlassButtonProps extends React.ButtonHTMLAttributes<HTMLButtonE
   readonly ripple?: boolean;
 }
 
-interface RipplePoint {
-  readonly id: number;
-  readonly x: number;
-  readonly y: number;
-  readonly size: number;
-}
-
 const variantStyles: Record<GlassButtonVariant, string> = {
   primary:
-    "bg-teal-500/20 hover:bg-teal-500/30 active:bg-teal-500/35 border border-teal-500/40 text-teal-200 shadow-sm shadow-teal-500/10 focus-visible:ring-teal-400 focus-visible:border-teal-400",
+    "bg-maya-accent hover:bg-maya-accent-hover border border-maya-accent text-maya-accent-text",
   secondary:
-    "bg-white/5 hover:bg-white/10 active:bg-white/15 border border-white/10 text-zinc-200 hover:text-white shadow-sm shadow-black/20 focus-visible:ring-zinc-400",
+    "bg-maya-raised hover:bg-maya-hover border border-maya-border-strong text-maya-text",
   outline:
-    "bg-transparent hover:bg-white/5 active:bg-white/10 border border-white/20 text-zinc-300 hover:text-white focus-visible:ring-zinc-400",
+    "bg-transparent hover:bg-maya-hover border border-maya-control-border text-maya-text",
   ghost:
-    "bg-transparent hover:bg-white/5 active:bg-white/10 border border-transparent text-zinc-400 hover:text-zinc-100 focus-visible:ring-zinc-400",
+    "bg-transparent hover:bg-maya-hover border border-transparent text-maya-muted hover:text-maya-text",
   danger:
-    "bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-500/30 border border-rose-500/35 text-rose-300 shadow-sm shadow-rose-500/10 focus-visible:ring-rose-400",
+    "bg-maya-danger-soft hover:bg-maya-danger-soft border border-maya-danger text-maya-danger",
 };
 
 const sizeStyles: Record<GlassButtonSize, string> = {
-  sm: "text-xs px-2.5 py-1.5 h-8 gap-1.5 rounded-lg",
-  md: "text-xs md:text-sm px-4 py-2 h-10 gap-2 rounded-lg",
-  lg: "text-sm md:text-base px-5 py-2.5 h-12 gap-2.5 rounded-xl",
+  sm: "text-xs px-2.5 py-1.5 h-8 gap-1.5 rounded-maya-md",
+  md: "text-xs md:text-sm px-4 py-2 h-10 gap-2 rounded-maya-md",
+  lg: "text-sm md:text-base px-5 py-2.5 h-12 gap-2.5 rounded-maya-md",
 };
 
 const iconSizes: Record<GlassButtonSize, string> = {
@@ -51,8 +44,8 @@ const iconSizes: Record<GlassButtonSize, string> = {
 };
 
 /**
- * GlassButton - High-polish glassmorphic action button with multiple variants,
- * size options, tactile ripple effect, loading indicator, and icon slots.
+ * GlassButton: token-backed action button with variants, sizes, loading state
+ * and icon slots. The `ripple` prop is accepted for compatibility and ignored.
  */
 export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(
   function GlassButton(
@@ -63,7 +56,8 @@ export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(
       loadingText,
       leftIcon,
       rightIcon,
-      ripple = true,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accepted for compatibility, intentionally ignored
+      ripple: _ripple = true,
       disabled = false,
       className = "",
       onClick,
@@ -72,29 +66,8 @@ export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(
     },
     ref,
   ) {
-    const [ripples, setRipples] = useState<readonly RipplePoint[]>([]);
-
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
       if (disabled || loading) return;
-
-      if (ripple) {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const rippleSize = Math.max(rect.width, rect.height) * 2;
-        const x = e.clientX - rect.left - rippleSize / 2;
-        const y = e.clientY - rect.top - rippleSize / 2;
-        const newRipple: RipplePoint = {
-          id: Date.now(),
-          x,
-          y,
-          size: rippleSize,
-        };
-
-        setRipples((prev) => [...prev, newRipple]);
-        setTimeout(() => {
-          setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
-        }, 500);
-      }
-
       onClick?.(e);
     };
 
@@ -110,27 +83,13 @@ export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(
         disabled={isDisabled}
         aria-busy={loading}
         onClick={handleClick}
-        className={`relative inline-flex items-center justify-center font-medium select-none backdrop-blur-md overflow-hidden transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none ${variantClass} ${sizeClass} ${className}`.trim()}
+        className={`relative inline-flex items-center justify-center font-medium select-none overflow-hidden transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-maya-focus disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none ${variantClass} ${sizeClass} ${className}`.trim()}
         {...props}
       >
-        {/* Ripple effect layer */}
-        {ripples.map((r) => (
-          <span
-            key={r.id}
-            className="absolute rounded-full bg-white/20 pointer-events-none animate-ping motion-reduce:hidden"
-            style={{
-              left: r.x,
-              top: r.y,
-              width: r.size,
-              height: r.size,
-            }}
-          />
-        ))}
-
         {loading ? (
           <>
             <Loader2
-              className={`${spinnerClass} animate-spin shrink-0`}
+              className={`${spinnerClass} animate-spin motion-reduce:animate-none shrink-0`}
               aria-hidden="true"
             />
             <span>{loadingText ?? children}</span>

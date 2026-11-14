@@ -1,39 +1,28 @@
 import React from "react";
-import { PublicFooter } from "../layout/PublicFooter";
-import { PublicNav } from "../layout/PublicNav";
 
 export interface AuthPageLayoutProps {
   children: React.ReactNode;
   maxWidth?: string;
 }
 
+/**
+ * Stand-alone frame for the auth pages (login, register, forgot/reset password, verify): one calm
+ * card centred in the window on the page background. Tokens only, so it follows the chosen theme.
+ * The card sizes to its content; it never stretches to the window height.
+ */
 export function AuthPageLayout({
   children,
   maxWidth = "max-w-md",
 }: AuthPageLayoutProps): React.JSX.Element {
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100 font-sans relative overflow-x-hidden selection:bg-teal-500/30 selection:text-teal-200">
-      {/* Ambient background glow effects */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-40 right-1/4 w-[600px] h-[600px] bg-teal-500/10 rounded-full blur-[140px]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-1/4 left-1/6 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[130px]"
-      />
-
-      <PublicNav />
-
-      <main className="flex-1 flex items-center justify-center px-4 sm:px-6 py-12 sm:py-16 relative z-10 w-full">
+    <main className="flex min-h-dvh min-w-0 flex-col bg-maya-bg p-4 text-maya-text sm:p-6">
+      <div className="m-auto w-full min-w-0 py-6">
         <div
-          className={`w-full ${maxWidth} rounded-2xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl p-6 sm:p-8 shadow-2xl shadow-black/50 relative shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]`}
+          className={`mx-auto w-full min-w-0 ${maxWidth} rounded-maya-lg border border-maya-border bg-maya-pane p-4 sm:p-6`}
         >
           {children}
         </div>
-      </main>
-
-      <PublicFooter />
-    </div>
+      </div>
+    </main>
   );
 }

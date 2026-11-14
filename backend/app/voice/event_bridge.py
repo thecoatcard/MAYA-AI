@@ -2,7 +2,8 @@
 
 Subscribes to tenant Redis task events, filters for the session's active tasks,
 and translates task lifecycle transitions into spoken natural language announcements
-that can be injected into Gemini Live via send_client_content.
+that can be injected into Gemini Live via send_client_content. Task text that reaches the model
+is sanitised (it can contain tool output, which is untrusted).
 """
 
 from __future__ import annotations
@@ -21,9 +22,12 @@ from app.tasks.events import (
     TaskEventType,
     get_event_channel,
 )
+from app.voice.gemini_live import sanitize_injected_text
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
+
+    from app.voice.task_watch import TaskAnnouncer
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,39 @@ class SpokenTaskAnnouncement:
     event_type: str
     spoken_text: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    payload: dict[str, Any] = field(default_factory=dict)
+    # Only milestones are spoken; every event is still forwarded to the client as TASK_EVENT.
+    speak: bool = True
+
+
+def _clean(value: Any, default: str) -> str:
+    cleaned = sanitize_injected_text(str(value)) if value else ""
+    return cleaned or default
+
+
+# Milestones only: a document, an email or an image that is ready. Other steps are not spoken.
+_SPOKEN_STEP_KINDS = frozenset({"render", "email", "image"})
+
+
+def _spoken_step(payload: dict[str, Any]) -> str | None:
+    """One short sentence for a finished milestone step of a task, or None to stay silent."""
+    step = payload.get("step")
+    if not isinstance(step, dict) or step.get("state") != "done":
+        return None
+    if step.get("kind") not in _SPOKEN_STEP_KINDS:
+        return None
+    return f"Finished: {_clean(step.get('label'), 'a step')}."
+
+
+def _should_speak(event_type: str, payload: dict[str, Any]) -> bool:
+    ev = str(event_type).lower()
+    if ev == str(TaskEventType.SUBTASK_DISPATCHED).lower():
+        return False
+    if ev == str(TaskEventType.TASK_PROGRESS).lower():
+        return _spoken_step(payload) is not None
+    if ev == str(TaskEventType.SUBTASK_STATUS_CHANGED).lower():
+        return str(payload.get("status", "")).lower() in ("completed", "failed")
+    return True
 
 
 def format_spoken_task_update(event_type: str | TaskEventType, payload: dict[str, Any]) -> str:
@@ -46,36 +83,46 @@ def format_spoken_task_update(event_type: str | TaskEventType, payload: dict[str
         str(TaskEventType.TASK_PLAN_CREATED).lower(),
         str(TaskEventType.PLANNING_STARTED).lower(),
     ):
-        steps = payload.get("subtask_count", payload.get("steps_count", 0))
-        intent = payload.get("intent", payload.get("instruction", "your request"))
+        steps = payload.get(
+            "subtasks_count", payload.get("subtask_count", payload.get("steps_count", 0))
+        )
+        intent = _clean(payload.get("intent", payload.get("instruction")), "your request")
         return f"I've created a plan with {steps} steps for: {intent}."
 
     if ev_type == str(TaskEventType.SUBTASK_DISPATCHED).lower():
-        desc = payload.get("description", payload.get("title", "the next action"))
+        desc = _clean(payload.get("description", payload.get("title")), "the next action")
         return f"Starting step: {desc}."
 
     if ev_type == str(TaskEventType.SUBTASK_STATUS_CHANGED).lower():
-        desc = payload.get("description", payload.get("title", "Step"))
-        status = payload.get("status", "")
+        desc = _clean(payload.get("description", payload.get("title")), "a step")
+        status = _clean(payload.get("status"), "")
         if status == "completed":
-            return f"Step completed: {desc}."
+            # Never the vague "a step": a finished step is spoken only by the TaskAnnouncer, with
+            # its real title. Without a title there is nothing exact to say.
+            known = _clean(payload.get("description", payload.get("title")), "")
+            return f"Step completed: {known}." if known else ""
         return f"Step status: {status} for {desc}."
 
     if ev_type in (
         str(TaskEventType.TASK_PAUSED_APPROVAL).lower(),
         str(TaskEventType.AWAITING_APPROVAL).lower(),
     ):
-        action = payload.get("action_description", payload.get("tool_name", "a sensitive action"))
+        action = _clean(
+            payload.get("action_description", payload.get("tool_name")), "a sensitive action"
+        )
         return f"Awaiting your approval for {action} in the web interface."
+
+    if ev_type == str(TaskEventType.TASK_PROGRESS).lower():
+        return _spoken_step(payload) or ""
 
     if ev_type == str(TaskEventType.TASK_COMPLETED).lower():
         return "Your task has completed successfully."
 
     if ev_type == str(TaskEventType.TASK_FAILED).lower():
-        err = payload.get("error", payload.get("error_message", "unknown failure"))
+        err = _clean(payload.get("error", payload.get("error_message")), "an unknown failure")
         return f"Task encountered an issue: {err}."
 
-    return "Task progress updated."
+    return ""
 
 
 class VoiceEventBridge:
@@ -86,14 +133,21 @@ class VoiceEventBridge:
         workspace_id: UUID,
         redis_client: Redis | None = None,
         channel_prefix: str = DEFAULT_EVENT_CHANNEL_PREFIX,
+        session_id: str | None = None,
     ) -> None:
         self.workspace_id = workspace_id
+        # Tasks of this conversation (Task.session_id) are announced even when they were created
+        # from the UI or text chat rather than on this socket.
+        self.session_id = str(session_id) if session_id else None
         self._redis = redis_client
         self._channel_prefix = channel_prefix
         self._tracked_tasks: set[str] = set()
         self._queue: asyncio.Queue[SpokenTaskAnnouncement] = asyncio.Queue()
         self._listener_task: asyncio.Task[None] | None = None
         self._closed = False
+        # When set, milestones (done, failed, cancelled, approval, needs input) of ANY task of the
+        # user are spoken by the announcer (once, queued); this bridge then stays silent for them.
+        self.watcher: TaskAnnouncer | None = None
 
     def track_task(self, task_id: str) -> None:
         """Register a task ID to track for spoken notifications."""
@@ -125,13 +179,16 @@ class VoiceEventBridge:
             event_type = event.get("event_type", "")
             payload = event.get("payload", {})
 
-        task_id = str(
-            payload.get("task_id")
-            or payload.get("id")
-            or (event.session_id if isinstance(event, TaskEvent) else "")
+        if self.watcher is not None:
+            await self.watcher.on_event(str(event_type), payload)
+        task_id = str(payload.get("task_id") or payload.get("id") or "")
+        event_session = str(
+            (event.session_id if isinstance(event, TaskEvent) else event.get("session_id")) or ""
         )
-
-        if not self.is_tracking(task_id):
+        same_session = bool(self.session_id) and event_session == self.session_id
+        if not task_id and not same_session:
+            return
+        if not (self.is_tracking(task_id) or same_session):
             return
 
         spoken_text = format_spoken_task_update(event_type, payload)
@@ -139,6 +196,11 @@ class VoiceEventBridge:
             task_id=task_id,
             event_type=str(event_type),
             spoken_text=spoken_text,
+            payload=dict(payload),
+            # Spoken updates come only from the TaskAnnouncer (exact step titles, coalesced,
+            # spaced, one live model). The generic text above is never injected into the model:
+            # that path produced "a step finished" repeated once per step.
+            speak=False,
         )
         await self._queue.put(announcement)
 
@@ -175,7 +237,7 @@ class VoiceEventBridge:
             finally:
                 try:
                     await pubsub.unsubscribe(channel_name)
-                    await pubsub.close()
+                    await pubsub.aclose()  # type: ignore[no-untyped-call]
                 except Exception:
                     pass
 

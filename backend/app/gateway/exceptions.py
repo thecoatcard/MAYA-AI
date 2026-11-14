@@ -20,7 +20,47 @@ class UnsupportedAliasTransportError(GatewayError):
 
 
 class GatewayFallbackExhaustedError(GatewayError):
-    """Raised when all fallbacks in a traversal chain have been attempted and failed."""
+    """Raised when all fallbacks in a traversal chain have been attempted and failed.
+
+    ``attempts`` is how many model calls were made, ``reason`` the low-cardinality reason of the
+    last failure (``unavailable``, ``timeout``, ``quota``, ...) and ``overloaded`` is True when
+    the failures were service-wide (5xx, timeouts or quota), not a bad request.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: int = 0,
+        reason: str = "",
+        overloaded: bool = False,
+        deadline_exceeded: bool = False,
+        models_tried: int = 0,
+        keys_tried: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.models_tried = models_tried
+        self.keys_tried = keys_tried
+        self.attempts = attempts
+        self.reason = reason
+        self.overloaded = overloaded
+        self.deadline_exceeded = deadline_exceeded
+
+    @property
+    def user_message(self) -> str:
+        """Plain-language text for end users (never contains key labels or provider text)."""
+        return overloaded_user_message(self.models_tried, self.keys_tried or self.attempts)
+
+
+def overloaded_user_message(models_tried: int, keys_tried: int) -> str:
+    """The one plain sentence a user sees when every model and key was tried (no key labels,
+    no provider text). Shared by chat, tasks and voice."""
+    models = max(models_tried, 1)
+    keys = max(keys_tried, 1)
+    return (
+        f"Gemini is overloaded right now. MAYA tried {models} model{'s' if models != 1 else ''} "
+        f"and {keys} key{'s' if keys != 1 else ''}; please try again in a minute."
+    )
 
 
 class ToolCallCommitmentError(GatewayError):

@@ -21,13 +21,14 @@ Authentication, tenant isolation and the account tables are documented in
 | `users`                                                   | Accounts                        | Plan table plus `username`, `email_verified_at`, `password_changed_at`; `hashed_password` is mandatory                                                                                                                                                                                                                                                                                |
 | `sessions`, `messages`                                    | Chat conversations              | Plan tables, unchanged. The Phase 04 chat repository (`backend/app/db/repositories/chat.py`) uses them: every statement names the workspace and the user (user-level ownership on top of row-level security), and keyset pagination orders by `(created_at, id)`. No index serves those queries yet; adding one needs a migration (Level 3), recommended before large histories exist |
 | `tasks`, `subtasks`, `approval_requests`, `compensations` | Task engine and approvals       | Phase 05 added SQLAlchemy declarative models (`backend/app/db/models.py`) and migration `0005_phase_05_tasks_subtasks.py` adding `user_instruction`, `plan_status`, `active_plan`, `shared_context`, `execution_trace`, and `updated_at` to `tasks`, and `updated_at` plus role check constraints to `subtasks`                                                                       |
-| `audit_log`                                               | Audit trail                     | Plan table; the runtime role may insert and read only. Hash chaining is not computed yet (Phase 07)                                                                                                                                                                                                                                                                                   |
+| `audit_log`                                               | Audit trail                     | Plan table; the runtime role may insert and read only. Hash-chained per workspace by `backend/app/services/audit_service.py` (see Audit hash chain below)                                                                                                                                                                                                                                                                                   |
 | `mcp_servers`                                             | MCP external integrations       | Phase 08 (migration `0011_phase_08_mcp_servers.py`) added `health_status`, `last_ping_at`, `consecutive_failures`, `tool_count`, `tools_manifest`, `updated_at`, and composite index `idx_mcp_servers_workspace_active`. Declarative model in `backend/app/db/models.py`                                                                                                              |
 | `file_artifacts`                                          | Generated artifacts             | Phase 09 added declarative model `FileArtifact` tracking `/artifacts/{workspace_id}/` files, SHA-256 checksums, and mime types                                                                                                                                                                                                                                                        |
 | `memory_items`                                            | Memory items                    | Plan table; Phase 11                                                                                                                                                                                                                                                                                                                                                                  |
 | `auth_otp_challenges`                                     | One-time codes                  | New. Only an HMAC of the code is stored; one live row per user and purpose                                                                                                                                                                                                                                                                                                            |
 | `auth_sessions`                                           | Refresh-token sessions          | New. Holds the current refresh token id and a generation counter (any older generation is a replay); revocation and expiry                                                                                                                                                                                                                                                            |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`    | LangGraph durable state         | Phase 05 checkpointer storage; forced RLS binds rows to both workspace and user. Existing rows without an owner remain NULL and inaccessible; no owner is guessed                                                                                                                                                                                                                     |
+| `user_settings`                                           | Per-user settings               | Revision `0015` (ADR-0016): one JSONB object per `(workspace_id, user_id)`, first key `chat_intent_classifier`; composite FK to `users`, forced RLS (`ws_isolation`, workspace only; the repository also filters by user); `maya_app` has SELECT, INSERT and UPDATE, no DELETE |
 | `chat_idempotency`                                        | Durable chat claims and results | Revision `0007`; scoped by workspace and user, stores keyed digests only (no raw key or request content), forced RLS binds both owner settings; claims are permanent and finalized with an owned compare-and-set                                                                                                                                                                      |
 
 The plan lists 12 tables, 11 of them tenant-scoped. This implementation adds the two `auth_*` tables and also
@@ -109,6 +110,8 @@ uv run --directory backend alembic -x env_file=..\.env.example downgrade base
 | `0005`   | Phase 05 task and subtask projection columns and indexes                                            |
 | `0006`   | LangGraph checkpoint tables and workspace-plus-user RLS                                             |
 | `0007`   | Durable chat idempotency claims/results, workspace-plus-user RLS and least-privilege runtime grants |
+| `0013`   | Repair of `task_outbox_events` (created by `0008`): `ws_isolation` policy with WITH CHECK, `maya_app` gets SELECT, INSERT and UPDATE (status, dispatched_at) only. Idempotent; see below |
+| `0014`   | `auth_any_account_exists()` and `list_workspaces_with_open_work()` definer functions (ids/boolean only) |
 
 For a deployment with an older checkpoint writer, stop checkpoint writes before applying `0006`, then deploy the
 owner-bound checkpointer. Old rows remain inaccessible; the revision does not infer owners or migrate their content.
@@ -130,6 +133,21 @@ disposable `maya_test_*` databases that they create and drop.
 **Persistent local database:** on 2026-11-05, with the owner's approval, the persistent `maya` database was migrated to
 revision `0004` (it was empty; a schema-only backup was taken first outside the repository). It holds no accounts.
 Revisions `0005` through `0007` have not been applied or live-verified in this remediation.
+
+Revision `0014` adds two `SECURITY DEFINER` functions owned by `maya_auth_definer` (pinned `search_path`, no PUBLIC
+execute, `EXECUTE` for `maya_app` only) so the runtime can answer cross-tenant questions without reading rows:
+`auth_any_account_exists()` (local-owner bootstrap, ADR-0014) and `list_workspaces_with_open_work()` (ids of workspaces
+with open tasks, subtasks or pending outbox events). The definer role gets column-level SELECT on only the columns
+involved and a SELECT-only `definer_open_work_lookup` policy on `tasks`, `subtasks` and `task_outbox_events`; `maya_app`
+still sees no rows of those tables without a tenant context. Idempotent; the downgrade drops the functions, policies
+and column grants.
+
+Revision `0013` exists because `0008` as committed gave `maya_app` no privileges on `task_outbox_events` (and named its
+policy `task_outbox_events_tenant_isolation`), so the first outbox insert failed with "permission denied". Alembic does
+not re-run an applied revision, so `0008` was left at its committed content and `0013` repairs any database whatever
+its starting point (committed `0008`, hand-patched grants, or fresh). Its downgrade only removes access (back to the
+state `0008` created). Apply to an existing development database from `backend/` with
+`python -m alembic -x env_file=<your env file> upgrade head`.
 
 ### Not implemented
 
@@ -175,3 +193,16 @@ recorded only as log lines until the Phase 07 audit writer exists (see [ADR-0006
 
 See the [local runbook](../operations/LOCAL_DEVELOPMENT.md) for initialization,
 persistence and non-destructive shutdown behavior.
+
+
+## Audit hash chain
+
+`audit_log` rows are written only through `record_audit` (`backend/app/services/audit_service.py`) inside the caller's
+tenant transaction. A per-workspace `pg_advisory_xact_lock` serialises writers; each row stores `prev_hash` (the
+previous row's `row_hash`, NULL for the first row) and `row_hash = sha256(prev_hash || canonical_json)`. The canonical
+JSON (sorted keys, compact separators, ASCII, UUIDs as strings, `created_at` as UTC ISO-8601 microseconds) is
+documented in the module docstring. Inputs and outputs are redacted before storage (bearer tokens, JWTs, passwords,
+API keys, card numbers, SSNs, secret-named keys); floats are stored as strings. `verify_chain` recomputes the chain.
+Non-tool events use `server_name='maya'` and `tool_name='<category>.<verb>'`. GDPR purge pseudonymises `user_ref`
+(`purge_user_ref`, administrative connection only because `maya_app` has no UPDATE) and re-seals the chain. Retention
+(365 days) is not enforced by code yet. Audit rows are not yet written by approvals, the worker or the MCP gate.

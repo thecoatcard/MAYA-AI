@@ -46,6 +46,7 @@ from app.gateway.sanitizer import (
 )
 from app.gateway.schemas import (
     EmbeddingResponse,
+    GatewayProgressEvent,
     GatewayResponse,
     GatewayStreamChunk,
     TokenCountResponse,
@@ -74,6 +75,7 @@ __all__ = [
     "GatewayFallbackExhaustedError",
     "GatewayResponse",
     "GatewayStartupError",
+    "GatewayProgressEvent",
     "GatewayStreamChunk",
     "InputSanitizationError",
     "MODEL_ID_PATTERN",

@@ -78,6 +78,8 @@ def test_task_submission_and_idempotency_lifecycle(mock_db_tenant: Any) -> None:
     with (
         patch("app.main.Resources") as factory,
         patch("app.api.v1.tasks.tenant_session", side_effect=fake_tenant_session),
+        # submission moved into the shared service; it opens its own tenant session
+        patch("app.services.task_submission.tenant_session", side_effect=fake_tenant_session),
     ):
         resources = factory.return_value
         resources.check = AsyncMock(return_value=None)
@@ -103,7 +105,9 @@ def test_task_submission_and_idempotency_lifecycle(mock_db_tenant: Any) -> None:
                 headers={"Authorization": "Bearer test-token"},
             )
             assert resp_no_key.status_code == 400
-            assert resp_no_key.json() == {"error": "http_error"}
+            body = resp_no_key.json()
+            assert body["error"] == "http_error"
+            assert "idempotency key" in body["message"].lower()
 
             # 2. First submission with idempotency key -> 201 Created
             resp_created = client.post(

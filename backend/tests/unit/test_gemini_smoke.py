@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from app.core.config import Settings
 from app.tools.gemini_smoke import main, run_smoke
 from tests.support.fake_gemini_client import FakeGeminiClient
+from tests.support.models import ORCH
 
 
 def make_smoke_settings(**kwargs: object) -> Settings:
@@ -88,7 +89,7 @@ async def test_smoke_free_tier_mode_succeeds_offline(capsys: pytest.CaptureFixtu
 async def test_smoke_429_quota_limit_handled_cleanly(capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_smoke_settings()
     fake_client = FakeGeminiClient()
-    fake_client.aio.models.enqueue_errors("gemini-3.8-flash", [APIError(429, "Resource exhausted")])
+    fake_client.aio.models.enqueue_errors(ORCH, [APIError(429, "Resource exhausted")])
 
     with (
         patch("app.tools.gemini_smoke.Settings", return_value=settings),
@@ -117,3 +118,29 @@ def test_main_cli_argument_parsing() -> None:
         assert args.alias == "heavy"
         assert args.verify_free_tier is True
         assert args.confirm_paid_calls_up_to_inr_100 is False
+
+
+@pytest.mark.asyncio
+async def test_smoke_picks_up_gemini_api_keys_pool(capsys: pytest.CaptureFixture[str]) -> None:
+    pool_key = "-".join(["test", "smoke", "pool", "key"])
+    settings = make_smoke_settings(gemini_api_key=None, gemini_api_keys=[pool_key])
+    fake_client = FakeGeminiClient()
+    fake_client.aio.models.default_text = "OK from pool key"
+
+    with (
+        patch("app.tools.gemini_smoke.Settings", return_value=settings),
+        patch("app.tools.gemini_smoke.build_genai_client", return_value=fake_client) as mock_build,
+    ):
+
+        class Args:
+            alias = "orchestrator"
+            prompt = "test"
+            verify_free_tier = True
+            confirm_paid_calls_up_to_inr_100 = False
+
+        status = await run_smoke(Args())  # type: ignore[arg-type]
+        assert status == 0
+        mock_build.assert_called_once_with(
+            api_key=pool_key,
+            timeout_seconds=settings.gemini_request_timeout_seconds,
+        )

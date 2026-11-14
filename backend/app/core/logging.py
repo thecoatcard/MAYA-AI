@@ -16,7 +16,7 @@ URL_CREDENTIALS = re.compile(r"([a-z][a-z0-9+.-]*://)[^/\s@]+@", re.IGNORECASE)
 BEARER_TOKEN = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 # ``?token=<jwt>`` on the voice WebSocket would otherwise reach the server's request log lines.
 SECRET_QUERY_VALUE = re.compile(
-    r"(?i)((?:(?:access|refresh|id)[_-]?)?token|password|passwd|secret|api[_-]?key"
+    r"(?i)\b((?:(?:access|refresh|id)[_-]?)?token|password|passwd|secret|api[_-]?key"
     r"|authorization)=([^&\s\"'#]+)"
 )
 REDACTED = "[redacted]"
@@ -94,6 +94,10 @@ def configure_logging(settings: Settings) -> None:
         secrets.append(settings.smtp_password.get_secret_value())
     if settings.gemini_api_key is not None:
         secrets.append(settings.gemini_api_key.get_secret_value())
+    for k in getattr(settings, "gemini_api_keys", []):
+        secrets.append(k.get_secret_value())
+    for k in getattr(settings, "effective_gemini_api_keys", []):
+        secrets.append(k.get_secret_value())
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter(tuple(secrets)))
     logger = logging.getLogger("maya")

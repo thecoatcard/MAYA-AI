@@ -79,7 +79,7 @@ class AuditWriteError(RuntimeError):
 class ChainVerification(NamedTuple):
     valid: bool
     first_bad_row_id: int | None
-    count: int  # type: ignore[assignment]
+    row_count: int
 
 
 def redact_text(value: str) -> str:

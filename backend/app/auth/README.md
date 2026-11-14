@@ -49,6 +49,15 @@ Domain errors (`errors.py`) map to generic HTTP answers in `backend/app/api/v1/e
 unavailable the request fails closed with 503. Delivery failures after the response are logged as an event and are not
 visible to the caller.
 
+## System e-mail format
+
+One-time-code mails (`messages.py`) are `multipart/alternative`: the complete plain-text body first, then an HTML part from
+`backend/app/core/email_templates.py` (table layout, inline styles, light and dark palette copied from the web theme tokens,
+no remote images, fonts, links or tracking; every value HTML-escaped). Codes, expiry, one-time-use wording and the
+take-over guidance are identical in both parts. Headers include `Auto-Submitted: auto-generated`. Preview offline with
+`uv run python -m scripts.preview_emails <folder>` (run from `backend/`). Mail MAYA sends from a user's own mailbox
+(`app/mail`) is deliberately not styled.
+
 ## Security considerations
 
 See [authentication security](../../../docs/security/AUTHENTICATION.md): enumeration resistance, one-time-code handling,

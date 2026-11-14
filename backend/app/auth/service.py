@@ -15,6 +15,8 @@ Design rules enforced here (the reasons are in docs/security/AUTHENTICATION.md):
   login cannot outlive a concurrent password reset.
 """
 
+import ipaddress
+import re
 import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from app.auth.errors import (
+    BootstrapUnavailable,
     InvalidCode,
     InvalidCredentials,
     InvalidToken,
@@ -32,12 +35,13 @@ from app.auth.events import AuthEvents
 from app.auth.identifiers import normalize_email, normalize_username
 from app.auth.messages import code_email
 from app.auth.models import AccountIdentity, AccountRecord, Principal, TokenPair
+from app.auth.pending import InMemoryPendingSignups, PendingSignup, PendingSignupStore
 from app.auth.policy import AuthPolicy
 from app.auth.store import AccountConflict, AuthStore, AuthTransaction, ChallengeConflict
 from app.core.clock import Clock
 from app.core.email import EmailDeliveryError, EmailSender, OutboundEmail, SmtpEmailSender
 from app.core.ratelimit import Limit, RateLimiter, RateLimiterUnavailable
-from app.core.security import PasswordService, validate_password_policy
+from app.core.security import USERNAME_PATTERN, PasswordService, validate_password_policy
 from app.core.security_otp import (
     OTP_LIFETIME,
     OTP_MAX_ATTEMPTS,
@@ -64,16 +68,6 @@ class RegisterCommand:
     workspace_name: str | None = None
 
 
-@dataclass
-class PendingSignup:
-    challenge_id: UUID
-    email: str
-    code_hmac: bytes
-    created_at: datetime
-    expires_at: datetime
-    attempts: int = 0
-
-
 @dataclass(frozen=True)
 class CompleteSignupCommand:
     email: str
@@ -82,6 +76,30 @@ class CompleteSignupCommand:
     password: str
     full_name: str
     workspace_name: str | None = None
+
+
+@dataclass(frozen=True)
+class BootstrapCommand:
+    full_name: str
+    email: str
+    password: str
+
+
+BOOTSTRAP_WORKSPACE_SLUG = "local-owner"  # unique: a second bootstrap conflicts even in a race
+BOOTSTRAP_LIMIT_ADDRESS = Limit(5, 3600)
+BOOTSTRAP_LIMIT_GLOBAL = Limit(20, 3600)
+_USERNAME_JUNK = re.compile(r"[^a-z0-9_.-]")
+
+
+def is_loopback_address(address: str) -> bool:
+    """True only for a literal loopback peer address (127.0.0.0/8, ::1, ::ffff:127.x)."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback
 
 
 class AuthService:
@@ -97,6 +115,8 @@ class AuthService:
         events: AuthEvents,
         email_sender: EmailSender | None,
         policy: AuthPolicy,
+        pending_signups: PendingSignupStore | None = None,
+        local_owner_bootstrap: bool = False,
     ) -> None:
         self._store = store
         self._passwords = passwords
@@ -107,7 +127,8 @@ class AuthService:
         self._events = events
         self._email_sender = email_sender
         self._policy = policy
-        self._pending_signups: dict[str, PendingSignup] = {}
+        self._pending: PendingSignupStore = pending_signups or InMemoryPendingSignups()
+        self._bootstrap_enabled = local_owner_bootstrap
 
     async def aclose(self) -> None:
         """Close owned authentication resources during application shutdown."""
@@ -396,6 +417,14 @@ class AuthService:
             session_id=session.id,
         )
 
+    async def profile_of(self, principal: Principal) -> tuple[str, str] | None:
+        """The caller's own (email, full name), for display. Never raises: it is cosmetic."""
+        try:
+            async with self._store.transaction(principal.workspace_id) as tx:
+                return await tx.get_profile(principal.user_id)
+        except Exception:  # a display lookup must not break /auth/me
+            return None
+
     # ----------------------------------------------------------------------- identify & signup
 
     async def send_signup_otp(self, email: str, address: str) -> OutboundEmail | None:
@@ -411,7 +440,7 @@ class AuthService:
             return None
 
         now = self._clock.now()
-        pending = self._pending_signups.get(email)
+        pending = await self._pending.get(email)
         if pending is not None and now < pending.created_at + self._policy.resend_cooldown:
             self._events.emit("signup_otp", outcome="cooldown")
             return None
@@ -419,13 +448,15 @@ class AuthService:
         challenge_id = uuid4()
         code = generate_code()
         mac = code_mac(self._otp_key, "email_verification", challenge_id, code)
-        self._pending_signups[email] = PendingSignup(
-            challenge_id=challenge_id,
-            email=email,
-            code_hmac=mac,
-            created_at=now,
-            expires_at=now + OTP_LIFETIME,
-            attempts=0,
+        await self._pending.put(
+            PendingSignup(
+                challenge_id=challenge_id,
+                email=email,
+                code_hmac=mac,
+                created_at=now,
+                expires_at=now + OTP_LIFETIME,
+                attempts=0,
+            )
         )
         self._events.emit("signup_otp", outcome="issued")
         return code_email(email, "email_verification", code, username=email.split("@")[0])
@@ -439,13 +470,13 @@ class AuthService:
         await self._enforce_attempt_limits(email, address)
 
         now = self._clock.now()
-        pending = self._pending_signups.get(email)
+        pending = await self._pending.get(email)
         if pending is None or now > pending.expires_at or pending.attempts >= OTP_MAX_ATTEMPTS:
             self._spend_equal_effort(command.code)
             self._events.emit("signup", outcome="failed", reason="no_pending_challenge")
             raise InvalidCode
 
-        pending.attempts += 1
+        await self._pending.record_attempt(email)
         if not code_matches(
             self._otp_key,
             "email_verification",
@@ -457,7 +488,7 @@ class AuthService:
             raise InvalidCode
 
         # Consume challenge
-        del self._pending_signups[email]
+        await self._pending.delete(email)
 
         hashed_password = await self._passwords.hash(command.password)
         workspace_id, user_id = uuid4(), uuid4()
@@ -507,6 +538,100 @@ class AuthService:
             generation=0,
             refresh_expires_at=refresh_expires,
         )
+
+    # ------------------------------------------------------------- local-owner bootstrap
+
+    def _bootstrap_allowed_here(self, address: str) -> bool:
+        return self._bootstrap_enabled and is_loopback_address(address)
+
+    async def bootstrap_status(self, address: str) -> tuple[bool, str | None]:
+        """(available, reason). Off and non-local peers get the same answer."""
+        if not self._bootstrap_allowed_here(address):
+            return False, "disabled"
+        try:
+            async with self._store.transaction(None) as tx:
+                exists = await tx.any_account_exists()
+        except Exception:
+            self._events.emit("bootstrap", outcome="failed", reason="check_unavailable")
+            return False, "not_ready"
+        return (False, "already_initialised") if exists else (True, None)
+
+    async def bootstrap(self, command: BootstrapCommand, address: str) -> TokenPair:
+        """Create the first workspace and owner on a fresh local install (ADR-0014)."""
+        if not self._bootstrap_allowed_here(address):
+            self._events.emit("bootstrap", outcome="refused", reason="not_allowed")
+            raise BootstrapUnavailable
+        await self._enforce(
+            (
+                (self._key("bootstrap-address", address), BOOTSTRAP_LIMIT_ADDRESS),
+                (self._key("bootstrap-global", "all"), BOOTSTRAP_LIMIT_GLOBAL),
+            )
+        )
+        email = normalize_email(command.email)
+        username = normalize_username(self._username_from(email))
+        validate_password_policy(command.password, forbidden=(username, email))
+        try:
+            async with self._store.transaction(None) as tx:
+                exists = await tx.any_account_exists()
+        except Exception:
+            self._events.emit("bootstrap", outcome="failed", reason="check_unavailable")
+            raise BootstrapUnavailable from None
+        if exists:
+            self._events.emit("bootstrap", outcome="refused", reason="not_empty")
+            raise BootstrapUnavailable
+
+        hashed_password = await self._passwords.hash(command.password)
+        now = self._clock.now()
+        workspace_id, user_id = uuid4(), uuid4()
+        session_id, refresh_jti = uuid4(), uuid4()
+        absolute = now + self._policy.refresh_absolute_ttl
+        refresh_expires = min(now + self._policy.refresh_ttl, absolute)
+        full_name = command.full_name.strip()
+        try:
+            async with self._store.transaction(workspace_id) as tx:
+                await tx.create_account(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    workspace_name=f"{full_name}'s workspace"[:255],
+                    slug=BOOTSTRAP_WORKSPACE_SLUG,
+                    username=username,
+                    email=email,
+                    full_name=full_name,
+                    hashed_password=hashed_password,
+                    role=WORKSPACE_ADMIN_ROLE,
+                    now=now,
+                )
+                await tx.mark_email_verified(user_id, now)
+                opened = await tx.create_session(
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    refresh_jti=refresh_jti,
+                    refresh_expires_at=refresh_expires,
+                    absolute_expires_at=absolute,
+                    expected_password_changed_at=now,
+                    now=now,
+                )
+                if not opened:
+                    raise BootstrapUnavailable
+        except AccountConflict:
+            self._events.emit("bootstrap", outcome="refused", reason="conflict")
+            raise BootstrapUnavailable from None
+        self._events.emit("bootstrap", outcome="created")
+        return self._issue_tokens(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            role=WORKSPACE_ADMIN_ROLE,
+            session_id=session_id,
+            refresh_jti=refresh_jti,
+            generation=0,
+            refresh_expires_at=refresh_expires,
+        )
+
+    @staticmethod
+    def _username_from(email: str) -> str:
+        local = _USERNAME_JUNK.sub("", email.split("@", 1)[0].lower())[:32]
+        return local if USERNAME_PATTERN.fullmatch(local) else "owner"
 
     # ------------------------------------------------------------------------ delivery
 

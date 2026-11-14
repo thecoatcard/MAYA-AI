@@ -9,6 +9,8 @@ from typing import Any
 
 from google.genai import types
 
+from app.gateway.registry import build_default_registry
+
 
 class FakeAsyncModels:
     """Async models namespace simulating client.aio.models."""
@@ -19,6 +21,9 @@ class FakeAsyncModels:
         self.default_text: str = "Fake model response text"
         self.queued_text_responses: list[str] = []
         self.default_tool_calls: list[dict[str, Any]] | None = None
+        # One script per streamed call, consumed in order. A script is a list of chunks; a chunk is
+        # {"text": str} and/or {"call": {"name": str, "args": dict}}. Real SDK types are produced.
+        self.queued_stream_scripts: list[list[dict[str, Any]]] = []
         self.embedding_dimension: int = 768
         self.stream_error_after_chunk: int | None = None
         # Errors raised when a stream is first iterated (after it was opened, before chunk 1).
@@ -28,11 +33,14 @@ class FakeAsyncModels:
         self.omit_usage: bool = False
         # Streams started and not yet closed/exhausted; lets tests assert the SDK stream is closed.
         self.open_streams: int = 0
+        # Every model the default registry verifies at startup (derived, never hard-coded).
         self.available_models: list[str] = [
-            "models/gemini-3.8-flash",
-            "models/gemini-4-argon",
-            "models/gemini-3.5-flash-lite",
-            "models/gemini-embedding-2",
+            f"models/{mid}"
+            for mid in dict.fromkeys(
+                spec.model_id
+                for spec in build_default_registry().specs.values()
+                if spec.verify_at_startup
+            )
         ]
         self.prompt_token_count: int = 100
         self.candidates_token_count: int = 50
@@ -135,6 +143,42 @@ class FakeAsyncModels:
             queued = self.stream_first_chunk_errors.get(model)
             if queued:
                 raise queued.pop(0)
+
+            if self.queued_stream_scripts:
+                script = self.queued_stream_scripts.pop(0)
+                # An item {"thoughts": n} reports n thought tokens (billed) with no visible part.
+                thoughts = sum(int(item.get("thoughts", 0)) for item in script)
+                for idx, item in enumerate(script):
+                    parts: list[types.Part] = []
+                    if "thought" in item:  # a thought summary part (include_thoughts requested)
+                        parts.append(types.Part(text=item["thought"], thought=True))
+                    if "text" in item:
+                        parts.append(types.Part.from_text(text=item["text"]))
+                    if "call" in item:
+                        parts.append(
+                            types.Part.from_function_call(
+                                name=item["call"]["name"], args=item["call"]["args"]
+                            )
+                        )
+                    is_last = idx == len(script) - 1
+                    yield types.GenerateContentResponse(
+                        candidates=[
+                            types.Candidate(
+                                content=types.Content(parts=parts, role="model"),
+                                finish_reason=types.FinishReason.STOP if is_last else None,
+                            )
+                        ],
+                        usage_metadata=types.GenerateContentResponseUsageMetadata(
+                            prompt_token_count=self.prompt_token_count,
+                            candidates_token_count=self.candidates_token_count,
+                            thoughts_token_count=thoughts,
+                            total_token_count=self.prompt_token_count + self.candidates_token_count,
+                        )
+                        if is_last
+                        else None,
+                        model_version=model,
+                    )
+                return
 
             words = self.default_text.split(" ")
             for idx, word in enumerate(words):

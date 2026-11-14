@@ -1,8 +1,8 @@
 /**
- * Typed API client for Approval Center endpoints (Decision D4, Decision D5).
+ * Typed API client for the approvals endpoints (Decision D4, Decision D5).
  */
 
-import { getAccessToken } from "./auth-session";
+import { getAccessToken, refreshSession } from "./auth-session";
 
 export type ApprovalLifecycleStatus =
   | "pending"
@@ -28,7 +28,7 @@ export interface ApprovalRequest {
   payload_hash: string;
   tier: "APPROVAL_REQUIRED" | "RESTRICTED";
   action_description: string;
-  payload_diff?: Record<string, unknown> | unknown[] | null;
+  payload_diff?: Record<string, unknown> | unknown[] | string | null;
   status: ApprovalLifecycleStatus;
   approval_token?: string | null;
   requested_at: string;
@@ -36,6 +36,8 @@ export interface ApprovalRequest {
   decided_at?: string | null;
   consumed_at?: string | null;
   decision_channel?: "web" | "api" | null;
+  /** True when the owner's Notion auto-approve setting, not a click, recorded the approval. */
+  auto_approved?: boolean;
 
   // Execution tracking fields
   claimed_by?: string | null;
@@ -86,6 +88,15 @@ function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
+/** fetch with Bearer auth; on 401 refresh the session once and retry. */
+async function authFetch(path: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(path, { ...init, headers: getAuthHeaders() });
+  if (res.status === 401 && (await refreshSession())) {
+    res = await fetch(path, { ...init, headers: getAuthHeaders() });
+  }
+  return res;
+}
+
 export async function listApprovals(
   status?: string,
   limit: number = 20,
@@ -95,9 +106,8 @@ export async function listApprovals(
     params.set("status", status);
   }
 
-  const res = await fetch(`/api/v1/approvals?${params.toString()}`, {
+  const res = await authFetch(`/api/v1/approvals?${params.toString()}`, {
     method: "GET",
-    headers: getAuthHeaders(),
     cache: "no-store",
   });
 
@@ -117,9 +127,8 @@ export async function listApprovals(
 }
 
 export async function getApproval(id: string): Promise<ApprovalRequest> {
-  const res = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`/api/v1/approvals/${encodeURIComponent(id)}`, {
     method: "GET",
-    headers: getAuthHeaders(),
     cache: "no-store",
   });
 
@@ -142,11 +151,10 @@ export async function decideApproval(
   id: string,
   decision: ApprovalDecisionRequest,
 ): Promise<ApprovalDecisionResponse> {
-  const res = await fetch(
+  const res = await authFetch(
     `/api/v1/approvals/${encodeURIComponent(id)}/decide`,
     {
       method: "POST",
-      headers: getAuthHeaders(),
       body: JSON.stringify(decision),
       cache: "no-store",
     },

@@ -1,718 +1,957 @@
 "use client";
 
 import {
-  BookOpen,
   Brain,
-  CheckCircle2,
-  Database,
+  Copy,
   Download,
-  Flame,
+  FolderOpen,
+  MessagesSquare,
+  Infinity as InfinityIcon,
+  Plus,
+  RefreshCw,
   Search,
-  ShieldAlert,
-  Sparkles,
+  Timer,
   Trash2,
+  X,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useOptionalRouter } from "../../hooks/useOptionalRouter";
+import { copyText } from "../../lib/menu-actions";
+import { ConversationContext } from "../chat/ConversationContext";
 
-import { getPrincipalMe, type UserPrincipal } from "../../lib/system-client";
 import {
+  createMemoryItem,
+  deleteMemoryItem,
   listMemoryItems,
   purgeMemory,
+  searchMemory,
+  type MemoryCreateRequest,
   type MemoryItem,
 } from "../../lib/memory-client";
 import {
-  GlassBadge,
-  GlassButton,
-  GlassCard,
+  Badge,
+  Button,
+  CodeBlockShell,
+  ConfirmDeleteDialog,
+  MenuSurface,
+  type ContextMenuEntry,
+  EmptyState,
+  ErrorState,
   GlassInput,
   GlassModal,
+  GlassTextarea,
+  Notice,
+  Pane,
+  Skeleton,
+  Truncate,
+  WrapText,
+  type Tone,
 } from "../ui";
+
+export type MemoryCategory =
+  "preference" | "project" | "episodic" | "knowledge";
 
 export interface MemoryEntry {
   readonly id: string;
-  readonly category: "preference" | "project" | "episodic" | "knowledge";
-  readonly title: string;
+  readonly category: MemoryCategory;
+  /** Only a real title from the record's metadata. Never a cut of the content. */
+  readonly title: string | undefined;
   readonly content: string;
-  readonly source: string;
+  readonly source?: string;
   readonly sourceUrl?: string;
-  readonly relevance: number; // Cosine similarity score [0..1]
-  readonly vectorDim: number;
-  readonly decayExempt: boolean;
+  readonly relevance?: number;
+  readonly decayExempt: boolean | undefined;
+  readonly expiresAt: string | null;
   readonly createdAt: string;
   readonly metadata: Record<string, unknown>;
 }
 
-const SAMPLE_MEMORIES: readonly MemoryEntry[] = [
-  {
-    id: "mem-01",
-    category: "preference",
-    title: "Executive Tone & Deliverable Formats",
-    content:
-      "Operator prefers concise, high-density responses with structured tables, executive summaries, and direct downloadable verified artifacts (PDF/XLSX). Omit verbose greetings.",
-    source: "User Profile Preference Calibration (Decision D1)",
-    sourceUrl: "docs/superpowers/SPECS.md",
-    relevance: 0.96,
-    vectorDim: 768,
-    decayExempt: true,
-    createdAt: "2026-11-06T14:20:00Z",
-    metadata: {
-      scope: "workspace",
-      agent: "orchestrator",
-      priority: "critical",
-      decay_exempt: true,
-    },
-  },
-  {
-    id: "mem-02",
-    category: "project",
-    title: "Governance Matrix & Single-Use Tokens",
-    content:
-      "MAYA AI operates under 4-tier permission governance (READ, WRITE, SENSITIVE, RESTRICTED). All RESTRICTED tools require single-use RFC 8785 payload-bound tokens and TOTP step-up (Decision D5).",
-    source: "AGENTS.md & docs/adr/README.md",
-    sourceUrl: "docs/adr/0011-mcp-gateway-and-specialist-agents.md",
-    relevance: 0.92,
-    vectorDim: 768,
-    decayExempt: true,
-    createdAt: "2026-11-06T15:00:00Z",
-    metadata: {
-      repo: "maya-ai",
-      security_level: "tier_4_enforced",
-      governance_version: "2.4",
-    },
-  },
-  {
-    id: "mem-03",
-    category: "knowledge",
-    title: "MCP RFC 8785 Canonical JSON Serialization",
-    content:
-      "Tools manifest and payloads must be hashed with RFC 8785 canonicalization: lexicographically sorted keys, no whitespace, -0.0 normalization, preventing schema poisoning.",
-    source: "PRODUCTION_READINESS_REPORT_PHASES_08_09.md",
-    sourceUrl: "docs/api/MCP.md",
-    relevance: 0.88,
-    vectorDim: 768,
-    decayExempt: true,
-    createdAt: "2026-11-07T04:00:00Z",
-    metadata: {
-      standard: "RFC 8785",
-      algorithm: "SHA-256",
-      anti_poisoning: "active",
-    },
-  },
-  {
-    id: "mem-04",
-    category: "episodic",
-    title: "Token Expiry Race Condition Fix Trace",
-    content:
-      "CodingAgent reproduced approval token race condition in Docker sandbox, applied atomic Redis lock patch, and verified exit code 0 before generating unified patch deliverable.",
-    source: "Task ID: task-8eb3262",
-    sourceUrl: "apps/web/src/components/activity/ActivityView.tsx",
-    relevance: 0.82,
-    vectorDim: 768,
-    decayExempt: false,
-    createdAt: "2026-11-07T08:15:00Z",
-    metadata: {
-      task_id: "task-8eb3262",
-      agent: "coding",
-      verified_by: "sandbox_runner",
-    },
-  },
-  {
-    id: "mem-05",
-    category: "knowledge",
-    title: "Gemini Model Gateway Routing Rules",
-    content:
-      "MAYA AI exclusively routes to authorized Google Gemini models: gemini-3.5-flash-lite for triage, gemini-3.8-flash for orchestration & coding, gemini-3.8-live for voice.",
-    source: "docs/modules/MODEL_ROUTING.md",
-    sourceUrl: "docs/architecture/DATA_MODEL.md",
-    relevance: 0.86,
-    vectorDim: 768,
-    decayExempt: true,
-    createdAt: "2026-11-07T09:30:00Z",
-    metadata: {
-      gateway: "decision_d13",
-      models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.8-live"],
-    },
-  },
+/** Items per page; the server default for `GET /memory/items` (limit 50). */
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
+
+const CATEGORIES: readonly {
+  readonly id: "all" | MemoryCategory;
+  readonly label: string;
+}[] = [
+  { id: "all", label: "All" },
+  { id: "preference", label: "Preferences" },
+  { id: "project", label: "Projects" },
+  { id: "knowledge", label: "Knowledge" },
+  { id: "episodic", label: "Episodes" },
 ];
 
-function mapMemoryItemToEntry(item: MemoryItem): MemoryEntry {
-  const metadata = item.metadata || {};
-  const cat =
-    item.category === "preference" ||
-    item.category === "project" ||
-    item.category === "episodic" ||
-    item.category === "knowledge"
-      ? item.category
-      : "knowledge";
+const CATEGORY_LABEL: Readonly<Record<MemoryCategory, string>> = {
+  preference: "Preference",
+  project: "Project",
+  knowledge: "Knowledge",
+  episodic: "Episode",
+};
 
+const CATEGORY_TONE: Readonly<Record<MemoryCategory, Tone>> = {
+  preference: "accent",
+  project: "info",
+  knowledge: "neutral",
+  episodic: "warning",
+};
+
+function toCategory(value: string): MemoryCategory {
+  return value === "preference" ||
+    value === "project" ||
+    value === "episodic" ||
+    value === "knowledge"
+    ? value
+    : "knowledge";
+}
+
+/** Only web links are made clickable (a stored `javascript:` URL must not become a link). */
+function safeHref(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? parsed.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+}
+
+function mapMemoryItemToEntry(
+  item: MemoryItem,
+  similarityScore?: number,
+  fromSearch = false,
+): MemoryEntry {
+  const metadata = item.metadata || {};
   const rawTitle =
-    typeof metadata.title === "string" ? metadata.title : undefined;
-  const title =
-    rawTitle ||
-    (item.content.length > 50
-      ? `${item.content.slice(0, 50)}...`
-      : item.content);
+    typeof metadata.title === "string" ? metadata.title.trim() : "";
   const source =
     typeof metadata.source === "string"
       ? metadata.source
-      : `Memory Item (${item.category})`;
+      : typeof metadata.citation === "string"
+        ? metadata.citation
+        : typeof metadata.task_id === "string"
+          ? `Task ${metadata.task_id}`
+          : undefined;
   const sourceUrl =
     typeof metadata.sourceUrl === "string" ? metadata.sourceUrl : undefined;
 
   return {
     id: item.id,
-    category: cat,
-    title,
+    category: toCategory(item.category),
+    // A title that repeats the body is noise: show the text once.
+    title:
+      rawTitle !== "" && rawTitle !== item.content.trim()
+        ? rawTitle
+        : undefined,
     content: item.content,
     source,
     sourceUrl,
-    relevance: 1.0,
-    vectorDim: 768,
-    decayExempt: item.permanent,
+    relevance: similarityScore,
+    decayExempt: fromSearch ? undefined : Boolean(item.permanent),
+    expiresAt: item.expires_at,
     createdAt: item.created_at,
     metadata: item.metadata,
   };
 }
 
+function nameOf(entry: MemoryEntry): string {
+  return entry.title ?? entry.content.slice(0, 40);
+}
+
+/** Retention in words, from real fields only. Search results do not carry it. */
+function Retention({ entry }: { readonly entry: MemoryEntry }) {
+  if (entry.decayExempt === undefined) return null;
+  if (entry.decayExempt) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <InfinityIcon aria-hidden="true" size={14} className="shrink-0" />
+        Kept permanently
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Timer aria-hidden="true" size={14} className="shrink-0" />
+      {entry.expiresAt !== null
+        ? `Expires ${formatDate(entry.expiresAt)}`
+        : "Standard retention"}
+    </span>
+  );
+}
+
+/** Two-step delete: the first press asks, the second removes. Nothing is deleted by one stray click. */
+function DeleteControl({
+  entry,
+  busy,
+  onConfirm,
+  label,
+}: {
+  readonly entry: MemoryEntry;
+  readonly busy: boolean;
+  readonly onConfirm: () => void;
+  readonly label?: string;
+}): React.JSX.Element {
+  const [asking, setAsking] = useState<boolean>(false);
+  if (!asking) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label={`Delete memory ${nameOf(entry)}`}
+        leftIcon={<Trash2 size={14} />}
+        disabled={busy}
+        onClick={() => setAsking(true)}
+      >
+        {label ?? "Delete"}
+      </Button>
+    );
+  }
+  return (
+    <span
+      role="group"
+      aria-label="Confirm delete"
+      className="inline-flex flex-wrap items-center gap-2"
+    >
+      <span className="text-maya-caption text-maya-secondary">
+        Delete this memory?
+      </span>
+      <Button
+        variant="danger"
+        size="sm"
+        loading={busy}
+        onClick={() => {
+          onConfirm();
+          setAsking(false);
+        }}
+      >
+        Yes, delete
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => setAsking(false)}>
+        Keep
+      </Button>
+    </span>
+  );
+}
+
+const LABEL = "text-maya-caption font-medium text-maya-text";
+
 export function MemoryView(): React.JSX.Element {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [searchInput, setSearchInput] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedEntry, setSelectedEntry] = useState<MemoryEntry | null>(null);
   const [showPurgeModal, setShowPurgeModal] = useState<boolean>(false);
   const [purgeConfirmation, setPurgeConfirmation] = useState<string>("");
   const [purgeSuccess, setPurgeSuccess] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
-  const [principal, setPrincipal] = useState<UserPrincipal | null>(null);
-  const [memories, setMemories] =
-    useState<readonly MemoryEntry[]>(SAMPLE_MEMORIES);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [memories, setMemories] = useState<readonly MemoryEntry[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [createCategory, setCreateCategory] =
+    useState<MemoryCategory>("preference");
+  const [createContent, setCreateContent] = useState<string>("");
+  const [createPermanent, setCreatePermanent] = useState<boolean>(false);
+  const [isCreating, setIsCreating] = useState<boolean>(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // "Forget" from the context menu asks in a dialog (the inline control is for the row button).
+  const [forgetting, setForgetting] = useState<MemoryEntry | null>(null);
+  const runtimeCtx = useContext(ConversationContext);
+  const router = useOptionalRouter();
+  const memoryItems = (mem: MemoryEntry): ContextMenuEntry[] => {
+    // There is no memory update endpoint in the client, so there is no Edit action.
+    const meta = mem.metadata;
+    const sid =
+      typeof meta.session_id === "string"
+        ? meta.session_id
+        : typeof meta.source_session_id === "string"
+          ? meta.source_session_id
+          : null;
+    const items: ContextMenuEntry[] = [
+      {
+        id: "open",
+        label: "Open",
+        icon: <FolderOpen size={14} />,
+        onSelect: () => setSelectedEntry(mem),
+      },
+      {
+        id: "copy",
+        label: "Copy",
+        icon: <Copy size={14} />,
+        onSelect: () => void copyText(mem.content),
+      },
+    ];
+    if (sid !== null && runtimeCtx !== null) {
+      items.push({
+        id: "source",
+        label: "Show source conversation",
+        icon: <MessagesSquare size={14} />,
+        onSelect: () => {
+          void runtimeCtx.openConversation(sid);
+          router.push("/");
+        },
+      });
+    }
+    items.push(
+      { kind: "separator" },
+      {
+        id: "forget",
+        label: "Forget",
+        icon: <Trash2 size={14} />,
+        danger: true,
+        onSelect: () => setForgetting(mem),
+      },
+    );
+    return items;
+  };
+
+  /** Ignores the answer of a request that a newer one has replaced. */
+  const requestId = useRef<number>(0);
 
   useEffect(() => {
-    getPrincipalMe()
-      .then(setPrincipal)
-      .catch(() => {});
-  }, []);
+    const handle = setTimeout(
+      () => setSearchQuery(searchInput),
+      searchInput === "" ? 0 : SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(handle);
+  }, [searchInput]);
 
-  const loadMemories = React.useCallback(async () => {
+  const searching = searchQuery.trim().length > 0;
+
+  const loadMemories = useCallback(async () => {
+    const mine = ++requestId.current;
     setLoading(true);
+    setError(null);
     try {
-      const items = await listMemoryItems(
-        categoryFilter !== "all" ? categoryFilter : undefined,
-      );
-      if (items && items.length > 0) {
-        setMemories(items.map(mapMemoryItemToEntry));
+      if (searchQuery.trim().length > 0) {
+        const res = await searchMemory({
+          query: searchQuery.trim(),
+          categories: categoryFilter !== "all" ? [categoryFilter] : undefined,
+        });
+        if (mine !== requestId.current) return;
+        setMemories(
+          (res.results || []).map((r) =>
+            mapMemoryItemToEntry(
+              {
+                id: r.id,
+                workspace_id: "",
+                user_id: "",
+                category: r.category,
+                content: r.content,
+                metadata: r.metadata,
+                permanent: false,
+                access_count: 0,
+                last_accessed_at: null,
+                expires_at: null,
+                created_at: r.created_at,
+              },
+              r.effective_score ?? r.raw_similarity,
+              true,
+            ),
+          ),
+        );
+        setHasMore(false);
+      } else {
+        const items = await listMemoryItems(
+          categoryFilter !== "all" ? categoryFilter : undefined,
+        );
+        if (mine !== requestId.current) return;
+        setMemories(items.map((item) => mapMemoryItemToEntry(item)));
+        setHasMore(items.length >= PAGE_SIZE);
       }
     } catch {
-      // Offline fallback: keep default sample memories
+      if (mine !== requestId.current) return;
+      setError("Unable to load memory records from the MAYA backend.");
+      setMemories([]);
+      setHasMore(false);
     } finally {
-      setLoading(false);
+      if (mine === requestId.current) setLoading(false);
     }
-  }, [categoryFilter]);
+  }, [categoryFilter, searchQuery]);
 
   useEffect(() => {
     void loadMemories();
   }, [loadMemories]);
+
+  const loadMore = async (): Promise<void> => {
+    if (loadingMore || searching) return;
+    setLoadingMore(true);
+    setActionError(null);
+    const mine = requestId.current;
+    try {
+      const items = await listMemoryItems(
+        categoryFilter !== "all" ? categoryFilter : undefined,
+        PAGE_SIZE,
+        memories.length,
+      );
+      if (mine !== requestId.current) return;
+      setMemories((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [
+          ...prev,
+          ...items
+            .filter((item) => !seen.has(item.id))
+            .map((item) => mapMemoryItemToEntry(item)),
+        ];
+      });
+      setHasMore(items.length >= PAGE_SIZE);
+    } catch {
+      setActionError("Could not load more memories. Try again.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleCreateMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createContent.trim() || isCreating) return;
+    setIsCreating(true);
+    try {
+      const payload: MemoryCreateRequest = {
+        category: createCategory,
+        content: createContent.trim(),
+        permanent: createPermanent,
+      };
+      await createMemoryItem(payload);
+      setShowCreateModal(false);
+      setCreateContent("");
+      setCreatePermanent(false);
+      setActionError(null);
+      await loadMemories();
+    } catch {
+      setActionError("Failed to create memory item.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleDeleteMemory = async (itemId: string) => {
+    setDeletingId(itemId);
+    setActionError(null);
+    try {
+      await deleteMemoryItem(itemId);
+      setMemories((prev) => prev.filter((m) => m.id !== itemId));
+      setSelectedEntry((curr) => (curr?.id === itemId ? null : curr));
+    } catch {
+      setActionError("Failed to delete memory item. It was not removed.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleExecutePurge = async () => {
     setIsPurging(true);
     try {
       await purgeMemory("all");
       setMemories([]);
+      setHasMore(false);
       setSelectedEntry(null);
       setShowPurgeModal(false);
       setPurgeConfirmation("");
       setPurgeSuccess(true);
-      setTimeout(() => setPurgeSuccess(false), 4000);
     } catch {
-      // In case of error, still close and notify
       setShowPurgeModal(false);
       setPurgeConfirmation("");
+      setActionError("Failed to erase memories.");
     } finally {
       setIsPurging(false);
     }
   };
 
-  const filteredMemories = useMemo(() => {
-    return memories.filter((m) => {
-      if (categoryFilter !== "all" && m.category !== categoryFilter) {
-        return false;
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          m.title.toLowerCase().includes(q) ||
-          m.content.toLowerCase().includes(q) ||
-          m.source.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [categoryFilter, memories, searchQuery]);
-
   const exportKnowledgeJson = () => {
     const dataStr =
       "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(filteredMemories, null, 2));
+      encodeURIComponent(JSON.stringify(memories, null, 2));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute(
       "download",
-      `maya_knowledge_embeddings_${new Date().toISOString().slice(0, 10)}.json`,
+      `maya_memory_export_${new Date().toISOString().slice(0, 10)}.json`,
     );
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
   };
 
-  const getRelevanceBar = (score: number) => {
-    const pct = Math.round(score * 100);
-    return (
-      <div className="flex items-center gap-2 font-mono text-[11px]">
-        <div className="w-16 h-1.5 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-full"
-            style={{ width: `${pct}%` }}
-          />
+  const countText = loading
+    ? "Loading…"
+    : searching
+      ? `${memories.length} ${memories.length === 1 ? "result" : "results"}`
+      : `${memories.length}${hasMore ? "+" : ""} ${
+          memories.length === 1 && !hasMore ? "memory" : "memories"
+        }`;
+
+  const header = (
+    <div className="grid min-w-0 gap-3 py-1">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <h1 className="m-0 text-maya-heading font-medium">Memory</h1>
+          <span
+            className="text-maya-caption text-maya-muted"
+            aria-live="polite"
+            data-testid="memory-count"
+          >
+            {countText}
+          </span>
         </div>
-        <span className="text-teal-300 font-bold">{pct}% match</span>
-      </div>
-    );
-  };
-
-  const getCategoryBadge = (cat: MemoryEntry["category"]) => {
-    switch (cat) {
-      case "preference":
-        return (
-          <GlassBadge variant="teal" size="sm" mono>
-            PREFERENCE
-          </GlassBadge>
-        );
-      case "project":
-        return (
-          <GlassBadge variant="blue" size="sm" mono>
-            PROJECT
-          </GlassBadge>
-        );
-      case "knowledge":
-        return (
-          <GlassBadge variant="purple" size="sm" mono>
-            KNOWLEDGE
-          </GlassBadge>
-        );
-      case "episodic":
-      default:
-        return (
-          <GlassBadge variant="amber" size="sm" mono>
-            EPISODIC
-          </GlassBadge>
-        );
-    }
-  };
-
-  return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-6 max-w-7xl mx-auto w-full">
-      {/* Header Banner */}
-      <GlassCard
-        variant="teal"
-        padding="md"
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-teal-500/30"
-      >
-        <div className="flex items-start gap-3.5">
-          <div className="p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-400 mt-0.5">
-            <Brain className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-lg md:text-xl font-bold tracking-tight text-zinc-100 font-mono">
-                Memory & Knowledge Repository
-              </h2>
-              <GlassBadge variant="purple" size="sm" mono>
-                pgvector (768-d)
-              </GlassBadge>
-            </div>
-            <p className="text-xs md:text-sm text-zinc-400 mt-1.5 max-w-3xl leading-relaxed">
-              Cognitive state architecture cleanly separating active Working
-              Memory (Redis conversation scratchpad & LangGraph checkpointer)
-              from Long-Term Memory (PostgreSQL pgvector semantic embeddings
-              with cosine similarity scoring).
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 shrink-0">
-          <GlassButton
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowCreateModal(true)}
+            leftIcon={<Plus size={14} />}
+          >
+            Add Memory
+          </Button>
+          <Button
             variant="secondary"
             size="sm"
             onClick={exportKnowledgeJson}
-            leftIcon={<Download className="w-3.5 h-3.5" />}
+            disabled={memories.length === 0}
+            leftIcon={<Download size={14} />}
           >
-            Export Memory
-          </GlassButton>
-          <GlassButton
+            Export
+          </Button>
+          <Button
             variant="danger"
             size="sm"
             onClick={() => setShowPurgeModal(true)}
-            leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+            leftIcon={<Trash2 size={14} />}
           >
             Purge Memory
-          </GlassButton>
+          </Button>
         </div>
-      </GlassCard>
-
-      {/* Memory Architecture 2-Pillar Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Working Memory Box */}
-        <GlassCard
-          variant="default"
-          padding="md"
-          className="flex flex-col justify-between gap-3"
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold font-mono text-zinc-100 uppercase">
-                    Working Memory (Active Session)
-                  </h3>
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    Redis 7.2 + LangGraph State
-                  </span>
-                </div>
-              </div>
-              <GlassBadge variant="emerald" size="sm" dot mono>
-                Operational
-              </GlassBadge>
-            </div>
-
-            <p className="text-xs text-zinc-300 leading-relaxed font-sans mt-1">
-              Short-term scratchpad holding live multi-turn chat turns, DAG
-              execution traces, and tool parameter buffers with zero persistent
-              token bleed.
-            </p>
-          </div>
-
-          <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1.5 font-mono text-[11px]">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span>Active Context Buffer</span>
-              <span className="text-teal-300 font-bold">
-                14,280 / 1,000,000 tokens
-              </span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full bg-teal-400 rounded-full"
-                style={{ width: "2%" }}
-              />
-            </div>
-          </div>
-        </GlassCard>
-
-        {/* Long-Term Memory Box */}
-        <GlassCard
-          variant="default"
-          padding="md"
-          className="flex flex-col justify-between gap-3"
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                  <Database className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold font-mono text-zinc-100 uppercase">
-                    Long-Term Memory (pgvector Embeddings)
-                  </h3>
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    PostgreSQL 17 `memory_items`
-                  </span>
-                </div>
-              </div>
-              <GlassBadge variant="purple" size="sm" mono>
-                Cosine Similarity
-              </GlassBadge>
-            </div>
-
-            <p className="text-xs text-zinc-300 leading-relaxed font-sans mt-1">
-              768-dimensional semantic vectors indexing user preference
-              calibrations, repository architecture rules, and historical
-              episodic traces with automated decay.
-            </p>
-          </div>
-
-          <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between font-mono text-[11px] text-zinc-400">
-            <span>
-              Vector Dimensions:{" "}
-              <strong className="text-zinc-200">768-d</strong>
-            </span>
-            <span>
-              Index Type:{" "}
-              <strong className="text-purple-300">HNSW (Cosine)</strong>
-            </span>
-            <span>
-              Items:{" "}
-              <strong className="text-emerald-300">
-                {loading ? "Loading..." : `${filteredMemories.length} Active`}
-              </strong>
-            </span>
-          </div>
-        </GlassCard>
       </div>
 
-      {/* Filter and Search Bar */}
-      <GlassCard
-        variant="default"
-        padding="sm"
-        className="flex flex-col sm:flex-row items-center justify-between gap-3"
+      <div
+        role="group"
+        aria-label="Filter by category"
+        className="flex min-w-0 flex-wrap items-center gap-1.5"
       >
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto text-xs">
-          {[
-            { id: "all", label: "All Categories" },
-            { id: "preference", label: "User Preferences" },
-            { id: "project", label: "Project Governance" },
-            { id: "knowledge", label: "Knowledge Standards" },
-            { id: "episodic", label: "Episodic Traces" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setCategoryFilter(tab.id)}
-              className={`px-3 py-1.5 rounded-lg font-medium text-xs whitespace-nowrap transition-all duration-150 cursor-pointer ${
-                categoryFilter === tab.id
-                  ? "bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-xs"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="w-full sm:w-72">
-          <GlassInput
-            placeholder="Semantic query vector search…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            leftIcon={<Search className="w-3.5 h-3.5 text-zinc-500" />}
-            clearable
-            onClear={() => setSearchQuery("")}
-            className="py-1.5 text-xs"
-          />
-        </div>
-      </GlassCard>
-
-      {/* Memory Items Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredMemories.map((mem) => (
-          <GlassCard
-            key={mem.id}
-            variant="default"
-            hoverEffect="lift-glow"
-            padding="md"
-            onClick={() => setSelectedEntry(mem)}
-            className="flex flex-col justify-between gap-3.5 cursor-pointer group"
+        {CATEGORIES.map((tab) => (
+          <Button
+            key={tab.id}
+            size="sm"
+            variant={categoryFilter === tab.id ? "primary" : "secondary"}
+            aria-pressed={categoryFilter === tab.id}
+            onClick={() => setCategoryFilter(tab.id)}
           >
-            <div className="flex flex-col gap-2">
-              <div className="flex items-start justify-between gap-2">
-                <h4 className="text-xs font-bold text-zinc-100 font-mono group-hover:text-teal-300 transition-colors">
-                  {mem.title}
-                </h4>
-                {getCategoryBadge(mem.category)}
-              </div>
-
-              <p className="text-xs text-zinc-300/90 leading-relaxed font-sans line-clamp-3">
-                {mem.content}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2 pt-3 border-t border-white/5 font-mono text-[11px]">
-              <div className="flex items-center justify-between text-zinc-400">
-                <span className="flex items-center gap-1.5 truncate max-w-[220px]">
-                  <BookOpen className="w-3.5 h-3.5 text-teal-400/80 shrink-0" />
-                  <span className="truncate">{mem.source}</span>
-                </span>
-                {getRelevanceBar(mem.relevance)}
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-0.5">
-                <span>Vector: {mem.vectorDim}-d</span>
-                {mem.decayExempt ? (
-                  <span className="text-emerald-400/80 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Decay Exempt</span>
-                  </span>
-                ) : (
-                  <span className="text-amber-400/80 flex items-center gap-1">
-                    <Flame className="w-3 h-3" />
-                    <span>30-Day Half-Life</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          </GlassCard>
+            {tab.label}
+          </Button>
         ))}
       </div>
 
-      {/* Memory Detail Modal */}
+      <div className="min-w-0 max-w-xl">
+        <GlassInput
+          placeholder="Search memories"
+          aria-label="Search memories"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          leftIcon={<Search size={14} aria-hidden="true" />}
+          clearable
+          onClear={() => setSearchInput("")}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="h-full min-h-0 min-w-0">
+      <Pane
+        aria-label="Memory"
+        header={header}
+        bodyLabel="Memories"
+        bodyClassName="p-4"
+      >
+        <div className="mx-auto grid min-w-0 max-w-5xl gap-4">
+          {purgeSuccess && (
+            <Notice
+              tone="success"
+              title="All memories erased"
+              onDismiss={() => setPurgeSuccess(false)}
+            >
+              Nothing is stored for you any more.
+            </Notice>
+          )}
+          {actionError !== null && (
+            <Notice tone="danger" onDismiss={() => setActionError(null)}>
+              {actionError}
+            </Notice>
+          )}
+
+          {error !== null && (
+            <ErrorState
+              title={error}
+              message="Your memories are safe; this view just could not reach them."
+              retry={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leftIcon={<RefreshCw size={14} />}
+                  onClick={() => void loadMemories()}
+                >
+                  Retry
+                </Button>
+              }
+            />
+          )}
+
+          {loading && (
+            <div aria-busy="true" className="grid gap-3">
+              <p className="m-0 text-maya-small text-maya-muted">
+                Loading memories…
+              </p>
+              <Skeleton lines={3} />
+              <Skeleton lines={3} />
+            </div>
+          )}
+
+          {!loading && error === null && memories.length === 0 && (
+            <EmptyState
+              icon={Brain}
+              title="No memory items recorded"
+              description={
+                searching
+                  ? `No memories matched "${searchQuery.trim()}".`
+                  : "Things MAYA learns from your conversations, and anything you add yourself, will appear here."
+              }
+              action={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leftIcon={<Plus size={14} />}
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  Add first memory item
+                </Button>
+              }
+            />
+          )}
+
+          {!loading && memories.length > 0 && (
+            <ul className="m-0 grid min-w-0 list-none gap-3 p-0">
+              {memories.map((mem) => (
+                <MenuSurface
+                  as="li"
+                  key={mem.id}
+                  label={nameOf(mem)}
+                  getItems={() => memoryItems(mem)}
+                  className="min-w-0 shrink-0 rounded-maya-lg overflow-hidden border border-maya-border bg-maya-raised"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEntry(mem)}
+                    aria-label={`Open memory ${nameOf(mem)}`}
+                    className="motion-interactive grid w-full min-w-0 cursor-pointer gap-2 p-3 text-left hover:bg-maya-hover"
+                  >
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Badge tone={CATEGORY_TONE[mem.category]}>
+                        {CATEGORY_LABEL[mem.category]}
+                      </Badge>
+                      {mem.relevance !== undefined && (
+                        <Badge tone="neutral">
+                          {Math.round(mem.relevance * 100)}% match
+                        </Badge>
+                      )}
+                      {mem.title !== undefined && (
+                        <Truncate
+                          className="min-w-0 flex-1 text-maya-small font-medium text-maya-text"
+                          title={mem.title}
+                        >
+                          {mem.title}
+                        </Truncate>
+                      )}
+                    </span>
+                    <Truncate
+                      as="span"
+                      lines={3}
+                      dir="auto"
+                      className="text-maya-body text-maya-text"
+                      title={mem.content}
+                    >
+                      {mem.content}
+                    </Truncate>
+                  </button>
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-maya-border px-3 py-2 text-maya-caption text-maya-muted">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+                      <span>{formatDate(mem.createdAt)}</span>
+                      {mem.source !== undefined && (
+                        <Truncate
+                          className="max-w-64"
+                          title={`Source: ${mem.source}`}
+                        >
+                          {mem.source}
+                        </Truncate>
+                      )}
+                      <Retention entry={mem} />
+                    </span>
+                    <DeleteControl
+                      entry={mem}
+                      busy={deletingId === mem.id}
+                      onConfirm={() => void handleDeleteMemory(mem.id)}
+                    />
+                  </div>
+                </MenuSurface>
+              ))}
+            </ul>
+          )}
+
+          {!loading && hasMore && !searching && (
+            <div className="flex justify-center">
+              <Button
+                variant="secondary"
+                loading={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </div>
+      </Pane>
+
+      {forgetting !== null && (
+        <ConfirmDeleteDialog
+          title="Forget this memory?"
+          removes={[`The memory "${nameOf(forgetting)}".`]}
+          keeps={["Your conversations and files."]}
+          confirmLabel="Forget memory"
+          busy={deletingId === forgetting.id}
+          onClose={() => setForgetting(null)}
+          onConfirm={() => {
+            const id = forgetting.id;
+            void handleDeleteMemory(id).finally(() => setForgetting(null));
+          }}
+        />
+      )}
+
       {selectedEntry && (
         <GlassModal
-          isOpen={Boolean(selectedEntry)}
+          isOpen
           onClose={() => setSelectedEntry(null)}
           title={
-            <div className="flex items-center gap-2 font-mono text-zinc-100">
-              <Brain className="w-5 h-5 text-teal-400" />
-              <span>{selectedEntry.title}</span>
-            </div>
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              {selectedEntry.title ?? CATEGORY_LABEL[selectedEntry.category]}
+            </span>
           }
-          description="Vector semantic embedding metadata and source document citation."
+          description={`${CATEGORY_LABEL[selectedEntry.category]} memory, saved ${formatDate(selectedEntry.createdAt)}`}
           size="md"
         >
-          <div className="flex flex-col gap-3.5 text-xs font-mono">
-            <div className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/10">
-              <div>
-                <span className="text-[10px] text-zinc-500 uppercase">
-                  Cosine Similarity
-                </span>
-                <div className="text-teal-300 font-bold text-sm">
-                  {(selectedEntry.relevance * 100).toFixed(1)}% Match Score
+          <div className="grid min-w-0 gap-4 text-maya-small">
+            {selectedEntry.relevance !== undefined && (
+              <p className="m-0 text-maya-secondary">
+                Match for your search:{" "}
+                {Math.round(selectedEntry.relevance * 100)}%
+              </p>
+            )}
+
+            <div className="grid gap-1">
+              <span className={LABEL}>Memory</span>
+              <WrapText
+                as="p"
+                dir="auto"
+                className="m-0 block rounded-maya-md border border-maya-border bg-maya-code p-3 text-maya-body text-maya-text"
+              >
+                {selectedEntry.content}
+              </WrapText>
+            </div>
+
+            <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-maya-caption text-maya-muted">
+              <Retention entry={selectedEntry} />
+            </p>
+
+            {selectedEntry.source && (
+              <div className="grid gap-1">
+                <span className={LABEL}>Source</span>
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-maya-secondary">
+                  <WrapText className="min-w-0">
+                    {selectedEntry.source}
+                  </WrapText>
+                  {safeHref(selectedEntry.sourceUrl) && (
+                    <a
+                      href={safeHref(selectedEntry.sourceUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-maya-link underline"
+                    >
+                      Open reference
+                    </a>
+                  )}
                 </div>
               </div>
-              <GlassBadge variant="purple" size="sm" mono>
-                {selectedEntry.vectorDim}-d Vector
-              </GlassBadge>
-            </div>
+            )}
 
-            <div>
-              <span className="text-zinc-400 font-semibold uppercase text-[10px] tracking-wider">
-                Full Content
-              </span>
-              <p className="text-zinc-200 mt-1 leading-relaxed bg-black/40 p-3.5 rounded-xl border border-white/10 font-sans">
-                {selectedEntry.content}
-              </p>
-            </div>
+            {Object.keys(selectedEntry.metadata ?? {}).length > 0 && (
+              <details className="min-w-0">
+                <summary className="cursor-pointer text-maya-caption text-maya-secondary">
+                  Technical details
+                </summary>
+                <CodeBlockShell label="Memory metadata" className="mt-2">
+                  {JSON.stringify(selectedEntry.metadata, null, 2)}
+                </CodeBlockShell>
+              </details>
+            )}
 
-            <div>
-              <span className="text-zinc-400 font-semibold uppercase text-[10px] tracking-wider">
-                Source Document Citation
-              </span>
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-2 mt-1">
-                <span className="text-zinc-300 break-all">
-                  {selectedEntry.source}
-                </span>
-                {selectedEntry.sourceUrl && (
-                  <span className="text-teal-400 shrink-0 font-sans text-[11px]">
-                    Verified Reference
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <span className="text-zinc-400 font-semibold uppercase text-[10px] tracking-wider">
-                Postgres `metadata_json`
-              </span>
-              <pre className="p-3 mt-1 rounded-xl bg-black/50 border border-white/10 text-[11px] font-mono text-zinc-300 overflow-x-auto max-h-48">
-                {JSON.stringify(selectedEntry.metadata, null, 2)}
-              </pre>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-              <GlassButton
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-maya-border pt-3">
+              <DeleteControl
+                entry={selectedEntry}
+                label="Delete item"
+                busy={deletingId === selectedEntry.id}
+                onConfirm={() => void handleDeleteMemory(selectedEntry.id)}
+              />
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedEntry(null)}
               >
                 Close
-              </GlassButton>
+              </Button>
             </div>
           </div>
         </GlassModal>
       )}
 
-      {/* GDPR / CCPA Purge Confirmation Modal */}
+      {showCreateModal && (
+        <GlassModal
+          isOpen
+          onClose={() => setShowCreateModal(false)}
+          title="Add Memory Item"
+          description="Save something you want MAYA to remember."
+          size="md"
+        >
+          <form
+            onSubmit={handleCreateMemory}
+            className="grid min-w-0 gap-4 text-maya-small"
+          >
+            <div className="grid gap-1.5">
+              <label htmlFor="memory-create-category" className={LABEL}>
+                Category
+              </label>
+              <select
+                id="memory-create-category"
+                value={createCategory}
+                onChange={(e) => setCreateCategory(toCategory(e.target.value))}
+                className="w-full rounded-maya-md border border-maya-control-border bg-maya-pane px-3 py-2 text-maya-body text-maya-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-maya-focus"
+              >
+                <option value="preference">Preference</option>
+                <option value="project">Project</option>
+                <option value="knowledge">Knowledge</option>
+                <option value="episodic">Episode</option>
+              </select>
+            </div>
+
+            <GlassTextarea
+              label="Content"
+              required
+              value={createContent}
+              onChange={(e) => setCreateContent(e.target.value)}
+              placeholder="Enter memory content..."
+              rows={4}
+              dir="auto"
+            />
+
+            <label className="flex cursor-pointer items-center gap-2 text-maya-secondary">
+              <input
+                type="checkbox"
+                checked={createPermanent}
+                onChange={(e) => setCreatePermanent(e.target.checked)}
+                className="size-4 accent-maya-accent"
+              />
+              <span>Keep permanently (never fades)</span>
+            </label>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-maya-border pt-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                disabled={!createContent.trim()}
+                loading={isCreating}
+              >
+                Save Memory
+              </Button>
+            </div>
+          </form>
+        </GlassModal>
+      )}
+
       {showPurgeModal && (
         <GlassModal
-          isOpen={showPurgeModal}
+          isOpen
           onClose={() => {
             setShowPurgeModal(false);
             setPurgeConfirmation("");
           }}
-          title={
-            <div className="flex items-center gap-2 text-rose-400 font-mono">
-              <ShieldAlert className="w-5 h-5" />
-              <span>Confirm Data Purge (GDPR / CCPA)</span>
-            </div>
-          }
-          description="Irreversible purge of tenant vector embeddings and session traces."
+          title="Erase all memory"
+          description="This cannot be undone."
           size="sm"
         >
-          <div className="flex flex-col gap-4 text-xs font-mono">
-            <p className="text-zinc-300 leading-relaxed font-sans">
-              This will permanently delete all long-term vector embeddings,
-              working scratchpad traces, and calibrated agent preferences
-              associated with workspace:{" "}
-              <strong className="text-white font-mono">
-                {principal?.workspace_id
-                  ? principal.workspace_id.slice(0, 12)
-                  : "current_workspace"}
-              </strong>
-              . Type <strong className="text-rose-400">PURGE</strong> to
-              confirm.
+          <div className="grid min-w-0 gap-4 text-maya-small">
+            <p className="m-0 text-maya-secondary">
+              Every memory MAYA holds for you will be permanently deleted. Type{" "}
+              <strong className="text-maya-danger">PURGE</strong> to confirm.
             </p>
 
             <GlassInput
               placeholder="Type PURGE"
+              aria-label="Type PURGE to confirm"
               value={purgeConfirmation}
               onChange={(e) => setPurgeConfirmation(e.target.value)}
-              className="font-mono text-center tracking-widest text-sm"
             />
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-              <GlassButton
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-maya-border pt-3">
+              <Button
                 variant="ghost"
                 size="sm"
+                leftIcon={<X size={14} />}
                 onClick={() => {
                   setShowPurgeModal(false);
                   setPurgeConfirmation("");
                 }}
               >
                 Cancel
-              </GlassButton>
-              <GlassButton
+              </Button>
+              <Button
                 variant="danger"
                 size="sm"
-                disabled={purgeConfirmation !== "PURGE" || isPurging}
-                onClick={handleExecutePurge}
+                disabled={purgeConfirmation !== "PURGE"}
+                loading={isPurging}
+                onClick={() => void handleExecutePurge()}
               >
-                {isPurging ? "Purging..." : "Erase All Memory Items"}
-              </GlassButton>
+                Erase All Memory Items
+              </Button>
             </div>
           </div>
         </GlassModal>
-      )}
-
-      {/* Purge Notification */}
-      {purgeSuccess && (
-        <div className="fixed bottom-6 right-6 z-40 max-w-sm">
-          <GlassCard
-            variant="teal"
-            padding="sm"
-            className="flex items-center gap-3 border-teal-500/40"
-          >
-            <CheckCircle2 className="w-5 h-5 text-teal-400 shrink-0" />
-            <div className="text-xs">
-              <p className="font-semibold text-zinc-100">
-                Purge Request Submitted
-              </p>
-              <p className="text-zinc-400 font-mono text-[11px]">
-                GDPR/CCPA compliance tombstone scheduled.
-              </p>
-            </div>
-          </GlassCard>
-        </div>
       )}
     </div>
   );

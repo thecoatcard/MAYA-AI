@@ -240,3 +240,10 @@ class TestBrowserToolPermissions:
                 {"amount": 100.0, "currency": "USD"},
             )
         assert "restricted" in str(exc_info.value).lower()
+
+
+def test_browser_handler_has_no_default_signing_key() -> None:
+    """A handler without an explicit key must refuse to exist (no forgeable built-in default)."""
+    for missing in (None, "", "   "):
+        with pytest.raises(ValueError, match="signing key"):
+            BrowserToolHandler(secret_key=missing)

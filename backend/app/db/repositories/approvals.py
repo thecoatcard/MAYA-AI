@@ -89,7 +89,7 @@ class ApprovalRecord:
     payload_hash: str
     tier: Literal["APPROVAL_REQUIRED", "RESTRICTED"]
     action_description: str
-    payload_diff: dict[str, Any] | list[Any] | None
+    payload_diff: dict[str, Any] | list[Any] | str | None
     status: str
     approval_token: str | None
     token_jti: UUID | None
@@ -108,16 +108,28 @@ class ApprovalRecord:
     execution_output: dict[str, Any] | list[Any] | None = None
 
 
+def _decode_json(value: Any) -> Any:
+    """A JSONB value as Python data, whichever form the driver returned it in.
+
+    Depending on the driver codec a JSONB value arrives already decoded or as JSON text. A JSON
+    string value (a plain-text diff, for example an e-mail's) arrives as a ``str`` that is NOT JSON
+    text, so a failed parse keeps the string. A single such row must never make the whole approval
+    list fail with a 500.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
 def _row_to_record(row: Any) -> ApprovalRecord:
-    args = row.tool_args
-    if isinstance(args, str):
-        args = json.loads(args)
-    diff = row.payload_diff
-    if isinstance(diff, str):
-        diff = json.loads(diff)
-    output = getattr(row, "execution_output", None)
-    if isinstance(output, str):
-        output = json.loads(output)
+    args = _decode_json(row.tool_args)
+    if not isinstance(args, dict):
+        args = {}
+    diff = _decode_json(row.payload_diff)
+    output = _decode_json(getattr(row, "execution_output", None))
 
     return ApprovalRecord(
         id=row.id,
@@ -166,7 +178,7 @@ class ApprovalRepository:
         payload_hash: str,
         tier: str,
         action_description: str,
-        payload_diff: dict[str, Any] | list[Any] | None,
+        payload_diff: dict[str, Any] | list[Any] | str | None,
         expires_at: datetime,
         idempotency_key: str | None = None,
         now: datetime | None = None,

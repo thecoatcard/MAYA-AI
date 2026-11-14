@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from app.auth.events import LoggingAuthEvents
+from app.auth.pending import RedisPendingSignups
 from app.auth.policy import AuthPolicy
 from app.auth.postgres import PostgresAuthStore
 from app.auth.service import AuthService
@@ -30,6 +31,7 @@ def build_email_sender(settings: Settings) -> EmailSender | None:
 
 def build_auth_service(settings: Settings, resources: Resources) -> AuthService:
     clock = SystemClock()
+    otp_key = settings.otp_hmac_key.get_secret_value().encode()
     return AuthService(
         store=PostgresAuthStore(resources.engine),
         passwords=PasswordService(),
@@ -38,11 +40,13 @@ def build_auth_service(settings: Settings, resources: Resources) -> AuthService:
             clock,
             timedelta(seconds=settings.access_token_ttl_seconds),
         ),
-        otp_key=settings.otp_hmac_key.get_secret_value().encode(),
+        otp_key=otp_key,
         clock=clock,
         limiter=RedisRateLimiter(resources.redis, clock),
         events=LoggingAuthEvents(),
         email_sender=build_email_sender(settings),
+        pending_signups=RedisPendingSignups(resources.redis, otp_key),
+        local_owner_bootstrap=settings.local_owner_bootstrap,
         policy=AuthPolicy(
             resend_cooldown=timedelta(seconds=settings.otp_resend_cooldown_seconds),
             refresh_ttl=timedelta(seconds=settings.refresh_token_ttl_seconds),

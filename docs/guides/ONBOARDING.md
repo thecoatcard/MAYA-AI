@@ -15,6 +15,18 @@ with Linux containers and Node.js 22.12+ or 24+. Follow the
 [local runbook](../operations/LOCAL_DEVELOPMENT.md) to start the API, web and data services.
 Dependency installation and infrastructure changes require human approval when performed by agents.
 
+## Desktop app (optional)
+
+The Electron desktop shell lives in `apps/desktop` ([ADR-0013](../adr/0013-desktop-shell-electron.md)). It needs Docker Desktop running and `backend/.venv`. Build the web export once, then start it:
+
+```bash
+npm --prefix apps/desktop install
+npm --prefix apps/desktop run build:web
+npm --prefix apps/desktop run dev
+```
+
+See [`apps/desktop/README.md`](../../apps/desktop/README.md) for the smoke check, packaging and troubleshooting.
+
 ## One-command setup
 
 ```bash

@@ -7,9 +7,35 @@ from typing import Literal
 
 from app.gateway.exceptions import GatewayConfigurationError, UnsupportedAliasTransportError
 
-TransportType = Literal["rest", "websocket", "managed_agent", "unsupported"]
+TransportType = Literal["rest", "websocket", "managed_agent", "decision", "unsupported"]
 MODEL_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][-a-zA-Z0-9.]{1,63}$")
-ALLOWED_OVERRIDE_ALIASES = frozenset({"orchestrator", "heavy", "lite", "embed", "embed-fallback"})
+ALLOWED_OVERRIDE_ALIASES = frozenset(
+    {"orchestrator", "heavy", "lite", "embed", "embed-fallback", "search"}
+)
+# Text-generation REST aliases an agent call may use (MAYA_AGENT_MODEL_ALIAS / _FALLBACK_ALIAS).
+AGENT_ALIAS_CHOICES = frozenset({"lite", "orchestrator", "heavy"})
+# Aliases a grounded (Google Search) call may use: the agent aliases plus the dedicated ``search``
+# alias, whose model has a grounding quota of its own (docs/architecture/MODEL_GATEWAY.md).
+SEARCH_ALIAS_CHOICES = AGENT_ALIAS_CHOICES | {"search"}
+_LIVE_ALIASES = frozenset({"live", "live-thinking"})
+# Last-resort text model: plain generation chains (lite, orchestrator, heavy) end here when every
+# model before it is overloaded or out of quota. It is the ``search`` alias (gemini-2.5-flash), so
+# its model id follows GEMINI_MODEL_OVERRIDES; its price is unknown and accounted as such.
+LAST_RESORT_ALIAS = "search"
+
+
+def validate_agent_alias(
+    value: str, setting: str, choices: frozenset[str] = AGENT_ALIAS_CHOICES
+) -> str:
+    """Return ``value`` if an agent may use it, else raise ValueError with a clear reason."""
+    if value in _LIVE_ALIASES:
+        raise ValueError(
+            f"{setting} cannot be '{value}': live is a stateful audio WebSocket API, "
+            "use it for voice only"
+        )
+    if value not in choices:
+        raise ValueError(f"{setting} must be an enabled REST text alias: {sorted(choices)}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -48,6 +74,16 @@ class ModelRegistry:
 
     def __init__(self, specs: dict[str, ModelSpec]) -> None:
         self._specs = dict(specs)
+        # Aliases whose model startup verification could not find. Fallback traversal skips them.
+        self._unavailable: set[str] = set()
+
+    def mark_unavailable(self, alias: str) -> None:
+        """Record that ``alias``' model is missing at the provider; fallbacks skip it."""
+        if alias in self._specs:
+            self._unavailable.add(alias)
+
+    def is_unavailable(self, alias: str) -> bool:
+        return alias in self._unavailable
 
     @property
     def specs(self) -> dict[str, ModelSpec]:
@@ -80,6 +116,43 @@ class ModelRegistry:
             spec = self.get(current)
             current = spec.fallback_alias
 
+        return chain
+
+    def candidate_chain(
+        self,
+        start_alias: str,
+        *,
+        allow_fallback: bool = True,
+        fallback_alias: str | None = None,
+        last_resort: bool = False,
+    ) -> list[str]:
+        """The ordered aliases a call may try: no duplicates (cycle safe), unavailable skipped.
+
+        ``fallback_alias`` replaces the registry chain with that single alias. ``last_resort``
+        appends the last-resort text model (``LAST_RESORT_ALIAS``) when the call starts on a
+        text-generation alias and the last-resort alias is an enabled REST model.
+        """
+        if not allow_fallback:
+            return [start_alias]
+        if fallback_alias is not None:
+            chain = (
+                [start_alias] if fallback_alias == start_alias else [start_alias, fallback_alias]
+            )
+        else:
+            chain = self.resolve_fallback_chain(start_alias)
+        # Skip aliases startup verification found missing (never the alias the caller asked for).
+        chain = [a for i, a in enumerate(chain) if i == 0 or a not in self._unavailable] or chain
+        if last_resort and start_alias in AGENT_ALIAS_CHOICES and LAST_RESORT_ALIAS not in chain:
+            spec = self._specs.get(LAST_RESORT_ALIAS)
+            if (
+                spec is not None
+                and spec.enabled
+                and spec.transport == "rest"
+                and LAST_RESORT_ALIAS not in self._unavailable
+                # A last resort that is the same model as one already in the chain adds nothing.
+                and all(self._specs[a].model_id != spec.model_id for a in chain)
+            ):
+                chain.append(LAST_RESORT_ALIAS)
         return chain
 
     def validate_configuration(self) -> None:
@@ -126,13 +199,33 @@ class ModelRegistry:
                     f"Invalid model_id '{new_model_id}' for alias '{alias}'"
                 )
 
-            updated_specs[alias] = replace(
-                spec,
-                model_id=new_model_id,
-                price_unknown=True,
+            # Pointing an alias at a model the registry already prices (for example the
+            # orchestrator at the lite model) keeps that model's rates; any other id has no
+            # known price.
+            priced = next(
+                (
+                    known
+                    for known in self._specs.values()
+                    if known.model_id == new_model_id
+                    and known.transport == "rest"
+                    and not known.price_unknown
+                ),
+                None,
             )
+            if priced is not None:
+                updated_specs[alias] = replace(
+                    spec,
+                    model_id=new_model_id,
+                    cost_per_1m_input=priced.cost_per_1m_input,
+                    cost_per_1m_output=priced.cost_per_1m_output,
+                    cost_per_1m_cached=priced.cost_per_1m_cached,
+                    price_unknown=False,
+                )
+            else:
+                updated_specs[alias] = replace(spec, model_id=new_model_id, price_unknown=True)
 
         new_registry = ModelRegistry(updated_specs)
+        new_registry._unavailable = set(self._unavailable)
         new_registry.validate_configuration()
         return new_registry
 
@@ -143,7 +236,7 @@ def build_default_registry(overrides: dict[str, str] | None = None) -> ModelRegi
         # Core MVP HTTPS models
         "orchestrator": ModelSpec(
             alias="orchestrator",
-            model_id="gemini-3.8-flash",
+            model_id="gemini-3.5-flash-lite",
             fallback_alias="lite",
             context_input_limit=1_048_576,
             context_output_limit=65_536,
@@ -156,7 +249,7 @@ def build_default_registry(overrides: dict[str, str] | None = None) -> ModelRegi
         ),
         "heavy": ModelSpec(
             alias="heavy",
-            model_id="gemini-4-argon",
+            model_id="gemini-4-hydrogen",
             fallback_alias="orchestrator",
             context_input_limit=1_048_576,
             context_output_limit=65_536,
@@ -169,7 +262,7 @@ def build_default_registry(overrides: dict[str, str] | None = None) -> ModelRegi
         ),
         "lite": ModelSpec(
             alias="lite",
-            model_id="gemini-3.5-flash-lite",
+            model_id="gemini-3.1-flash-lite",
             fallback_alias="orchestrator",
             context_input_limit=1_048_576,
             context_output_limit=65_536,
@@ -179,6 +272,24 @@ def build_default_registry(overrides: dict[str, str] | None = None) -> ModelRegi
             transport="rest",
             verify_at_startup=True,
             enabled=True,
+        ),
+        # Grounded web search. Gemini 3.x grounding was quota-blocked for the whole key pool while
+        # gemini-2.5-flash grounding worked, so grounded calls use their own alias and model.
+        # The model id is not priced in this registry: do not invent a price.
+        "search": ModelSpec(
+            alias="search",
+            model_id="gemini-3.5-flash-lite",
+            fallback_alias=None,
+            context_input_limit=1_048_576,
+            context_output_limit=65_536,
+            cost_per_1m_input=None,
+            cost_per_1m_output=None,
+            cost_per_1m_cached=None,
+            transport="rest",
+            verify_at_startup=False,
+            enabled=True,
+            price_unknown=True,
+            context_unverified=True,
         ),
         "embed": ModelSpec(
             alias="embed",
@@ -235,6 +346,22 @@ def build_default_registry(overrides: dict[str, str] | None = None) -> ModelRegi
             transport="websocket",
             verify_at_startup=False,
             enabled=True,
+        ),
+        # Decision model (ADR-0029): advisory yes/no, pick-one and score judgements through its own
+        # REST endpoint (app.decisions), not generateContent, so the generate gateway refuses it.
+        "decision": ModelSpec(
+            alias="decision",
+            model_id="gemini-decision-1",
+            fallback_alias=None,
+            context_input_limit=262_144,
+            context_output_limit=None,
+            cost_per_1m_input=Decimal("0.10"),
+            cost_per_1m_output=None,
+            cost_per_1m_cached=None,
+            transport="decision",
+            verify_at_startup=False,
+            enabled=True,
+            context_unverified=True,
         ),
         # Managed async agent (no automatic fallback; plan specifies 'with a custom plan')
         "research": ModelSpec(

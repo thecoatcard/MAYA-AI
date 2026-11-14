@@ -18,6 +18,9 @@ class VerificationReport(BaseModel):
     size_bytes: int
     checks_passed: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # Findings that do not fail the file (for example a slide count that differs from the stated
+    # one: count policy, the file is delivered with a note).
+    warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

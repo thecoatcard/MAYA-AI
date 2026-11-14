@@ -15,14 +15,9 @@ import {
   refreshSession,
 } from "./auth-session";
 import { readSseFrames, SseBufferOverflowError, type SseFrame } from "./sse";
+import { readInputRequest, type ChatInputRequest } from "./ask-user";
 
 export const DEFAULT_API_BASE_URL = "";
-
-/**
- * Owner-approved input limit shown in the UI (MAYA_CHAT_MAX_MESSAGE_CHARS on
- * the server). The server remains the authority.
- */
-export const CHAT_MAX_MESSAGE_CHARS = 8000;
 
 const CHAT_PATH = "/api/v1/chat";
 const MAX_RETRY_AFTER_SECONDS = 3600;
@@ -53,7 +48,7 @@ export type KnownApiErrorCode =
   | "stream_protocol_error"
   | "unknown_error";
 
-/** A JSON error body `{ "error": code }` (or a malformed response) from the API. */
+/** A JSON error body `{ "error": code, "message"?: text }` (or a malformed response) from the API. */
 export class ApiError extends Error {
   readonly status: number;
   /** The documented error code, or "unknown_error" when the body had none. */
@@ -61,6 +56,8 @@ export class ApiError extends Error {
   readonly fields: readonly string[];
   /** Seconds from the Retry-After header, or null. */
   readonly retryAfterSeconds: number | null;
+  /** Server-authored message, if provided in error body. */
+  readonly serverMessage: string | null;
 
   constructor(
     status: number,
@@ -68,14 +65,32 @@ export class ApiError extends Error {
     options: {
       fields?: readonly string[];
       retryAfterSeconds?: number | null;
+      message?: string | null;
     } = {},
   ) {
-    super(`The API answered ${status} (${code}).`);
+    const errorText =
+      typeof options.message === "string" && options.message.trim().length > 0
+        ? options.message
+        : `The API answered ${status} (${code}).`;
+    super(errorText);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fields = options.fields ?? [];
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
+    this.serverMessage = options.message ?? null;
+  }
+}
+
+/** Distinct error thrown when proxy fails with bare "Internal Server Error" or upstream connection fails. */
+export class BackendUnreachableError extends Error {
+  constructor(
+    message = "The backend service is unreachable.",
+    cause?: unknown,
+  ) {
+    super(message);
+    this.name = "BackendUnreachableError";
+    this.cause = cause;
   }
 }
 
@@ -144,32 +159,110 @@ export async function apiErrorFromResponse(
 ): Promise<ApiError> {
   let code = "unknown_error";
   let fields: string[] = [];
+  let serverMessage: string | null = null;
   try {
-    const body: unknown = await response.json();
-    if (isRecord(body)) {
-      if (isCodeLike(body.error)) {
-        code = body.error;
-      }
-      if (Array.isArray(body.fields)) {
-        fields = body.fields
-          .filter((field): field is string => typeof field === "string")
-          .slice(0, 20);
-      }
+    const rawText = await response.text();
+    const trimmed = rawText.trim();
+    if (response.status >= 500 && trimmed.startsWith("Internal Server Error")) {
+      throw new BackendUnreachableError(
+        `Backend service unreachable (${response.status}): ${trimmed}`,
+      );
     }
-  } catch {
-    // Not JSON (for example a proxy error page): keep the generic code.
+    try {
+      const body: unknown = JSON.parse(rawText);
+      if (isRecord(body)) {
+        if (isCodeLike(body.error)) {
+          code = body.error;
+        } else if (isCodeLike(body.detail)) {
+          code = body.detail;
+        } else if (
+          typeof body.detail === "string" &&
+          body.detail.trim().length > 0 &&
+          body.detail.length <= 300
+        ) {
+          serverMessage = body.detail;
+        } else if (isRecord(body.detail)) {
+          if (isCodeLike(body.detail.error)) {
+            code = body.detail.error;
+          }
+          if (typeof body.detail.message === "string") {
+            serverMessage = body.detail.message;
+          }
+        }
+
+        if (
+          typeof body.message === "string" &&
+          body.message.trim().length > 0
+        ) {
+          serverMessage = body.message;
+        }
+        if (Array.isArray(body.fields)) {
+          fields = body.fields
+            .filter((field): field is string => typeof field === "string")
+            .slice(0, 20);
+        }
+      }
+    } catch (parseErr) {
+      if (parseErr instanceof BackendUnreachableError) {
+        throw parseErr;
+      }
+      // Not JSON
+    }
+  } catch (err) {
+    if (err instanceof BackendUnreachableError) {
+      throw err;
+    }
+    // Network or other error reading text
   }
   return new ApiError(response.status, code, {
     fields,
     retryAfterSeconds: parseRetryAfter(response.headers.get("Retry-After")),
+    message: serverMessage,
   });
+}
+
+/**
+ * Query the readiness endpoint GET /api/v1/readyz through the same-origin proxy.
+ * Checks PostgreSQL and Redis health as documented in docs/api/HEALTH.md.
+ */
+export async function checkBackendReady(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<{ ready: boolean; reason?: string }> {
+  try {
+    const response = await fetchImpl(`${getApiBaseUrl()}/api/v1/readyz`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      let reason = `status_${response.status}`;
+      try {
+        const data = (await response.json()) as { status?: string };
+        if (data?.status) {
+          reason = data.status;
+        }
+      } catch {
+        // ignore
+      }
+      return { ready: false, reason };
+    }
+    const data = (await response.json()) as { status?: string };
+    if (data?.status === "ready") {
+      return { ready: true };
+    }
+    return { ready: false, reason: data?.status ?? "not_ready" };
+  } catch (err) {
+    return {
+      ready: false,
+      reason: err instanceof Error ? err.message : "network_error",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Input validation (mirrors the documented rules; the server decides)
 // ---------------------------------------------------------------------------
 
-export type ChatContentProblem = "empty" | "too_long" | "invalid_characters";
+export type ChatContentProblem = "empty" | "invalid_characters";
 
 /** A control character other than newline and tab. */
 const DISALLOWED_CONTROL = /[^\P{Cc}\n\t]/u;
@@ -190,15 +283,10 @@ export function countCodePoints(text: string): number {
   return count;
 }
 
-export function validateChatContent(
-  text: string,
-  maxChars: number = CHAT_MAX_MESSAGE_CHARS,
-): ChatContentProblem | null {
+/** Empty and control-character rules only. There is no fixed length limit. */
+export function validateChatContent(text: string): ChatContentProblem | null {
   if (text.trim() === "") {
     return "empty";
-  }
-  if (countCodePoints(text) > maxChars) {
-    return "too_long";
   }
   if (DISALLOWED_CONTROL.test(text)) {
     return "invalid_characters";
@@ -244,6 +332,171 @@ export interface ChatUsage {
   /** A decimal string, or null when the cost is unknown (never "0"). */
   cost_usd: string | null;
   is_estimate: boolean;
+  /** Prompt tokens the provider served from its cache. Absent when not reported. */
+  cached_tokens?: number;
+  /** Model calls made for the reply. Absent when the server did not count them. */
+  turns?: number | null;
+  /** Wall-clock milliseconds of the reply. Absent when not measured. */
+  elapsed_ms?: number | null;
+}
+
+export type ChatToolStatus = "ok" | "error" | "skipped";
+
+/** A file made inline in a chat reply (`file.created`, or `metadata.files_created`). */
+export interface ChatFileCreated {
+  readonly fileId: string;
+  readonly name: string;
+  /** The file type without the dot, for example "md" or "docx". */
+  readonly fileType: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly action: "created" | "edited";
+  readonly sourceUploadId: string | null;
+}
+
+/**
+ * Read one file card from its wire shape (snake_case). Returns null for anything that is not a
+ * well-formed card, so a bad entry is skipped instead of breaking the message.
+ */
+export function readChatFileCreated(value: unknown): ChatFileCreated | null {
+  if (!isRecord(value)) return null;
+  const {
+    file_id,
+    name,
+    file_type,
+    mime_type,
+    size_bytes,
+    action,
+    source_upload_id,
+  } = value;
+  if (typeof file_id !== "string" || file_id === "") return null;
+  if (typeof name !== "string" || name === "") return null;
+  if (
+    typeof size_bytes !== "number" ||
+    !Number.isFinite(size_bytes) ||
+    size_bytes < 0
+  ) {
+    return null;
+  }
+  if (action !== "created" && action !== "edited") return null;
+  return {
+    fileId: file_id,
+    name,
+    fileType: typeof file_type === "string" ? file_type : "",
+    mimeType: typeof mime_type === "string" ? mime_type : "",
+    sizeBytes: size_bytes,
+    action,
+    sourceUploadId:
+      typeof source_upload_id === "string" ? source_upload_id : null,
+  };
+}
+
+export type ChatProgressKind =
+  | "plan"
+  | "think"
+  | "tool"
+  | "step"
+  | "render"
+  | "check"
+  | "repair"
+  | "save"
+  | "search"
+  | "email"
+  | "image"
+  | "voice"
+  | "note";
+
+export type ChatProgressState = "running" | "done" | "failed" | "skipped";
+
+/**
+ * One step of the live "what MAYA is doing" list: the progress stream event, and the same
+ * objects kept in the stored reply metadata for reload.
+ */
+export interface ChatProgressStep {
+  readonly runId: string;
+  readonly stepId: string;
+  readonly parentId: string | null;
+  readonly kind: ChatProgressKind;
+  readonly label: string;
+  readonly detail: string | null;
+  readonly state: ChatProgressState;
+  readonly index: number | null;
+  readonly total: number | null;
+  readonly elapsedMs: number | null;
+  /** Short thinking summary; only set for kind "think". */
+  readonly thought: string | null;
+  /** The model's narration between two tool calls; only set for kind "note". */
+  readonly note?: string | null;
+  /**
+   * Live only: characters of streamed reply text this note replaces. The client already showed
+   * that text as the reply body, so it removes it instead of showing it twice.
+   */
+  readonly textLen?: number | null;
+}
+
+const PROGRESS_KINDS: readonly string[] = [
+  "plan",
+  "think",
+  "tool",
+  "step",
+  "render",
+  "check",
+  "repair",
+  "save",
+  "search",
+  "email",
+  "image",
+  "voice",
+  "note",
+];
+const PROGRESS_STATES: readonly string[] = [
+  "running",
+  "done",
+  "failed",
+  "skipped",
+];
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Read one progress step from its wire shape (snake_case). Returns null for anything that is not
+ * a well-formed step (missing ids, unknown kind or state), so a bad entry is skipped instead of
+ * breaking the stream. Unknown extra fields are ignored.
+ */
+export function readChatProgressStep(value: unknown): ChatProgressStep | null {
+  if (!isRecord(value)) return null;
+  const { run_id, step_id, kind, state, label } = value;
+  if (typeof run_id !== "string" || run_id === "") return null;
+  if (typeof step_id !== "string" || step_id === "") return null;
+  if (typeof kind !== "string" || !PROGRESS_KINDS.includes(kind)) return null;
+  if (typeof state !== "string" || !PROGRESS_STATES.includes(state)) {
+    return null;
+  }
+  return {
+    runId: run_id,
+    stepId: step_id,
+    parentId: optionalString(value.parent_id),
+    kind: kind as ChatProgressKind,
+    label: typeof label === "string" ? label : "",
+    detail: optionalString(value.detail),
+    state: state as ChatProgressState,
+    index: optionalNumber(value.index),
+    total: optionalNumber(value.total),
+    elapsedMs: optionalNumber(value.elapsed_ms),
+    thought: kind === "think" ? optionalString(value.thought) : null,
+    ...(kind === "note"
+      ? {
+          note: optionalString(value.note),
+          textLen: optionalNumber(value.text_len),
+        }
+      : {}),
+  };
 }
 
 export type ChatEvent =
@@ -256,6 +509,67 @@ export type ChatEvent =
     }
   | { type: "delta"; text: string }
   | {
+      /** One live step (a new step, or an update to a known step id). */
+      type: "progress";
+      step: ChatProgressStep;
+    }
+  | {
+      type: "task.created";
+      taskId: string;
+      title: string;
+      status: string;
+      /** True when an inline answer was moved to the background (the reply says so). */
+      promoted: boolean;
+    }
+  | {
+      /** An inline tool call started (progress only; carries no file content). */
+      type: "tool.started";
+      callId: string;
+      name: string;
+    }
+  | {
+      /** An inline tool call finished. */
+      type: "tool.finished";
+      callId: string;
+      name: string;
+      status: ChatToolStatus;
+    }
+  | {
+      /** A file was created or edited for this reply; download it with the chat file route. */
+      type: "file.created";
+      file: ChatFileCreated;
+    }
+  | {
+      /** MAYA saved (or updated) a memory for this message; Undo deletes it. */
+      type: "memory.saved";
+      memoryId: string;
+      text: string;
+      updated: boolean;
+    }
+  | {
+      /** MAYA drafted a custom agent (ADR-0023). Nothing is saved until the user approves. */
+      type: "agent.draft";
+      name: string;
+      description: string;
+      path: string;
+      content: string;
+      capabilities: string[];
+      instructions: string;
+    }
+  | {
+      /** MAYA asked a question (ask_user). The turn ends; the answer is the next message. */
+      type: "input.requested";
+      request: ChatInputRequest;
+    }
+  | {
+      /**
+       * MAYA drafted a scheduled report (`schedule.draft` with `{ draft_id, name, preview, ... }`).
+       * Nothing is created until the user clicks Create schedule on the card.
+       */
+      type: "schedule.draft";
+      draftId: string;
+    }
+  | {
       type: "done";
       assistantMessageId: string;
       /** "stop", "max_tokens" or "interrupted". */
@@ -264,7 +578,7 @@ export type ChatEvent =
     }
   | { type: "error"; code: string; retryable: boolean };
 
-function readUsage(value: unknown): ChatUsage | null {
+export function readUsage(value: unknown): ChatUsage | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -282,6 +596,13 @@ function readUsage(value: unknown): ChatUsage | null {
     total_tokens,
     cost_usd: typeof cost_usd === "string" ? cost_usd : null,
     is_estimate: value.is_estimate === true,
+    ...(typeof value.cached_tokens === "number"
+      ? { cached_tokens: value.cached_tokens }
+      : {}),
+    ...(typeof value.turns === "number" ? { turns: value.turns } : {}),
+    ...(typeof value.elapsed_ms === "number"
+      ? { elapsed_ms: value.elapsed_ms }
+      : {}),
   };
 }
 
@@ -294,6 +615,15 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
   switch (frame.event) {
     case "message.accepted":
     case "delta":
+    case "progress":
+    case "task.created":
+    case "tool.started":
+    case "tool.finished":
+    case "file.created":
+    case "memory.saved":
+    case "agent.draft":
+    case "schedule.draft":
+    case "input.requested":
     case "done":
     case "error":
       break;
@@ -332,6 +662,84 @@ export function decodeChatEvent(frame: SseFrame): ChatEvent | null {
     case "delta":
       return typeof data.text === "string"
         ? { type: "delta", text: data.text }
+        : null;
+    case "progress": {
+      const step = readChatProgressStep(data);
+      return step === null ? null : { type: "progress", step };
+    }
+    case "task.created":
+      return typeof data.task_id === "string" && data.task_id !== ""
+        ? {
+            type: "task.created",
+            taskId: data.task_id,
+            title: typeof data.title === "string" ? data.title : "",
+            status: typeof data.status === "string" ? data.status : "executing",
+            promoted: data.promoted === true,
+          }
+        : null;
+    case "tool.started":
+      return typeof data.call_id === "string" &&
+        data.call_id !== "" &&
+        typeof data.name === "string"
+        ? { type: "tool.started", callId: data.call_id, name: data.name }
+        : null;
+    case "tool.finished":
+      return typeof data.call_id === "string" &&
+        data.call_id !== "" &&
+        typeof data.name === "string" &&
+        (data.status === "ok" ||
+          data.status === "error" ||
+          data.status === "skipped")
+        ? {
+            type: "tool.finished",
+            callId: data.call_id,
+            name: data.name,
+            status: data.status,
+          }
+        : null;
+    case "file.created": {
+      const file = readChatFileCreated(data);
+      return file === null ? null : { type: "file.created", file };
+    }
+    case "memory.saved":
+      return typeof data.memory_id === "string" &&
+        data.memory_id !== "" &&
+        typeof data.text === "string"
+        ? {
+            type: "memory.saved",
+            memoryId: data.memory_id,
+            text: data.text,
+            updated: data.updated === true,
+          }
+        : null;
+    case "schedule.draft":
+      return typeof data.draft_id === "string" && data.draft_id !== ""
+        ? { type: "schedule.draft", draftId: data.draft_id }
+        : null;
+    case "input.requested": {
+      const request = readInputRequest(data);
+      return request === null ? null : { type: "input.requested", request };
+    }
+    case "agent.draft":
+      return typeof data.name === "string" &&
+        data.name !== "" &&
+        typeof data.path === "string" &&
+        typeof data.content === "string"
+        ? {
+            type: "agent.draft",
+            name: data.name,
+            description:
+              typeof data.description === "string" ? data.description : "",
+            path: data.path,
+            content: data.content,
+            capabilities: Array.isArray(data.capabilities)
+              ? data.capabilities.filter(
+                  (c): c is string => typeof c === "string",
+                )
+              : [],
+            instructions:
+              typeof data.instructions === "string" ? data.instructions : "",
+          }
         : null;
     case "done": {
       if (
@@ -375,7 +783,17 @@ export interface StreamChatMessageParams extends RequestOptions {
   idempotencyKey: string;
   /** Omit to let the server create a session. */
   sessionId?: string | null;
+  /** Ids of uploaded files (POST /api/v1/files/uploads) the message refers to. Additive. */
+  attachments?: readonly string[];
+  /** The user's answer to a question card (ask_user): sent with the readable `content`. */
+  answer?: { ask_id: string; answers: { selected: string[]; text: string }[] };
+  /** Request mode. "deep_research" asks for the multi-source research run. Omitted: normal chat. */
+  mode?: ChatRequestMode;
+  /** Use THIS assistant message as the content for the request (`source_message_id`). */
+  sourceMessageId?: string;
 }
+
+export type ChatRequestMode = "deep_research";
 
 function resolveToken(options: RequestOptions): string {
   const token = options.accessToken ?? getAccessToken();
@@ -482,6 +900,18 @@ export async function streamChatMessage(
   if (params.sessionId) {
     body.session_id = params.sessionId;
   }
+  if (params.attachments !== undefined && params.attachments.length > 0) {
+    body.attachments = [...params.attachments];
+  }
+  if (params.answer !== undefined) {
+    body.answer = params.answer;
+  }
+  if (params.mode !== undefined) {
+    body.mode = params.mode;
+  }
+  if (params.sourceMessageId !== undefined) {
+    body.source_message_id = params.sourceMessageId;
+  }
   const response = await send(
     `${getApiBaseUrl()}${CHAT_PATH}/message`,
     {
@@ -527,6 +957,9 @@ export interface SessionSummary {
   channel: string;
   status: string;
   created_at: string;
+  /** Additive: absent on older servers (treated as false). */
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 export interface StoredMessage {
@@ -535,7 +968,42 @@ export interface StoredMessage {
   content: string;
   created_at: string;
   finish_reason?: string | null;
+  /** Additive: the user's rating of this reply. */
+  feedback?: "up" | "down" | null;
   model_id?: string | null;
+  /** `audio` for a spoken voice turn (additive; absent on older servers). */
+  modality?: "text" | "audio" | "multimodal";
+  /** Voice turn id, null on typed messages. */
+  turn_id?: string | null;
+  source?: string | null;
+  /**
+   * Additive server metadata: `task` is set when this reply started a task and
+   * `memories_saved` lists the memories it saved (read defensively).
+   */
+  metadata?: {
+    task?: { task_id?: unknown; title?: unknown; promoted?: unknown } | null;
+    memories_saved?: unknown;
+    /** Final progress steps of this reply, for reload (read defensively). */
+    progress?: unknown;
+    /** `[file card]` for the files this reply created (read defensively; see readChatFileCreated). */
+    files_created?: unknown;
+    /** `[{ id, name, kind }]` for the files a user message carried (read defensively). */
+    attachments?: unknown;
+    /** "deep_research" on a user message sent with the Deep research toggle (read defensively). */
+    mode?: unknown;
+    /** Token usage of this reply (turns, elapsed_ms, cached_tokens; read defensively). */
+    usage?: unknown;
+    /** The ask_user question card of this reply (read with readInputRequest). */
+    input_request?: unknown;
+    /** `{ id }` of a scheduled-report draft this reply made (read with readScheduleDraftId). */
+    schedule_draft?: unknown;
+    /** `[{ id, name, preview, schedule, expires_at }]`, every draft this reply made. */
+    schedule_drafts?: unknown;
+    /** On a user message: the card it answered and the sanitised answers. */
+    answer?: unknown;
+    /** Set on the message MAYA posts when a task ends (read with readTaskResult). */
+    task_result?: unknown;
+  } | null;
 }
 
 export interface ListOptions extends RequestOptions {
@@ -614,9 +1082,13 @@ function isStoredMessage(item: unknown): item is StoredMessage {
 
 /** GET /api/v1/chat/sessions: the caller's sessions, newest first. */
 export async function listSessions(
-  options: ListOptions = {},
+  options: ListOptions & { readonly archived?: "false" | "true" | "all" } = {},
 ): Promise<Page<SessionSummary>> {
-  const page = readPage(await getJson("/sessions", options), 200, isSession);
+  const path =
+    options.archived === undefined || options.archived === "false"
+      ? "/sessions"
+      : `/sessions?archived=${options.archived}`;
+  const page = readPage(await getJson(path, options), 200, isSession);
   return {
     ...page,
     items: page.items.map((item) => ({
@@ -641,14 +1113,19 @@ export async function listMessages(
   );
 }
 
-/** DELETE /api/v1/chat/sessions/{id}: delete a session and all its messages. */
+/**
+ * DELETE /api/v1/chat/sessions/{id}: delete a session and all its messages. With
+ * `alsoDeleteContent` its finished tasks and files are deleted too; by default they are kept.
+ */
 export async function deleteSession(
   sessionId: string,
-  options: RequestOptions = {},
+  options: RequestOptions & { readonly alsoDeleteContent?: boolean } = {},
 ): Promise<void> {
   const token = resolveToken(options);
+  const query =
+    options.alsoDeleteContent === true ? "?delete_files_and_tasks=true" : "";
   const response = await send(
-    `${getApiBaseUrl()}${CHAT_PATH}/sessions/${encodeURIComponent(sessionId)}`,
+    `${getApiBaseUrl()}${CHAT_PATH}/sessions/${encodeURIComponent(sessionId)}${query}`,
     {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
@@ -661,4 +1138,118 @@ export async function deleteSession(
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Conversation and message actions (context menus). A 404 or 501 means the server does not
+// have the endpoint yet: callers hide the action instead of showing an error.
+// ---------------------------------------------------------------------------
+
+/** True when the server does not offer an endpoint yet. */
+export function isUnsupported(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 404 || error.status === 501)
+  );
+}
+
+async function sendJson(
+  method: "PATCH" | "POST",
+  path: string,
+  body: unknown,
+  options: RequestOptions,
+): Promise<Response> {
+  const token = resolveToken(options);
+  const response = await send(
+    `${getApiBaseUrl()}${CHAT_PATH}${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: options.signal,
+      cache: "no-store",
+      credentials: "omit",
+    },
+    options,
+  );
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  return response;
+}
+
+function readSession(body: unknown, status: number): SessionSummary {
+  if (!isSession(body)) throw new ApiError(status, "unexpected_response");
+  return { ...body, title: body.title ?? "Untitled conversation" };
+}
+
+/** PATCH /api/v1/chat/sessions/{id}: rename, pin or archive. Returns the updated session. */
+export async function updateSession(
+  sessionId: string,
+  patch: {
+    readonly title?: string;
+    readonly pinned?: boolean;
+    readonly archived?: boolean;
+  },
+  options: RequestOptions = {},
+): Promise<SessionSummary> {
+  const response = await sendJson(
+    "PATCH",
+    `/sessions/${encodeURIComponent(sessionId)}`,
+    patch,
+    options,
+  );
+  return readSession(await response.json().catch(() => null), response.status);
+}
+
+/** POST /api/v1/chat/sessions/{id}/duplicate: branch a conversation (optionally up to a message). */
+export async function duplicateSession(
+  sessionId: string,
+  fromMessageId?: string,
+  options: RequestOptions = {},
+): Promise<SessionSummary> {
+  const response = await sendJson(
+    "POST",
+    `/sessions/${encodeURIComponent(sessionId)}/duplicate`,
+    fromMessageId === undefined ? {} : { from_message_id: fromMessageId },
+    options,
+  );
+  return readSession(await response.json().catch(() => null), response.status);
+}
+
+/** GET /api/v1/chat/sessions/{id}/export?format=md: the conversation as Markdown text. */
+export async function exportSessionMarkdown(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<string> {
+  const token = resolveToken(options);
+  const response = await send(
+    `${getApiBaseUrl()}${CHAT_PATH}/sessions/${encodeURIComponent(sessionId)}/export?format=md`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, Accept: "text/markdown" },
+      signal: options.signal,
+      cache: "no-store",
+      credentials: "omit",
+    },
+    options,
+  );
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  return response.text();
+}
+
+/** POST /api/v1/chat/messages/{id}/feedback: rate a reply (null clears it). 204 on success. */
+export async function sendMessageFeedback(
+  messageId: string,
+  value: "up" | "down" | null,
+  note?: string,
+  options: RequestOptions = {},
+): Promise<void> {
+  await sendJson(
+    "POST",
+    `/messages/${encodeURIComponent(messageId)}/feedback`,
+    note === undefined ? { value } : { value, note },
+    options,
+  );
 }

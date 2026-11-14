@@ -5,7 +5,7 @@ import pytest
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
-from app.auth.dependencies import client_address, get_principal
+from app.auth.dependencies import client_address, get_file_link_principal, get_principal
 from app.auth.errors import NotAuthenticated
 from app.auth.models import Principal
 
@@ -61,7 +61,29 @@ async def test_get_principal_with_bearer_credentials() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_principal_with_query_token_fallback() -> None:
+async def test_get_principal_ignores_query_token_on_ordinary_get() -> None:
+    # Policy: the query token is not accepted for ordinary GET routes. Only the file download
+    # GET (get_file_link_principal) reads it, because a browser opens that as a plain link.
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/artifacts",
+            "raw_path": b"/api/v1/artifacts?token=query-token-abc",
+            "query_string": b"token=query-token-abc",
+            "headers": [],
+        }
+    )
+    auth_service = MagicMock()
+    auth_service.authenticate = AsyncMock()
+
+    with pytest.raises(NotAuthenticated):
+        await get_principal(request=request, credentials=None, service=auth_service)
+    auth_service.authenticate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_file_link_principal_accepts_query_token_on_get() -> None:
     request = Request(
         {
             "type": "http",
@@ -81,7 +103,7 @@ async def test_get_principal_with_query_token_fallback() -> None:
     auth_service = MagicMock()
     auth_service.authenticate = AsyncMock(return_value=expected_principal)
 
-    result = await get_principal(
+    result = await get_file_link_principal(
         request=request,
         credentials=None,
         service=auth_service,

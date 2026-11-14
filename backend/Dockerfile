@@ -37,4 +37,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=15s \
   CMD curl -f http://localhost:8000/api/v1/healthz || exit 1
 
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# One worker on purpose: the task queue, outbox relay and reconciler run in-process (ADR-0012).
+# More workers would create competing queues and reconcilers; scale out only after a shared queue.
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -2,8 +2,9 @@
  * A small, dependency-free, safe Markdown subset for assistant replies.
  *
  * Supported: paragraphs, headings (# to ######), bold, italic, inline code,
- * fenced code blocks, ordered and unordered lists (nested), blockquotes, links
- * and horizontal rules. Everything else (tables, raw HTML, setext headings,
+ * fenced code blocks, ordered and unordered lists (nested), blockquotes, links,
+ * horizontal rules and pipe tables (header row, delimiter row, body rows; the
+ * column count is bounded). Everything else (raw HTML, setext headings,
  * reference links, footnotes) is shown as plain text.
  *
  * Safety rules, all enforced here and covered by tests:
@@ -26,11 +27,21 @@
  *    pose as another site.
  */
 
+import { latexToText } from "./latex-text";
+
+/** A math span: readable `text`, the original `tex`, and `ok` (false: show `tex` as code). */
+export interface MathValue {
+  tex: string;
+  text: string;
+  ok: boolean;
+}
+
 export type Inline =
   | { type: "text"; value: string }
   | { type: "strong"; children: Inline[] }
   | { type: "em"; children: Inline[] }
   | { type: "code"; value: string }
+  | ({ type: "math" } & MathValue)
   | { type: "link"; href: string; children: Inline[] }
   | { type: "br" };
 
@@ -40,7 +51,21 @@ export type Block =
   | { type: "code"; language: string | null; value: string }
   | { type: "list"; ordered: boolean; start: number; items: Block[][] }
   | { type: "blockquote"; children: Block[] }
-  | { type: "hr" };
+  | { type: "hr" }
+  | ({ type: "math" } & MathValue)
+  | {
+      type: "table";
+      /** One entry per column; null when the delimiter row sets no alignment. */
+      align: (TableAlign | null)[];
+      header: Inline[][];
+      rows: Inline[][][];
+    };
+
+export type TableAlign = "left" | "center" | "right";
+
+/** A table wider or longer than this is shown as plain text lines instead. */
+export const MAX_TABLE_COLUMNS = 24;
+export const MAX_TABLE_ROWS = 1000;
 
 /** Longer input is shown as plain paragraphs without any formatting. */
 export const MAX_MARKDOWN_CHARS = 200_000;
@@ -105,6 +130,9 @@ export function decodeBasicEntities(value: string): string {
 // URL safety
 // ---------------------------------------------------------------------------
 
+const BARE_DOMAIN =
+  /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?!(?:html?|php|js|css|png|jpe?g|gif|svg|pdf|txt|md|json|xml|zip)(?:\/|$))[a-z]{2,}(?:\/[^\s:]*)?$/i;
+
 /**
  * Return a normalised, safe href for http, https and mailto URLs, or null.
  *
@@ -118,7 +146,10 @@ export function sanitizeUrl(raw: string): string | null {
   }
   let url: URL;
   try {
-    url = new URL(raw.trim());
+    const trimmed = raw.trim();
+    // A bare domain ("esc-plus.com/page") is what a model writes when it means a website; it
+    // becomes https. Anything with another scheme, a colon or a space is still rejected below.
+    url = new URL(BARE_DOMAIN.test(trimmed) ? `https://${trimmed}` : trimmed);
   } catch {
     return null;
   }
@@ -176,6 +207,8 @@ export function inlinePlainText(
       }
       if (node.type === "text" || node.type === "code") {
         out += node.value;
+      } else if (node.type === "math") {
+        out += node.tex;
       } else if (node.type === "strong" || node.type === "em") {
         visit(node.children);
       } else if (node.type === "link") {
@@ -515,8 +548,249 @@ function startsBlock(line: string, maxFenceIndent: number): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Pipe tables
+// ---------------------------------------------------------------------------
+
+/**
+ * Split one table line into cell sources. The outer pipes are optional and `|`
+ * is a literal pipe. Returns null when the line has more than MAX_TABLE_COLUMNS
+ * cells. One linear pass, no regular expression over the line.
+ */
+function splitTableRow(line: string): string[] | null {
+  const text = line.trim();
+  const cells: string[] = [];
+  let current = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charAt(i);
+    if (ch === "\\" && text.charAt(i + 1) === "|") {
+      current += "|";
+      i += 1;
+    } else if (ch === "|") {
+      cells.push(current);
+      current = "";
+      if (cells.length > MAX_TABLE_COLUMNS + 1) {
+        return null;
+      }
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current);
+  if (text.startsWith("|")) {
+    cells.shift();
+  }
+  if (text.endsWith("|") && !text.endsWith("\\|") && cells.length > 0) {
+    cells.pop();
+  }
+  return cells.length > 0 && cells.length <= MAX_TABLE_COLUMNS ? cells : null;
+}
+
+function parseDelimiterCell(cell: string): TableAlign | null | undefined {
+  const text = cell.trim();
+  if (text.length === 0) {
+    return undefined;
+  }
+  const left = text.startsWith(":");
+  const right = text.endsWith(":") && text.length > 1;
+  const dashes = text.slice(left ? 1 : 0, right ? -1 : undefined);
+  if (dashes.length === 0) {
+    return undefined;
+  }
+  for (let i = 0; i < dashes.length; i += 1) {
+    if (dashes.charAt(i) !== "-") {
+      return undefined;
+    }
+  }
+  if (left && right) {
+    return "center";
+  }
+  return right ? "right" : left ? "left" : null;
+}
+
+/** The header and delimiter line at `start`, when they open a table. */
+function matchTableStart(
+  lines: readonly string[],
+  start: number,
+): { header: string[]; align: (TableAlign | null)[] } | null {
+  const headerLine = lines[start];
+  const delimiterLine = lines[start + 1];
+  if (
+    delimiterLine === undefined ||
+    !headerLine.includes("|") ||
+    !delimiterLine.includes("-") ||
+    leadingSpaces(headerLine) > 3
+  ) {
+    return null;
+  }
+  const header = splitTableRow(headerLine);
+  const delimiter = splitTableRow(delimiterLine);
+  if (
+    header === null ||
+    delimiter === null ||
+    header.length !== delimiter.length
+  ) {
+    return null;
+  }
+  const align: (TableAlign | null)[] = [];
+  for (const cell of delimiter) {
+    const parsed = parseDelimiterCell(cell);
+    if (parsed === undefined) {
+      return null;
+    }
+    align.push(parsed);
+  }
+  return { header, align };
+}
+
+function parseTable(
+  lines: readonly string[],
+  start: number,
+  maxFenceIndent: number,
+): [Block, number] | null {
+  const opening = matchTableStart(lines, start);
+  if (opening === null) {
+    return null;
+  }
+  const columns = opening.header.length;
+  const rows: Inline[][][] = [];
+  let i = start + 2;
+  while (i < lines.length && rows.length < MAX_TABLE_ROWS) {
+    const line = lines[i];
+    if (
+      isBlank(line) ||
+      !line.includes("|") ||
+      startsBlock(line, maxFenceIndent)
+    ) {
+      break;
+    }
+    const cells = splitTableRow(line) ?? [];
+    const row: Inline[][] = [];
+    for (let c = 0; c < columns; c += 1) {
+      row.push(parseInlines((cells[c] ?? "").trim(), 0, false));
+    }
+    rows.push(row);
+    i += 1;
+  }
+  return [
+    {
+      type: "table",
+      align: opening.align,
+      header: opening.header.map((cell) => parseInlines(cell.trim(), 0, false)),
+      rows,
+    },
+    i,
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Block parser
 // ---------------------------------------------------------------------------
+
+const MAX_MATH_CHARS = 2000;
+const MAX_MATH_LINES = 30;
+
+function toMath(tex: string): MathValue {
+  const clean = tex.trim();
+  const { text, ok } = latexToText(clean);
+  return { tex: clean, text, ok };
+}
+
+/**
+ * A display math block: `$$ ... $$` or `\[ ... \]` that starts a line and closes at the end of a
+ * line (one or several lines). Returns the source and the next line index, or null.
+ */
+function matchDisplayMath(
+  lines: readonly string[],
+  start: number,
+  indent: number,
+): [string, number] | null {
+  if (indent > 3) {
+    return null;
+  }
+  const first = lines[start].trim();
+  let open: string;
+  let close: string;
+  if (first.startsWith("$$")) {
+    open = "$$";
+    close = "$$";
+  } else if (first.startsWith("\\[")) {
+    open = "\\[";
+    close = "\\]";
+  } else {
+    return null;
+  }
+  const parts: string[] = [];
+  let rest = first.slice(open.length);
+  for (let k = start; k < lines.length && k < start + MAX_MATH_LINES; k += 1) {
+    if (k > start) {
+      rest = lines[k].trim();
+    }
+    if (rest.endsWith(close) && (k > start || rest.length >= close.length)) {
+      parts.push(rest.slice(0, rest.length - close.length));
+      const tex = parts.join("\n");
+      return tex.trim() === "" || tex.length > MAX_MATH_CHARS
+        ? null
+        : [tex, k + 1];
+    }
+    if (rest.includes("`")) {
+      return null;
+    }
+    parts.push(rest);
+  }
+  return null;
+}
+
+/**
+ * Inline math at `i`: `$...$`, `$$...$$` or `\(...\)`. `$...$` follows the usual rule so that
+ * currency is not math: no space after the opening or before the closing dollar, the closing
+ * dollar is not followed by a digit, and the content has a letter or a backslash.
+ * Returns the end index (after the closer) and the source, or null.
+ */
+function matchInlineMath(text: string, i: number): [number, string] | null {
+  const n = text.length;
+  if (text.startsWith("\\(", i)) {
+    const end = text.indexOf("\\)", i + 2);
+    if (end === -1 || end - i > MAX_MATH_CHARS || end === i + 2) {
+      return null;
+    }
+    return [end + 2, text.slice(i + 2, end)];
+  }
+  if (text.charAt(i) !== "$") {
+    return null;
+  }
+  if (text.charAt(i + 1) === "$") {
+    const end = text.indexOf("$$", i + 2);
+    if (end === -1 || end - i > MAX_MATH_CHARS || end === i + 2) {
+      return null;
+    }
+    const body = text.slice(i + 2, end);
+    return body.includes("`") ? null : [end + 2, body];
+  }
+  const first = text.charAt(i + 1);
+  if (first === "" || first === " " || first === "\t" || first === "\n") {
+    return null;
+  }
+  for (let k = i + 1; k < n && k - i <= MAX_MATH_CHARS; k += 1) {
+    const ch = text.charAt(k);
+    if (ch === "\\") {
+      k += 1;
+      continue;
+    }
+    if (ch === "`" || ch === "\n") {
+      return null;
+    }
+    if (ch === "$") {
+      const body = text.slice(i + 1, k);
+      const before = text.charAt(k - 1);
+      const after = text.charAt(k + 1);
+      if (before === " " || before === "\t" || (after >= "0" && after <= "9")) {
+        return null;
+      }
+      return /[A-Za-z\\]/.test(body) ? [k + 1, body] : null;
+    }
+  }
+  return null;
+}
 
 function parseBlocks(lines: readonly string[], depth: number): Block[] {
   const blocks: Block[] = [];
@@ -551,6 +825,13 @@ function parseBlocks(lines: readonly string[], depth: number): Block[] {
       continue;
     }
 
+    const math = matchDisplayMath(lines, i, indent);
+    if (math !== null) {
+      blocks.push({ type: "math", ...toMath(math[0]) });
+      i = math[1];
+      continue;
+    }
+
     const heading = matchHeading(line, indent);
     if (heading !== null) {
       blocks.push({
@@ -582,6 +863,13 @@ function parseBlocks(lines: readonly string[], depth: number): Block[] {
       continue;
     }
 
+    const table = parseTable(lines, i, maxFenceIndent);
+    if (table !== null) {
+      blocks.push(table[0]);
+      i = table[1];
+      continue;
+    }
+
     const [paragraph, next] = collectParagraph(lines, i, false, maxFenceIndent);
     blocks.push(paragraph);
     i = next;
@@ -599,7 +887,12 @@ function collectParagraph(
   let i = start + 1;
   while (i < lines.length) {
     const line = lines[i];
-    if (isBlank(line) || (!flat && startsBlock(line, maxFenceIndent))) {
+    if (
+      isBlank(line) ||
+      (!flat &&
+        (startsBlock(line, maxFenceIndent) ||
+          (line.includes("|") && matchTableStart(lines, i) !== null)))
+    ) {
       break;
     }
     parts.push(line.trim());
@@ -1027,6 +1320,17 @@ function parseInlines(text: string, depth: number, inLink: boolean): Inline[] {
 
   while (i < n) {
     const code = text.charCodeAt(i);
+
+    if (
+      (code === 36 || (code === 92 && text.charAt(i + 1) === "(")) &&
+      !inLink
+    ) {
+      const math = matchInlineMath(text, i);
+      if (math !== null) {
+        emit({ type: "math", ...toMath(math[1]) }, math[0]);
+        continue;
+      }
+    }
 
     if (code === 92) {
       // Backslash escape or hard break.

@@ -47,3 +47,23 @@ docs/codemie/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+
+# Desktop shell (ADR-0013)
+apps/desktop/dist/
+apps/desktop/node_modules/
+apps/web/.next-desktop/
+apps/web/out/
+
+# Scratch and generated output
+tmp/
+output/
+
+# Generated user documents and runtime storage (never commit)
+backend/storage/
+storage/
+
+# Local agent tooling and runtime leftovers
+*.pid
+agy_bridge.db*
+workspaces/
+pytest-of-*/

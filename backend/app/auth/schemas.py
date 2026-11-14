@@ -103,6 +103,27 @@ class CompleteSignupRequest(_Request):
         return None if value is None else normalize_display_text(value)
 
 
+class BootstrapRequest(_Request):
+    full_name: str = Field(max_length=1024)
+    email: str = Field(max_length=320)
+    password: Password
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("full_name")
+    @classmethod
+    def _text(cls, value: str) -> str:
+        return normalize_display_text(value)
+
+
+class BootstrapStatusResponse(BaseModel):
+    available: bool
+    reason: str | None = None
+
+
 class ResetPasswordRequest(EmailRequest):
     code: Code
     new_password: Password
@@ -141,3 +162,6 @@ class MeResponse(BaseModel):
     user_id: UUID
     workspace_id: UUID
     role: str
+    # The caller's own details, for display only (None when the lookup is unavailable).
+    email: str | None = None
+    display_name: str | None = None

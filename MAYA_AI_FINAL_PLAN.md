@@ -1,5 +1,7 @@
 # MAYA AI — FINAL PROJECT PLAN
 
+> Superseded: Brave Search was removed on 2026-11-09. Web search is Gemini Google Search grounding; mentions of Brave below are the original plan, not current behaviour.
+
 ### Autonomous, voice-first digital employee — consolidated from Master Specification v1.0 and Technical Specification v2.0
 
 |                         |                                                                                                                                                                                                               |
@@ -111,6 +113,8 @@
 5. **Everything auditable** — every tool call, approval and outcome is logged tamper-evidently.
 
 **Out of scope for the MVP:** Playwright computer-use over authenticated multi-page sites, Salesforce/SAP/enterprise Jira clusters, Tauri desktop packaging, local offline inference, swarm cloning of agents, SAML/Okta SSO, cold-archive tier.
+
+_Update 2026-11-08: the desktop app is now in scope as an Electron shell, not Tauri; see [ADR-0013](docs/adr/0013-desktop-shell-electron.md)._
 
 ---
 
@@ -708,7 +712,7 @@ maya-ai/
 ├── apps/
 │   ├── web/                           # Next.js 15 + TS + Tailwind
 │   │   └── src/{app, components/{voice,canvas,tasks,approvals}, hooks/useLiveVoice.ts, lib/api.ts}
-│   └── desktop/                       # [post-MVP] Tauri shell
+│   └── desktop/                       # Electron shell (ADR-0013, supersedes the Tauri plan)
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/                    # auth, chat, voice, tasks, approvals, artifacts, mcp_admin, memory
@@ -780,6 +784,7 @@ maya-ai/
 
 - **Primary topology (cloud):** containers behind a TLS reverse proxy with sticky sessions for WebSockets; FastAPI replicas; Celery/ARQ workers as non-root containers; managed Postgres 17 + pgvector; Redis single node with AOF (cluster later); S3-compatible artifacts. Start on Docker Compose; Kubernetes (EKS/GKE) when scale demands.
 - **Desktop / privacy-first (post-MVP):** Tauri shell + Python sidecar, local Postgres/SQLite-with-vector, local sandbox.
+  _Update 2026-11-08: the desktop app is now in scope as an Electron shell, not Tauri; see [ADR-0013](docs/adr/0013-desktop-shell-electron.md)._
 - **Observability:** OpenTelemetry traces across FastAPI → LangGraph → MCP; Prometheus metrics (token use, TTFT, voice latency, MCP connection health, queue depth) in Grafana; structured JSON logs; the hash-chained `audit_log` is the compliance record.
 - **Operational controls:** per-task and per-user spend limits, key-rotation job, memory-decay job, MCP schema-change alarms, runbooks for Live-API outage (degrade to text), model-deprecation (change alias config), and rate-limit storms.
 
@@ -837,7 +842,7 @@ Carried from v1 with the arithmetic corrected. Prices are the specs' quoted figu
 | **O1** | The folder is named _Ollama_ but the plans are Gemini-only. Should a **local Ollama provider** be supported behind the Model Gateway (offline / dev / privacy mode)? | Not in MVP scope; keep the gateway provider-agnostic so it can be added later without redesign.              |
 | **O2** | **Identity:** own accounts (hashed passwords) or an external IdP?                                                                                                    | Google OIDC — Google OAuth scopes are needed for Gmail/Calendar anyway; `hashed_password` stays nullable.    |
 | **O3** | **Team size and target date** — the 22-week plan assumes unstated staffing.                                                                                          | Provide team size to turn the phases into a dated schedule; P5/P6/P7 can run in parallel with ≥ 3 engineers. |
-| **O4** | **Hosting target** for the MVP: cloud or local desktop first?                                                                                                        | Cloud (specs' recommendation); desktop after MVP.                                                            |
+| **O4** | **Hosting target** for the MVP: cloud or local desktop first?                                                                                                        | Cloud (specs' recommendation); desktop after MVP. **Update 2026-11-08: desktop via Electron, ADR-0013.**                                                            |
 | **O5** | **Should voice be allowed to approve** low-risk actions later?                                                                                                       | Not until speaker verification exists; revisit post-MVP.                                                     |
 | **O6** | **Budget ceiling** per user per month.                                                                                                                               | Decide after the Phase-2 token baseline; sets per-task caps.                                                 |
 
@@ -850,6 +855,7 @@ Carried from v1 with the arithmetic corrected. Prices are the specs' quoted figu
 3. **Proactive ambient mode:** webhook/email/calendar monitors that notify by voice when attention is needed.
 4. **Local inference option** (Gemma and/or Ollama) behind the Model Gateway for zero-egress workflows.
 5. **Desktop shell (Tauri)** and local-first storage.
+   _Update 2026-11-08: the desktop app is now in scope as an Electron shell, not Tauri; see [ADR-0013](docs/adr/0013-desktop-shell-electron.md)._
 6. **Enterprise:** SAML/Okta SSO, 99.95 % multi-AZ, Redis cluster, cold-archive tier.
 7. **Agent swarms** for large parallel refactors; **generative UI** mini-apps on the canvas.
 

@@ -36,7 +36,7 @@ async def test_barge_in_buffer_flushed_instantly() -> None:
     # Must have dispatched an AUDIO_INTERRUPT frame
     interrupt_msg = await session.get_next_outgoing_message()
     assert interrupt_msg.msg_type == OutgoingMessageType.CONTROL
-    assert interrupt_msg.payload == {"type": "AUDIO_INTERRUPT"}
+    assert interrupt_msg.payload == {"type": "AUDIO_INTERRUPT", "epoch": 1}
 
 
 @pytest.mark.asyncio
@@ -54,7 +54,7 @@ async def test_barge_in_triggered_by_client_interrupt_message() -> None:
     assert session.pending_audio_chunks_count == 0
 
     msg = await session.get_next_outgoing_message()
-    assert msg.payload == {"type": "AUDIO_INTERRUPT"}
+    assert msg.payload == {"type": "AUDIO_INTERRUPT", "epoch": 1}
 
 
 @pytest.mark.asyncio
@@ -72,4 +72,4 @@ async def test_barge_in_triggered_by_server_interrupted_event() -> None:
     assert session.pending_audio_chunks_count == 0
 
     msg = await session.get_next_outgoing_message()
-    assert msg.payload == {"type": "AUDIO_INTERRUPT"}
+    assert msg.payload == {"type": "AUDIO_INTERRUPT", "epoch": 1}

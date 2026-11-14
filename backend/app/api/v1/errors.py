@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth.errors import (
+    BootstrapUnavailable,
     InvalidCode,
     InvalidCredentials,
     InvalidToken,
@@ -17,6 +18,7 @@ from app.core.security import Overloaded, PasswordPolicyViolation
 from app.db.repositories.chat import InvalidCursor, SessionNotFound
 from app.services.chat_service import (
     ChatError,
+    ChatMessageTooLong,
     ChatStreamLimitReached,
     ChatUnavailable,
     ChatValidationError,
@@ -39,6 +41,8 @@ async def _domain_error(request: Request, exc: Exception) -> JSONResponse:
         return _error(429, "rate_limited", {"Retry-After": str(exc.retry_after)})
     if isinstance(exc, PasswordPolicyViolation):
         return _error(422, exc.code)
+    if isinstance(exc, BootstrapUnavailable):
+        return _error(404, "bootstrap_unavailable")
     if isinstance(exc, InvalidCode):
         return _error(400, "invalid_or_expired_code")
     if isinstance(exc, InvalidCredentials):
@@ -57,6 +61,17 @@ async def _chat_error(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, ChatValidationError):
         return JSONResponse(
             status_code=422, content={"error": "validation_error", "fields": list(exc.fields)}
+        )
+    if isinstance(exc, ChatMessageTooLong):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "message_too_long",
+                "message": (
+                    "This message is too long for the model context. "
+                    "Shorten it or attach it as a file."
+                ),
+            },
         )
     if isinstance(exc, InvalidCursor):
         return JSONResponse(
@@ -99,11 +114,18 @@ async def _http_error(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc.detail, dict):
         return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
     code = {404: "not_found", 405: "method_not_allowed"}.get(exc.status_code, "http_error")
-    return _error(exc.status_code, code, headers)
+    content: dict[str, str] = {"error": code}
+    # Keep the server-authored explanation (4xx only) so clients can show it. It is never
+    # request data: handlers write these strings, not the caller.
+    if isinstance(exc.detail, str) and exc.detail and 400 <= exc.status_code < 500:
+        if code == "http_error":
+            content["message"] = exc.detail[:500]
+    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 
 def install_error_handlers(app: FastAPI) -> None:
     for error in (
+        BootstrapUnavailable,
         RateLimited,
         PasswordPolicyViolation,
         InvalidCode,

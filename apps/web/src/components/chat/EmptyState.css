@@ -1,0 +1,159 @@
+/*
+ * Empty conversation: a calm living presence. Every colour is a token. The only CSS motion is
+ * the shared .motion-stagger entrance (finite) and chip hover and press from the motion kit.
+ * The continuous drift is drawn by LivingBackdrop on a canvas, so no CSS loop lives here.
+ */
+
+.maya-chat-empty.maya-empty {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: var(--maya-space-6) var(--maya-space-4);
+  text-align: center;
+}
+
+/* Centre the whole presence (mark, orbits, heading, chips) in the conversation pane, both ways.
+ * The thread column is a flex column that is at least as tall as the pane while it is empty. */
+.maya-thread__inner:has(> .maya-chat-empty.maya-empty) {
+  min-height: 100%;
+  justify-content: center;
+}
+
+/* A small lift so the mark sits at the optical centre, not below it, and leaves room for the
+ * chips under it. */
+.maya-thread__inner > .maya-chat-empty.maya-empty {
+  margin-top: auto;
+  margin-bottom: auto;
+  transform: translateY(-2.5vh);
+}
+
+/* Anchor for the mark. The canvas is centred on it; the static wash sits behind it. */
+.maya-empty__mark {
+  position: relative;
+  width: 5.5rem;
+  height: 5.5rem;
+  margin-bottom: var(--maya-space-5);
+  pointer-events: none;
+}
+
+.maya-empty__mark::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -2;
+  width: min(38rem, 100vw);
+  height: 24rem;
+  transform: translate(-50%, -50%);
+  border-radius: var(--maya-radius-full);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--maya-accent) 10%, transparent),
+    transparent
+  );
+}
+
+.maya-living {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: 1100px;
+  max-width: none;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.maya-empty__hint {
+  max-width: 32rem;
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+  color: var(--maya-text-muted);
+  margin-bottom: var(--maya-space-6);
+}
+
+.maya-empty__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--maya-space-3);
+  margin: var(--maya-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 34rem;
+}
+
+.maya-empty__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.375rem;
+  padding: var(--maya-space-2) var(--maya-space-4);
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-surface);
+  color: var(--maya-text-secondary);
+  font: inherit;
+  font-size: var(--maya-text-small);
+  font-weight: var(--maya-weight-medium);
+  line-height: var(--maya-leading-small);
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  outline: none;
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+@media (hover: hover) {
+  .maya-empty__chip:hover {
+    border-color: var(--maya-border-strong);
+    background: var(--maya-hover);
+    color: var(--maya-text);
+    box-shadow: var(--maya-shadow-lift);
+    transform: translateY(var(--maya-lift));
+  }
+}
+
+.maya-empty__chip:focus-visible {
+  border-color: var(--maya-accent);
+  outline: 2px solid var(--maya-accent);
+  outline-offset: 2px;
+}
+
+.maya-empty__chip:active {
+  background: var(--maya-pressed);
+  transform: scale(var(--maya-press-scale));
+}
+
+@media (pointer: coarse) {
+  .maya-empty__chip {
+    min-height: 2.75rem;
+    padding: var(--maya-space-2) var(--maya-space-5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-empty__chip,
+  .maya-empty__chip:hover,
+  .maya-empty__chip:active {
+    transform: none;
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .maya-empty__mark::before {
+    display: none;
+  }
+}

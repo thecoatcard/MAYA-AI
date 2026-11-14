@@ -158,7 +158,7 @@ async def test_client_manager_invoke_tool_with_sanitization() -> None:
         server_id=server_id,
         tenant_id=uuid4(),
         name="search-server",
-        vendor="brave",
+        vendor="google",
         transport=transport,
         expected_schema_hash=expected_hash,
     )

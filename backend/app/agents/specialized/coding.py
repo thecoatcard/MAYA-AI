@@ -13,6 +13,7 @@ from app.agents.schemas import (
     SpecialistAgentResult,
     SpecialistAgentRole,
 )
+from app.connections.service import ConnectionService
 from app.mcp.client_manager import MCPClientManager
 from app.mcp.connectors.github import GitHubConnector
 from app.mcp.permissions import ToolPermissionRegistry, ToolTier
@@ -26,7 +27,6 @@ class CodingAgent(BaseSpecialistAgent):
     """Specialist agent implementing Workflow 3 with isolated sandbox verification and gated PRs."""
 
     role = SpecialistAgentRole.CODING
-    model_alias = "heavy"
     permission_ceiling = ToolTier.APPROVAL_REQUIRED
     assigned_tools = frozenset(
         {
@@ -44,12 +44,15 @@ class CodingAgent(BaseSpecialistAgent):
         self,
         sandbox_runner: SandboxRunner | None = None,
         github_connector: GitHubConnector | None = None,
+        connections: ConnectionService | None = None,
         permission_registry: ToolPermissionRegistry | None = None,
         client_manager: MCPClientManager | None = None,
     ) -> None:
         super().__init__(permission_registry=permission_registry, client_manager=client_manager)
         self.sandbox_runner = sandbox_runner
         self.github_connector = github_connector
+        # When set, the GitHub token is the requesting user's own (else the server default).
+        self.connections = connections
 
     async def execute_subtask(
         self,
@@ -146,8 +149,11 @@ class CodingAgent(BaseSpecialistAgent):
 
         # 5. Execute gated PR creation with approval token
         pr_url = ""
-        if self.github_connector:
-            pr_data = await self.github_connector.create_pull_request(
+        github = self.github_connector
+        if self.connections is not None:
+            github = await self.connections.github_connector(job.workspace_id, job.user_id)
+        if github:
+            pr_data = await github.create_pull_request(
                 repo=ctx.get("repo", "maya-ai/maya"),
                 title=ctx.get("pr_title", "Fix identified bug"),
                 head=ctx.get("pr_head", "fix/bug"),

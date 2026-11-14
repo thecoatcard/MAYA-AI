@@ -22,6 +22,7 @@ To ensure safety, multi-tenancy, and stability, several critical security constr
    - Implement managed stdio and streamable HTTP transports in `backend/app/mcp/`.
    - Implement `ProcessSupervisor` with 15-second JSON-RPC ping heartbeats, 3-strike degradation to `DEGRADED`, and exponential backoff restarts (1s, 2s, 4s, 8s) up to `DEAD`.
    - Provide fallback routing (e.g., GitHub to local Git, Brave Search to Gemini web search).
+   - Superseded 2026-11-09: Brave Search was removed on 2026-11-09; web search now uses Gemini Google Search grounding. The Brave route no longer exists.
 
 2. **Schema Normalization & Description Poisoning Defense:**
    - Map external JSON Schema tool definitions into Google GenAI `FunctionDeclaration` parameters.

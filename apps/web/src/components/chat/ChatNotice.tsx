@@ -71,20 +71,20 @@ function ErrorNotice({
     <div
       role="group"
       aria-label="Message problem"
-      className="maya-notice maya-notice--error"
+      className="maya-cnotice maya-cnotice--error"
     >
       <TriangleAlert
         aria-hidden="true"
         size={18}
-        className="maya-notice__icon"
+        className="maya-cnotice__icon"
       />
       {/* Only this static text is a live region. The countdown and the buttons
           sit outside it, so a screen reader is not interrupted every second. */}
-      <p role="alert" className="maya-notice__text">
+      <p role="alert" className="maya-cnotice__text">
         {error.message}
         {waitText}
       </p>
-      <div className="maya-notice__actions">
+      <div className="maya-cnotice__actions">
         {canRetry ? (
           <>
             <button
@@ -99,7 +99,7 @@ function ErrorNotice({
             </button>
             {waiting ? (
               <>
-                <span className="maya-notice__countdown" aria-hidden="true">
+                <span className="maya-cnotice__countdown" aria-hidden="true">
                   Available in {remaining}s
                 </span>
                 <span id={waitId} className="maya-sr-only">
@@ -133,9 +133,13 @@ export function ChatNotice({ error, retrying, ...rest }: ChatNoticeProps) {
   }
   if (retrying !== null) {
     return (
-      <div role="status" className="maya-notice maya-notice--info">
-        <RefreshCw aria-hidden="true" size={16} className="maya-notice__icon" />
-        <p className="maya-notice__text">
+      <div role="status" className="maya-cnotice maya-cnotice--info">
+        <RefreshCw
+          aria-hidden="true"
+          size={16}
+          className="maya-cnotice__icon"
+        />
+        <p className="maya-cnotice__text">
           The reply did not arrive. Retrying automatically, attempt{" "}
           {retrying.attempt} of {retrying.maxAttempts}.
         </p>

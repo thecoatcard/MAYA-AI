@@ -15,6 +15,7 @@ from app.schemas.chat import (
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
+    MemorySavedEvent,
     MessageAcceptedEvent,
     MessageOut,
     Page,
@@ -181,6 +182,9 @@ def test_a_session_serialises_to_the_documented_fields() -> None:
         "channel": "web",
         "status": "active",
         "created_at": "2026-11-05T10:00:00Z",
+        # The per-user pin and archive flags (user settings JSON) are part of the session item.
+        "pinned": False,
+        "archived": False,
     }
 
 
@@ -188,7 +192,15 @@ def test_a_session_can_be_built_from_a_record_and_may_have_no_title() -> None:
     record = FakeSessionRecord(SESSION, None, "voice", "active", WHEN, USER_MESSAGE)
     out = SessionOut.model_validate(record)
     assert out.title is None and out.channel == "voice"
-    assert set(out.model_dump()) == {"id", "title", "channel", "status", "created_at"}
+    assert set(out.model_dump()) == {
+        "id",
+        "title",
+        "channel",
+        "status",
+        "created_at",
+        "pinned",
+        "archived",
+    }
 
 
 def test_an_unknown_channel_is_rejected() -> None:
@@ -205,7 +217,7 @@ def test_a_user_message_has_no_model_fields_and_an_assistant_message_has_them() 
         content="hello",
         created_at=WHEN,
         finish_reason="stop",
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
     )
     assert json.loads(assistant.model_dump_json()) == {
         "id": str(ASSISTANT_MESSAGE),
@@ -213,8 +225,104 @@ def test_a_user_message_has_no_model_fields_and_an_assistant_message_has_them() 
         "content": "hello",
         "created_at": "2026-11-05T10:00:00Z",
         "finish_reason": "stop",
-        "model_id": "gemini-3.8-flash",
+        "model_id": "gemini-4-hydrogen",
+        "modality": "text",
+        "turn_id": None,
+        "source": None,
+        "feedback": None,  # additive: the caller's thumbs up/down on an assistant message
+        "metadata": {
+            "task": None,
+            "memories_saved": [],
+            "agent_drafts": [],
+            "schedule_drafts": [],
+            "schedule_draft": None,
+            "files_created": [],
+            "progress": [],
+            "usage": None,  # added on purpose: usage of the reply for the work-log footer
+            "input_request": None,  # additive: the ask_user card of a reply
+            "answer": None,  # additive: the answer a user message gave to a card
+            "task_result": None,  # additive: set on the message MAYA posts when a task ends
+        },
     }
+
+
+def test_stored_task_and_memory_metadata_are_exposed_and_nothing_else() -> None:
+    memory_id = "6c1f6a64-8f0a-4b7e-9d52-0d6a0c9d9a11"
+    task_id = "0b7d2a5e-3a41-4d6e-8d84-52f1f7b2c0aa"
+    out = MessageOut.model_validate(
+        {
+            "id": ASSISTANT_MESSAGE,
+            "role": "assistant",
+            "content": "ok",
+            "created_at": WHEN,
+            "metadata": {
+                "usage": {"prompt_tokens": 1},
+                "model_id": "m",
+                "task": {"task_id": task_id, "title": "T", "status": "executing"},
+                "memories_saved": [
+                    {"memory_id": memory_id, "text": "Favourite colour is blue"},
+                    {"memory_id": "not-a-uuid", "text": "dropped"},
+                    "junk",
+                ],
+            },
+        }
+    )
+    assert json.loads(out.metadata.model_dump_json()) == {
+        # "promoted" defaults to false for a task that was not moved from an inline answer
+        "task": {"task_id": task_id, "title": "T", "status": "executing", "promoted": False},
+        "memories_saved": [
+            {"memory_id": memory_id, "text": "Favourite colour is blue", "updated": False}
+        ],
+        "agent_drafts": [],
+        "schedule_drafts": [],
+        "schedule_draft": None,
+        # "files_created" is new: no stored file cards, so an empty list
+        "files_created": [],
+        # "progress" (the live step list) is new: nothing stored here, so an empty list
+        "progress": [],
+        # "usage" is new (work-log footer): none stored here, so null
+        "usage": None,
+        "input_request": None,
+        "answer": None,
+        "task_result": None,
+    }
+
+
+@pytest.mark.parametrize("raw", [None, "text", {"task": "bad", "memories_saved": "bad"}, {}])
+def test_unreadable_stored_metadata_reads_as_none(raw: object) -> None:
+    out = MessageOut.model_validate(
+        {"id": USER_MESSAGE, "role": "user", "content": "x", "created_at": WHEN, "metadata": raw}
+    )
+    assert out.metadata.task is None and out.metadata.memories_saved == []
+
+
+def test_memory_saved_event_has_exactly_the_documented_fields() -> None:
+    assert set(MemorySavedEvent.model_fields) == {"memory_id", "text", "updated"}
+    frame = encode_sse(
+        1, "memory.saved", MemorySavedEvent(memory_id=UUID(int=1), text="a\u2028b", updated=True)
+    )
+    assert frame.startswith("id: 1\nevent: memory.saved\ndata: {")
+    assert frame.count("\n") == 4  # one data line: the line separator is escaped in the JSON
+    assert "\u2028" not in frame  # the raw character, not its escape
+
+
+def test_a_voice_message_exposes_modality_turn_id_and_source_only() -> None:
+    @dataclass
+    class Record:
+        id: UUID = USER_MESSAGE
+        role: str = "user"
+        content: str = "hello there"
+        created_at: datetime = WHEN
+        modality: str = "audio"
+        turn_id: str | None = "t-1"
+        source: str | None = "live"
+        metadata: Any = None
+
+    out = MessageOut.model_validate(Record())
+    assert (out.modality, out.turn_id, out.source) == ("audio", "t-1", "live")
+    assert "interrupted" not in out.model_dump()
+    with pytest.raises(ValidationError):
+        MessageOut(id=USER_MESSAGE, role="user", content="x", created_at=WHEN, modality="video")
 
 
 @pytest.mark.parametrize("role", ["system", "agent", "orchestrator", "model", ""])
@@ -231,7 +339,7 @@ def test_messages_do_not_accept_fields_the_contract_does_not_expose() -> None:
                 "role": "user",
                 "content": "x",
                 "created_at": WHEN,
-                "metadata": {"usage": 1},
+                "usage": {"prompt_tokens": 1},  # `metadata` is now exposed (task, memories only)
             }
         )
 
@@ -270,6 +378,9 @@ def test_event_payloads_have_exactly_the_documented_fields() -> None:
         "total_tokens",
         "cost_usd",
         "is_estimate",
+        "cached_tokens",
+        "turns",  # added on purpose: work-log footer figures
+        "elapsed_ms",
     }
     assert set(DoneEvent.model_fields) == {"assistant_message_id", "finish_reason", "usage"}
     assert set(ErrorEvent.model_fields) == {"code", "retryable"}
@@ -438,7 +549,7 @@ def test_every_event_type_is_one_id_event_data_frame() -> None:
         "id: 3\nevent: done\n"
         f'data: {{"assistant_message_id":"{ASSISTANT_MESSAGE}","finish_reason":"stop",'
         '"usage":{"prompt_tokens":10,"candidates_tokens":20,"total_tokens":30,'
-        '"cost_usd":null,"is_estimate":false}}\n\n'
+        '"cost_usd":null,"is_estimate":false,"cached_tokens":0,"turns":null,"elapsed_ms":null}}\n\n'
     )
     assert frames[3] == (
         'id: 4\nevent: error\ndata: {"code":"stream_interrupted","retryable":true}\n\n'

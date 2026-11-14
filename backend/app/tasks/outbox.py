@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -14,6 +15,43 @@ from app.db.models import TaskOutboxEvent
 from app.tasks.events import TaskEvent, TaskEventPublisher, TaskEventType
 
 logger = logging.getLogger(__name__)
+
+
+_TERMINAL_EVENTS = frozenset(
+    {
+        TaskEventType.TASK_COMPLETED.value,
+        TaskEventType.TASK_FAILED.value,
+        TaskEventType.TASK_CANCELLED.value,
+    }
+)
+
+
+class ActiveWorkspaces:
+    """Process-local registry of workspaces that may have outbox/task work.
+
+    Row-level security hides every tenant row without a workspace context (including the
+    ``workspaces`` table), so background loops cannot discover tenants from the database. Writers
+    register here; ``TaskRuntime`` mirrors the set to Redis so a restart can find open work.
+    """
+
+    def __init__(self) -> None:
+        self._last_seen: dict[UUID, float] = {}
+
+    def register(self, workspace_id: UUID) -> None:
+        self._last_seen[workspace_id] = time.monotonic()
+
+    def known(self) -> list[UUID]:
+        return list(self._last_seen)
+
+    def hot(self, window_seconds: float) -> list[UUID]:
+        now = time.monotonic()
+        return [w for w, seen in list(self._last_seen.items()) if now - seen <= window_seconds]
+
+    def forget(self, workspace_id: UUID) -> None:
+        self._last_seen.pop(workspace_id, None)
+
+
+active_workspaces = ActiveWorkspaces()
 
 
 async def write_outbox_event(
@@ -38,6 +76,7 @@ async def write_outbox_event(
     )
     session.add(outbox_event)
     await session.flush()
+    active_workspaces.register(workspace_id)
     return outbox_event
 
 
@@ -46,6 +85,9 @@ class OutboxDispatcher:
 
     def __init__(self, publisher: TaskEventPublisher) -> None:
         self.publisher = publisher
+        # Task ids whose terminal event (completed, failed, cancelled) was relayed by the last
+        # ``dispatch_pending_events`` call; the runtime writes their result message from it.
+        self.terminal_tasks: list[UUID] = []
 
     async def dispatch_pending_events(
         self,
@@ -74,6 +116,7 @@ class OutboxDispatcher:
         result = await session.execute(stmt)
         events = list(result.scalars().all())
 
+        self.terminal_tasks = []
         if not events:
             return 0
 
@@ -98,6 +141,8 @@ class OutboxDispatcher:
                 if is_success:
                     event.status = "dispatched"
                     event.dispatched_at = datetime.now(UTC)
+                    if event.event_type in _TERMINAL_EVENTS:
+                        self.terminal_tasks.append(event.task_id)
                     dispatched_count += 1
                 else:
                     # Redis failed or disconnected; leave as pending for retry

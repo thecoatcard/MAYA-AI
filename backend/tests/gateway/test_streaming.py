@@ -13,6 +13,7 @@ from app.gateway.model_gateway import ModelGateway
 from app.gateway.registry import build_default_registry
 from app.gateway.resilience import ResiliencePolicy
 from tests.support.fake_gemini_client import FakeGeminiClient
+from tests.support.models import ORCH
 
 
 def make_gateway_settings() -> Settings:
@@ -67,7 +68,7 @@ async def test_streaming_normal_completion(
         workspace_id=workspace_id,
     ):
         chunks.append(chunk.text)
-        assert chunk.model_id == "gemini-3.8-flash"
+        assert chunk.model_id == ORCH
         assert chunk.alias_used == "orchestrator"
 
     assert "".join(chunks) == "One two three four"

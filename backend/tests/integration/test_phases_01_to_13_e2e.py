@@ -108,8 +108,10 @@ from app.voice.tools import (
 from app.voice.vad import VoiceActivityDetector
 from tests.conftest import TestDatabase
 from tests.support.auth import build_harness
+from tests.support.fake_live import FakeLive
 from tests.support.postgres import scoped
 from tests.support.settings import make_settings
+from tests.support.voice_app import FakePersistence, recv_until
 
 pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
 
@@ -857,7 +859,7 @@ async def test_phases_01_to_13_comprehensive_e2e(
 
     control_frame = await voice_session.get_next_outgoing_message()
     assert control_frame.msg_type == OutgoingMessageType.CONTROL
-    assert control_frame.payload == {"type": "AUDIO_INTERRUPT"}
+    assert control_frame.payload == {"type": "AUDIO_INTERRUPT", "epoch": 1}
     await voice_session.close()
 
     real_redis = redis_async.from_url(redis_url, decode_responses=False)
@@ -953,6 +955,10 @@ async def test_phases_01_to_13_comprehensive_e2e(
         resources.close = AsyncMock()
         resources.verify_runtime_role = AsyncMock(return_value=None)
         resources.redis = real_redis
+        resources.engine = None
+        resources.registry = None
+        resources.model_gateway = None
+        resources.subtask_queue = None
 
         auth_service = AsyncMock()
         auth_service.warm_up = AsyncMock()
@@ -960,6 +966,8 @@ async def test_phases_01_to_13_comprehensive_e2e(
         auth_service.authenticate = AsyncMock(return_value=principal_alice)
 
         app = create_app(make_settings(), auth_service=auth_service)
+        app.state.voice_live_connector = FakeLive().connector
+        app.state.voice_persistence = FakePersistence()
         with TestClient(app) as client:
             with client.websocket_connect(
                 f"/api/v1/voice/live?token={tokens_a.access_token}"
@@ -967,13 +975,16 @@ async def test_phases_01_to_13_comprehensive_e2e(
                 ws_client.send_bytes(pcm16_16k_bytes[:640])
                 ws_client.send_json({"type": "VAD_SPEECH_START"})
                 ws_client.send_json({"type": "CLIENT_INTERRUPT"})
-                resp_json = ws_client.receive_json()
+                resp_json = recv_until(ws_client, "AUDIO_INTERRUPT")
                 assert resp_json.get("type") == "AUDIO_INTERRUPT"
 
             auth_service.authenticate = AsyncMock(side_effect=Exception("Invalid access token"))
-            with pytest.raises(WebSocketDisconnect):
-                with client.websocket_connect("/api/v1/voice/live?token=invalid-token"):
-                    pass
+            # Socket is accepted first, then closed with 4401 (was an opaque pre-accept 403).
+            with client.websocket_connect("/api/v1/voice/live?token=invalid-token") as ws_bad:
+                assert ws_bad.receive_json()["code"] == "unauthenticated"
+                with pytest.raises(WebSocketDisconnect) as closed:
+                    ws_bad.receive_json()
+                assert closed.value.code == 4401
 
     await real_redis.aclose()
 

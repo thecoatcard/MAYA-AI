@@ -33,6 +33,29 @@ class TaskCreateRequest(BaseModel):
         default=None,
         description="Optional conversation session ID this task is associated with.",
     )
+    input_files: list[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Upload ids (POST /api/v1/files/uploads) the task may read and edit.",
+    )
+
+
+class TaskInputAnswer(BaseModel):
+    """One answer of a paused step's question card: chosen option labels and/or pasted text."""
+
+    selected: list[str] = Field(default_factory=list, max_length=10)
+    text: str = Field(default="", max_length=2000)
+
+
+class TaskInputRequest(BaseModel):
+    """Answer for a step that paused with a ``needs_input`` question (inline on the task card)."""
+
+    subtask_id: UUID
+    answers: list[TaskInputAnswer] = Field(min_length=1, max_length=4)
+
+
+class TaskInputResponse(BaseModel):
+    message: str
 
 
 class SubtaskResponse(BaseModel):
@@ -76,6 +99,15 @@ class TaskDetailResponse(BaseModel):
     completed_at: datetime | None = None
     active_plan: list[dict[str, Any]] = Field(default_factory=list)
     subtasks: list[SubtaskResponse] = Field(default_factory=list)
+    # Self-healing report (no migration: read from ``tasks.shared_context``). ``warnings`` lists
+    # steps that failed but were not critical; ``error`` is the first real cause of a failure.
+    warnings: list[str] = Field(default_factory=list)
+    recovered: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+    # "Completed with errors": the status is still ``completed``; ``partial`` is true when a step
+    # failed, and ``failed_steps`` lists them (``step``, ``error``, ``deliverable_incomplete``).
+    partial: bool = False
+    failed_steps: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -94,6 +126,7 @@ class TaskListItem(BaseModel):
     created_at: datetime
     completed_at: datetime | None = None
     subtask_count: int = 0
+    partial: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -126,3 +159,18 @@ class TaskAbortResponse(BaseModel):
     executed: int
     failed: int
     notifications: list[str] = Field(default_factory=list)
+
+
+class TaskBulkDeleteRequest(BaseModel):
+    """Delete several finished tasks at once (at most 100 per request)."""
+
+    ids: list[UUID] = Field(..., min_length=1, max_length=100)
+
+
+class TaskBulkDeleteResponse(BaseModel):
+    """What happened to each id. ``not_found`` also covers tasks already deleted."""
+
+    deleted: list[UUID] = Field(default_factory=list)
+    not_found: list[UUID] = Field(default_factory=list)
+    not_finished: list[UUID] = Field(default_factory=list)
+    files_removed: int = 0

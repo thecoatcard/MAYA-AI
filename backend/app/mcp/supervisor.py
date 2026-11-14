@@ -25,7 +25,6 @@ class ServerHealthStatus(StrEnum):
 
 FALLBACK_ROUTES: dict[str, str] = {
     "github": "local_git",
-    "brave": "gemini_search",
 }
 
 

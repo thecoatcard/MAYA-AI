@@ -9,6 +9,9 @@ export interface UserPrincipal {
   readonly user_id: string;
   readonly workspace_id: string;
   readonly role: string;
+  /** Not sent by /auth/me today; shown in the status bar when the backend provides them. */
+  readonly email?: string;
+  readonly display_name?: string;
 }
 
 export interface SystemHealth {

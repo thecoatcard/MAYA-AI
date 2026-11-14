@@ -127,9 +127,16 @@ async def test_worker_denies_unregistered_tool_by_default() -> None:
 
     status = await worker.execute_job(session=session, job=job)
 
-    # Deny by default: unregistered tool required approval and paused
-    assert status == SubtaskStatus.AWAITING_APPROVAL
-    assert subtask.status == SubtaskStatus.AWAITING_APPROVAL
+    # Deny by default: an unclassified tool is refused outright (not offered for approval).
+    assert status == SubtaskStatus.FAILED
+    assert subtask.status == SubtaskStatus.FAILED
+    assert "denied by default" in (subtask.error_message or "")
+    assert task.status == "failed"
+
+
+async def _ok_handler(job: SubtaskJob, input_data: dict[str, Any]) -> dict[str, Any]:
+    assert "approval_token" not in input_data  # the JWT must never reach handlers
+    return {"result": {"ok": True}, "proof": {"status": "verified"}}
 
 
 @pytest.mark.asyncio
@@ -219,7 +226,7 @@ async def test_worker_executes_when_valid_token_presented_and_consumed() -> None
         assigned_agent="coding",
     )
 
-    status = await worker.execute_job(session=session, job=job)
+    status = await worker.execute_job(session=session, job=job, agent_handler=_ok_handler)
 
     # Valid token was verified and consumed: execution completed!
     assert status == SubtaskStatus.COMPLETED

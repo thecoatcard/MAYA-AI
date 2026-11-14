@@ -18,3 +18,8 @@ The central LangGraph orchestrator and multi-agent coordination framework (Phase
   isolation has an offline test plus a PostgreSQL test that has not been run against a live database.
 
 Specification: [docs/architecture/ORCHESTRATOR_SPECIFICATION.md](../../../docs/architecture/ORCHESTRATOR_SPECIFICATION.md).
+
+## Unified and custom agents (ADR-0023)
+
+- `unified.py`: the three agents the planner and UI see (Research, Builder, Operator), the alias table for every old role name, and `resolve_member`, which `plan_repair` uses to turn `builder`/`operator` into one concrete member before anything is stored.
+- `custom/`: custom agents defined by `<folder>/.maya/agents/<name>.md`. `definition.py` parses and validates (closed READ-only capability vocabulary, no extra keys), `store.py` reads and writes through SafePath, `runner.py` runs a text-only step with the instructions as untrusted data. API: [docs/api/AGENTS.md](../../../docs/api/AGENTS.md).

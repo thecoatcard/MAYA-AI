@@ -1,19 +1,11 @@
 import type { Metadata } from "next";
 import React from "react";
 
-import { ApprovalCenterView } from "../../components/approvals/ApprovalCenterView";
-import { AppShell } from "../../components/layout/AppShell";
+import { LegacyRedirect } from "../../components/layout/LegacyRedirect";
 
-export const metadata: Metadata = {
-  title: "Approval Center | MAYA AI",
-  description:
-    "Security governance dashboard for sensitive action authorizations with single-use cryptographic tokens.",
-};
+export const metadata: Metadata = { title: "Moved | MAYA AI" };
 
-export default function ApprovalsPage() {
-  return (
-    <AppShell title="Approval Center" breadcrumb="Governance">
-      <ApprovalCenterView />
-    </AppShell>
-  );
+/** Approvals are decided on the task card now. An old link opens Tasks (the query string stays). */
+export default function ApprovalsRedirect() {
+  return <LegacyRedirect to="/tasks" />;
 }

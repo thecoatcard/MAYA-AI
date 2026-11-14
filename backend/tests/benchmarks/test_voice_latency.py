@@ -12,16 +12,11 @@ from __future__ import annotations
 import asyncio
 import statistics
 import time
-from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.auth.models import Principal
-from app.main import create_app
 from app.voice.live_session import LiveVoiceSession, OutgoingMessageType
-from tests.support.settings import make_settings
 
 
 def calculate_percentiles(samples_ms: list[float]) -> dict[str, float]:
@@ -136,34 +131,19 @@ async def test_barge_in_interruption_latency_benchmark() -> None:
 
 def test_voice_websocket_live_barge_in_roundtrip() -> None:
     """Measure end-to-end WebSocket roundtrip barge-in interruption over Starlette testclient."""
-    ws_id = uuid4()
-    u_id = uuid4()
-    principal = Principal(user_id=u_id, workspace_id=ws_id, role="user", session_id=uuid4())
+    from tests.support import fake_live as fl
+    from tests.support.voice_app import FakePersistence, recv, recv_until, voice_client
 
-    with patch("app.main.Resources") as factory:
-        resources = factory.return_value
-        resources.check = AsyncMock(return_value=None)
-        resources.close = AsyncMock()
-        resources.verify_runtime_role = AsyncMock(return_value=None)
-        resources.redis = None
+    with voice_client(live=fl.FakeLive(), persistence=FakePersistence()) as client:
+        with client.websocket_connect("/api/v1/voice/live?token=valid-jwt") as websocket:
+            recv(websocket)  # READY
+            websocket.send_bytes(b"\x00\x10" * 800)
 
-        auth_service = AsyncMock()
-        auth_service.warm_up = AsyncMock()
-        auth_service.aclose = AsyncMock()
-        auth_service.authenticate = AsyncMock(return_value=principal)
+            t0 = time.perf_counter()
+            websocket.send_json({"type": "CLIENT_INTERRUPT"})
+            response = recv_until(websocket, "AUDIO_INTERRUPT")
+            t1 = time.perf_counter()
 
-        app = create_app(make_settings(), auth_service=auth_service)
-        with TestClient(app) as client:
-            with client.websocket_connect("/api/v1/voice/live?token=valid-jwt") as websocket:
-                # Transmit initial audio
-                websocket.send_bytes(b"\x00\x10" * 800)
-
-                # Send client interrupt and measure response roundtrip
-                t0 = time.perf_counter()
-                websocket.send_json({"type": "CLIENT_INTERRUPT"})
-                response = websocket.receive_json()
-                t1 = time.perf_counter()
-
-                rt_ms = (t1 - t0) * 1000.0
-                assert response.get("type") == "AUDIO_INTERRUPT"
-                assert rt_ms <= 150.0, f"WebSocket barge-in roundtrip {rt_ms}ms exceeded 150ms"
+            rt_ms = (t1 - t0) * 1000.0
+            assert response.get("type") == "AUDIO_INTERRUPT"
+            assert rt_ms <= 150.0, f"WebSocket barge-in roundtrip {rt_ms}ms exceeded 150ms"

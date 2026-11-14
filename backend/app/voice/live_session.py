@@ -66,6 +66,12 @@ class LiveVoiceSession:
         self.is_speaking = False
         self.is_listening = True
         self.is_interrupted = False
+        # Barge-in epoch: bumped on every interrupt. While ``_gate_stale_audio`` is set, audio
+        # from the generation that was interrupted is dropped instead of queued.
+        self.epoch = 0
+        self.model_turn_active = False
+        self._gate_stale_audio = False
+        self._audio_since_interrupt = True
         self.created_at = time.time()
         self.total_client_bytes_received = 0
         self.total_model_bytes_sent = 0
@@ -86,11 +92,32 @@ class LiveVoiceSession:
         if not audio_chunk:
             return
         async with self._lock:
+            if self._gate_stale_audio:
+                return  # stale audio of an interrupted generation (FR-02)
+            self.model_turn_active = True
+            self._audio_since_interrupt = True
             self._pending_audio_count += 1
             self.is_speaking = True
             self.total_model_bytes_sent += len(audio_chunk)
             msg = OutgoingMessage(OutgoingMessageType.AUDIO, audio_bytes=audio_chunk)
             await self._outgoing_queue.put(msg)
+
+    @property
+    def dropping_stale_audio(self) -> bool:
+        """True while audio of an interrupted generation is being discarded."""
+        return self._gate_stale_audio
+
+    async def emit_control(self, payload: dict[str, Any]) -> None:
+        """Queue a JSON control frame for the client."""
+        await self._outgoing_queue.put(
+            OutgoingMessage(OutgoingMessageType.CONTROL, payload=payload)
+        )
+
+    async def end_model_turn(self) -> None:
+        """Provider turn finished or was interrupted: a stale-audio gate is lifted here."""
+        async with self._lock:
+            self.model_turn_active = False
+            self._gate_stale_audio = False
 
     async def emit_transcript_user(self, text: str) -> None:
         """Emit a user speech transcription frame."""
@@ -114,6 +141,17 @@ class LiveVoiceSession:
         Immediately flushes pending outgoing audio buffers and emits AUDIO_INTERRUPT frame.
         """
         async with self._lock:
+            if not self._audio_since_interrupt and self._pending_audio_count == 0:
+                return  # duplicate trigger (VAD start + CLIENT_INTERRUPT): one frame is enough
+            self._audio_since_interrupt = False
+            self.epoch += 1
+            # Provider may still be generating the interrupted turn: drop its audio until the
+            # provider reports the turn boundary (interrupted / turn_complete).
+            if source != "gemini_interrupted" and self.model_turn_active:
+                self._gate_stale_audio = True
+            elif source == "gemini_interrupted":
+                self._gate_stale_audio = False
+                self.model_turn_active = False
             # Drain and discard pending audio frames from the outgoing queue
             retained_messages: list[OutgoingMessage] = []
             while not self._outgoing_queue.empty():
@@ -134,7 +172,7 @@ class LiveVoiceSession:
             # Emit AUDIO_INTERRUPT control message
             interrupt_frame = OutgoingMessage(
                 OutgoingMessageType.CONTROL,
-                payload={"type": "AUDIO_INTERRUPT"},
+                payload={"type": "AUDIO_INTERRUPT", "epoch": self.epoch},
             )
             await self._outgoing_queue.put(interrupt_frame)
             logger.info("barge_in_triggered source=%s session_id=%s", source, self.session_id)
@@ -175,17 +213,6 @@ class LiveVoiceSession:
         if task_id:
             self._active_task_ids.add(str(task_id))
         return result
-
-    async def send_client_content(self, text_or_turns: str | list[dict[str, Any]]) -> None:
-        """Inject conversational content or spoken updates into the live session."""
-        if isinstance(text_or_turns, str):
-            await self.emit_transcript_model(text_or_turns)
-        elif isinstance(text_or_turns, list):
-            for turn in text_or_turns:
-                parts = turn.get("parts", [])
-                for part in parts:
-                    if "text" in part:
-                        await self.emit_transcript_model(part["text"])
 
     async def get_next_outgoing_message(self) -> OutgoingMessage:
         """Pop the next outgoing frame to send to the WebSocket client."""

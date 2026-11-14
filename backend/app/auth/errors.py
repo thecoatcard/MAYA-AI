@@ -14,6 +14,13 @@ class ServiceUnavailable(Exception):
         super().__init__("Service unavailable")
 
 
+class BootstrapUnavailable(Exception):
+    """The local-owner bootstrap is off, not local, or already used: one answer for all."""
+
+    def __init__(self) -> None:
+        super().__init__("Bootstrap unavailable")
+
+
 class InvalidCode(Exception):
     """Wrong, expired, used or unknown one-time code: one answer for all of them."""
 

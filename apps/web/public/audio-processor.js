@@ -11,6 +11,8 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.outputBuffer = new Int16Array(this.bufferSize);
     this.bufferIndex = 0;
     this.resampleIndex = 0;
+    this.sampleSum = 0;
+    this.sampleCount = 0;
 
     // VAD State Machine
     this.isSpeaking = false;
@@ -34,12 +36,21 @@ class AudioProcessor extends AudioWorkletProcessor {
     const ratio = inputSampleRate / this.targetSampleRate;
 
     for (let i = 0; i < channelData.length; i++) {
+      this.sampleSum += channelData[i];
+      this.sampleCount += 1;
       this.resampleIndex += 1;
+
       if (this.resampleIndex >= ratio) {
         this.resampleIndex -= ratio;
 
+        // Simple anti-alias boxcar averaging before decimation
+        const avgSample =
+          this.sampleCount > 0 ? this.sampleSum / this.sampleCount : 0;
+        this.sampleSum = 0;
+        this.sampleCount = 0;
+
         // Clamp float sample [-1.0, 1.0] to int16 [-32768, 32767]
-        const sample = Math.max(-1.0, Math.min(1.0, channelData[i]));
+        const sample = Math.max(-1.0, Math.min(1.0, avgSample));
         const int16 =
           sample < 0 ? Math.round(sample * 32768) : Math.round(sample * 32767);
 

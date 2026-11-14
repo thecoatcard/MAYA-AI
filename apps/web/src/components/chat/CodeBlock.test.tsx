@@ -175,18 +175,40 @@ describe("CodeBlock", () => {
     expect(screen.getByRole("button", { name: "Code copied" })).toBeVisible();
   });
 
-  it("names the focusable code region as a group", () => {
+  it("names the focusable code region (the shared CodeBlockShell)", () => {
     render(<CodeBlock code="x" language="ts" />);
-    const region = screen.getByRole("group", { name: "Code listing, ts" });
+    const region = screen.getByRole("region", { name: "Code listing, ts" });
     expect(region.tagName).toBe("PRE");
     expect(region).toHaveAttribute("tabindex", "0");
+    // No inline style: the height cap is a CSS rule, so rendered replies carry no style attribute.
+    expect(region).not.toHaveAttribute("style");
   });
 
   it("falls back to a plain label for the region when there is no language", () => {
     render(<CodeBlock code="x" />);
     expect(
-      screen.getByRole("group", { name: "Code listing, text" }),
+      screen.getByRole("region", { name: "Code listing, text" }),
     ).toBeInTheDocument();
+  });
+
+  it("scrolls long lines by default and wraps them when Wrap is pressed", () => {
+    render(<CodeBlock code={"x".repeat(400)} language="ts" />);
+    const region = screen.getByRole("region", { name: "Code listing, ts" });
+    const wrap = screen.getByRole("button", { name: "Wrap" });
+    expect(region).toHaveAttribute("data-wrap", "false");
+    expect(wrap).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(wrap);
+    expect(region).toHaveAttribute("data-wrap", "true");
+    expect(wrap).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(wrap);
+    expect(region).toHaveAttribute("data-wrap", "false");
+  });
+
+  it("keeps the code reading left to right whatever the page direction", () => {
+    render(<CodeBlock code="x" language="ts" />);
+    expect(
+      screen.getByRole("region", { name: "Code listing, ts" }),
+    ).toHaveAttribute("dir", "ltr");
   });
 });
 
@@ -218,5 +240,21 @@ describe("CodeBlock direction controls", () => {
     const code = "const name = 'caf" + String.fromCharCode(0xe9) + "';";
     const { container } = render(<CodeBlock code={code} language="ts" />);
     expect(container.querySelector("pre code")?.textContent).toBe(code);
+  });
+});
+
+describe("CodeBlock context menu", () => {
+  it("offers Copy code, Save as file and a Wrap toggle", () => {
+    render(<CodeBlock code={"let a = 1;"} language="js" />);
+    fireEvent.contextMenu(screen.getByRole("figure"));
+    expect(screen.getByRole("menuitem", { name: /Copy code/ })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Save as file/ })).toBeTruthy();
+    const wrap = screen.getByRole("menuitemcheckbox", { name: /Wrap lines/ });
+    expect(wrap).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(wrap);
+    expect(screen.getByRole("button", { name: /Wrap/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

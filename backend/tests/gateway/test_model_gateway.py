@@ -22,6 +22,7 @@ from app.gateway.registry import build_default_registry
 from app.gateway.resilience import ResiliencePolicy
 from app.gateway.schemas import ToolDefinition
 from tests.support.fake_gemini_client import FakeGeminiClient
+from tests.support.models import LITE, ORCH
 
 
 def make_gateway_settings(**kwargs: object) -> Settings:
@@ -87,7 +88,7 @@ async def test_generate_text_happy_path(
 
     assert response.text == "Generated text from orchestrator"
     assert response.alias_used == "orchestrator"
-    assert response.model_id == "gemini-3.8-flash"
+    assert response.model_id == ORCH
     assert response.was_fallback is False
     assert response.usage.prompt_tokens == 100
     assert response.usage.candidates_tokens == 50
@@ -104,8 +105,8 @@ async def test_generate_text_happy_path(
 async def test_generate_text_with_fallback(
     gateway: ModelGateway, fake_client: FakeGeminiClient
 ) -> None:
-    # Make gemini-3.8-flash (orchestrator) fail with 500
-    fake_client.aio.models.enqueue_errors("gemini-3.8-flash", [APIError(500, "Crash")])
+    # Make the orchestrator model fail with 500
+    fake_client.aio.models.enqueue_errors(ORCH, [APIError(500, "Crash")])
     fake_client.aio.models.default_text = "Fallback text from lite"
 
     response = await gateway.generate_text(
@@ -116,7 +117,7 @@ async def test_generate_text_with_fallback(
 
     assert response.text == "Fallback text from lite"
     assert response.alias_used == "lite"
-    assert response.model_id == "gemini-3.5-flash-lite"
+    assert response.model_id == LITE
     assert response.was_fallback is True
 
 
@@ -272,7 +273,7 @@ async def test_embed_content_fallback_opt_in(
 async def test_count_tokens(gateway: ModelGateway) -> None:
     response = await gateway.count_tokens(alias="orchestrator", contents=["Short text"])
     assert response.total_tokens == 42
-    assert response.model_id == "gemini-3.8-flash"
+    assert response.model_id == ORCH
 
 
 @pytest.mark.asyncio

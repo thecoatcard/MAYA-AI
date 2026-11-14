@@ -608,6 +608,23 @@ class MemoryItem(Base):
     )
 
 
+class UserSettings(Base):
+    """Per-user settings (migration 0015): one JSON object per user."""
+
+    __tablename__ = "user_settings"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AuthOtpChallenge(Base):
     """One-time password challenge model."""
 

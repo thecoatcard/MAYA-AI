@@ -133,6 +133,8 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
 ### 2.4 Abort Task (Trigger Saga Rollback)
 
 - **Method:** `POST /api/v1/tasks/{task_id}/abort`
+- **Behaviour:** emits a `task_cancelled` event (payload `status: "cancelled"`), not `task_failed`.
+  Workers skip subtasks of a cancelled task and never flip it back to `completed`.
 - **Response:** `200 OK`
   ```json
   {
@@ -151,11 +153,12 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
 
 - **Method:** `GET /api/v1/tasks/{task_id}/events`
 - **Headers:** `Accept: text/event-stream`
-- **Response:** `200 OK` (Stream)
+- **Errors:** `404` when the task does not exist in the caller's workspace.
+- **Response:** `200 OK` (Stream; `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`)
   ```http
   HTTP/1.1 200 OK
   Content-Type: text/event-stream
-  Cache-Control: no-cache
+  Cache-Control: no-cache, no-transform
   Connection: keep-alive
 
   data: {"event_type": "connected", "task_id": "a548f074-b788-4f51-b844-0b1a0e9c991b"}
@@ -164,3 +167,28 @@ The Tasks API provides endpoints to submit, monitor, and cancel long-running age
 
   data: {"event_type": "task_completed", "payload": {"task_id": "...", "status": "completed"}}
   ```
+
+---
+
+## 3. Execution semantics (ADR-0012)
+
+- `POST /tasks` enqueues root subtasks only after its transaction has committed.
+- The in-process worker, outbox relay and reconciler run in a tenant context per workspace.
+- A subtask handler error retries with backoff (max 3 attempts) and then fails the subtask and task
+  with the real `error_message`. No canned output is ever substituted: with no model gateway or on
+  a gateway error the subtask fails.
+- `output_result` is always a JSON object. Text-only model output carries
+  `verification_proof = {"status": "unverified", "kind": "llm_text", "content_sha256": ...}`;
+  generated files carry a verified proof (`storage_uri`, `sha256`, ...).
+- The signed approval token is never passed to handlers or LLM prompts.
+
+## Delete tasks from history
+
+- **`DELETE /api/v1/tasks/{task_id}`**: `204` when deleted. `404` for an unknown, another user's or already deleted task (idempotent for the UI). `409 task_not_finished` ("Cancel the task first") unless the task is completed, failed or cancelled.
+- **`POST /api/v1/tasks/delete`** with `{"ids": [...]}` (1 to 100, else `422`): `{deleted, not_found, not_finished, files_removed}`. Unfinished tasks are left alone.
+- **Removed:** the title, instruction, plan, results and trace; the steps (subtasks); the task's file records and MAYA's stored copies of those files. Pending approvals are closed (`revoked`). Deleted tasks leave lists, detail, events, voice catch-up and chat session activity.
+- **Kept:** the audit log (a `task.deleted` row is added) and the outbox history, both keeping the task id; copies saved in the user's own working folder. The task row stays as a tombstone (`shared_context.deleted_at`) because `task_outbox_events` cascades from `tasks`; a real row delete would need a migration (not written).
+
+## Delete files
+
+`DELETE /api/v1/artifacts/{id}` and `POST /api/v1/artifacts/delete` (`{"ids": [...]}`, at most 100) remove the record and MAYA's stored copy (only paths that resolve inside the artifact storage root; `..` and links leading outside are never deleted). A file in the user's connected folder is never deleted.

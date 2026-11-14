@@ -1,25 +1,13 @@
 "use client";
 
 import {
-  Activity,
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
-  Cpu,
-  FolderGit2,
   Globe,
-  HardDrive,
-  Loader2,
-  PlusCircle,
+  Plus,
   RefreshCw,
   Search,
   Server,
-  ShieldAlert,
-  ShieldCheck,
   Terminal,
   Trash2,
-  X,
-  Zap,
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -32,337 +20,283 @@ import {
   type McpServerCreate,
 } from "../../lib/mcp-client";
 import {
-  GlassBadge,
-  GlassButton,
-  GlassCard,
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
   GlassInput,
   GlassModal,
+  Notice,
+  Pane,
+  ScrollArea,
+  Skeleton,
+  Truncate,
+  WrapText,
+  type Tone,
 } from "../ui";
 
-export interface IntegrationCatalogItem {
-  id: string;
-  name: string;
-  category: "search" | "vcs" | "productivity" | "workspace" | "filesystem";
-  desc: string;
-  transport: "stdio" | "http" | "streamable_http";
-  status: "Built-in" | "Connected" | "Configured";
-  toolsCount: number;
-  tools: Array<{
-    name: string;
-    description: string;
-    tier: "READ" | "WRITE" | "SENSITIVE" | "RESTRICTED";
-  }>;
-  schemaHash: string;
-}
-
-const CORE_INTEGRATIONS: IntegrationCatalogItem[] = [
+/** Static suggestions. None of these is connected; the list is not read from the server. */
+const SUGGESTIONS: ReadonlyArray<{
+  readonly id: string;
+  readonly name: string;
+  readonly desc: string;
+}> = [
   {
-    id: "core-brave",
-    name: "Brave Search",
-    category: "search",
-    desc: "Live privacy-preserving web search & rich site extraction engine with token leaky-bucket rate limiting.",
-    transport: "http",
-    status: "Connected",
-    toolsCount: 2,
-    schemaHash: "sha256:d8a21f7e034b7a19c54e81561bd2819890f671380126a099",
-    tools: [
-      {
-        name: "brave_web_search",
-        description:
-          "Executes web searches and extracts structured snippets with source citations.",
-        tier: "READ",
-      },
-      {
-        name: "brave_extract_page",
-        description:
-          "Fetches and sanitizes full text contents of specified search target URLs.",
-        tier: "READ",
-      },
-    ],
-  },
-  {
-    id: "core-github",
+    id: "github",
     name: "GitHub",
-    category: "vcs",
-    desc: "Repository automation for issues, PR reviews, and diff checks. PR submission requires single-use approval token.",
-    transport: "http",
-    status: "Connected",
-    toolsCount: 4,
-    schemaHash: "sha256:7e9104c99a632b71fa14b82650ee45cb2193b2160d540e11",
-    tools: [
-      {
-        name: "github_list_issues",
-        description: "Lists repo issues and filter states.",
-        tier: "READ",
-      },
-      {
-        name: "github_get_pull_request",
-        description: "Fetches PR details, code diffs, and review comments.",
-        tier: "READ",
-      },
-      {
-        name: "github_create_pull_request",
-        description:
-          "Submits pull request. Gated by Decision D5 single-use approval token.",
-        tier: "RESTRICTED",
-      },
-      {
-        name: "github_merge_pull_request",
-        description: "Merges approved pull request into target branch.",
-        tier: "RESTRICTED",
-      },
-    ],
+    desc: "Repositories, issues and pull requests.",
   },
   {
-    id: "core-notion",
+    id: "notion",
     name: "Notion",
-    category: "productivity",
-    desc: "Read-only access for sprint boards, documentation indexes, and knowledge base databases.",
-    transport: "http",
-    status: "Connected",
-    toolsCount: 2,
-    schemaHash: "sha256:3b94a08ef48d29c362140a876dc10a2f7c00e5a932b1f810",
-    tools: [
-      {
-        name: "notion_query_database",
-        description: "Queries Notion database tables with filter conditions.",
-        tier: "READ",
-      },
-      {
-        name: "notion_get_page",
-        description: "Reads page blocks and child content in markdown format.",
-        tier: "READ",
-      },
-    ],
+    desc: "Pages and databases from a Notion workspace.",
   },
   {
-    id: "core-google",
+    id: "google",
     name: "Google Workspace",
-    category: "workspace",
-    desc: "In-house streamable HTTP adapter for Gmail and Calendar. Email transmission strictly gated by TOTP.",
-    transport: "streamable_http",
-    status: "Connected",
-    toolsCount: 4,
-    schemaHash: "sha256:91aa84102d5b62e49c71e06fa941829e2830f3c5b8d0092c",
-    tools: [
-      {
-        name: "google_gmail_search",
-        description: "Searches inbox messages and email threads.",
-        tier: "READ",
-      },
-      {
-        name: "google_gmail_send",
-        description:
-          "Dispatches outgoing email. Gated by single-use token and TOTP step-up.",
-        tier: "RESTRICTED",
-      },
-      {
-        name: "google_calendar_list_events",
-        description: "Reads user calendar events for scheduled coordination.",
-        tier: "READ",
-      },
-      {
-        name: "google_calendar_create_event",
-        description: "Schedules calendar invites.",
-        tier: "SENSITIVE",
-      },
-    ],
+    desc: "Gmail and Google Calendar.",
   },
   {
-    id: "core-fs",
+    id: "fs",
     name: "Sandboxed Filesystem",
-    category: "filesystem",
-    desc: "Strictly confined to /artifacts/{workspace_id}/. Sandboxed directory traversal defense.",
-    transport: "stdio",
-    status: "Built-in",
-    toolsCount: 3,
-    schemaHash: "sha256:4a00bc9837f132e04da88c91a0c776de34190c128509b431",
-    tools: [
-      {
-        name: "fs_list_directory",
-        description: "Lists workspace deliverable directory contents.",
-        tier: "READ",
-      },
-      {
-        name: "fs_read_artifact",
-        description:
-          "Reads deliverable file contents with anti-tamper hash check.",
-        tier: "READ",
-      },
-      {
-        name: "fs_write_artifact",
-        description:
-          "Writes verified output deliverable into sandboxed partition.",
-        tier: "WRITE",
-      },
-    ],
+    desc: "Files inside MAYA's own workspace folder.",
   },
   {
-    id: "core-git",
+    id: "git",
     name: "Local Git Engine",
-    category: "vcs",
-    desc: "Autonomous local repo status, diff, branch, and commit inside ephemeral docker sandboxes.",
-    transport: "stdio",
-    status: "Built-in",
-    toolsCount: 5,
-    schemaHash: "sha256:5ef34b1298c56d012e88a3194519fbc702a11b659c03211a",
-    tools: [
-      {
-        name: "git_status",
-        description: "Checks working tree status.",
-        tier: "READ",
-      },
-      {
-        name: "git_diff",
-        description:
-          "Inspects unified diff between sandbox working tree and HEAD.",
-        tier: "READ",
-      },
-      {
-        name: "git_branch",
-        description: "Lists or creates feature branches.",
-        tier: "WRITE",
-      },
-      {
-        name: "git_commit",
-        description: "Creates signed commit with Conventional Commits message.",
-        tier: "WRITE",
-      },
-      {
-        name: "git_push",
-        description:
-          "Pushes branch to remote. Gated by explicit human approval.",
-        tier: "RESTRICTED",
-      },
-    ],
+    desc: "Status, diffs and commits for a local repository.",
   },
 ];
+
+const FIELD =
+  "w-full rounded-maya-md border border-maya-control-border bg-maya-pane px-3.5 py-2 text-maya-body text-maya-text hover:border-maya-border-strong focus:border-maya-focus";
+
+/** A URL without credentials, query or fragment: those can hold secrets and are never shown. */
+export function safeUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}${u.pathname === "/" ? "" : u.pathname}`;
+  } catch {
+    return raw.split(/[?#]/)[0] ?? "";
+  }
+}
+
+/** Hides the value of an argument that looks like a secret (--token=abc becomes --token=...). */
+export function safeArg(arg: string): string {
+  const eq = arg.indexOf("=");
+  if (
+    eq > 0 &&
+    /token|key|secret|password|passwd|auth/i.test(arg.slice(0, eq))
+  ) {
+    return `${arg.slice(0, eq)}=…`;
+  }
+  return arg;
+}
+
+function health(status: string): { tone: Tone; label: string } {
+  switch (status.toLowerCase()) {
+    case "healthy":
+      return { tone: "success", label: "Connected" };
+    case "degraded":
+      return { tone: "warning", label: "Degraded" };
+    case "dead":
+      return { tone: "danger", label: "Failed" };
+    default:
+      return { tone: "neutral", label: "Unknown" };
+  }
+}
+
+function usable(server: McpServer): boolean {
+  return Boolean(server.schema_hash && server.pinned_version);
+}
+
+function when(iso?: string | null): string {
+  if (!iso) return "Never checked";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "Unknown" : d.toLocaleString();
+}
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function Detail({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="grid min-w-0 gap-0.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-3">
+      <dt className="text-maya-caption text-maya-muted">{label}</dt>
+      <dd className="m-0 min-w-0 text-maya-small text-maya-secondary">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function ServerDetails({
+  server,
+}: {
+  readonly server: McpServer;
+}): React.JSX.Element {
+  return (
+    <dl className="m-0 grid min-w-0 gap-1.5">
+      {server.transport === "stdio" ? (
+        <Detail label="Command">
+          <WrapText className="font-mono text-maya-mono">
+            {[server.command ?? "", ...(server.args ?? []).map(safeArg)]
+              .join(" ")
+              .trim() || "None"}
+          </WrapText>
+        </Detail>
+      ) : (
+        <Detail label="Address">
+          <WrapText className="font-mono text-maya-mono">
+            {server.url ? safeUrl(server.url) : "None"}
+          </WrapText>
+        </Detail>
+      )}
+      <Detail label="Pinned version">
+        <WrapText>{server.pinned_version || "Not set"}</WrapText>
+      </Detail>
+      <Detail label="Schema hash">
+        <WrapText className="font-mono text-maya-mono">
+          {server.schema_hash || "Not set"}
+        </WrapText>
+      </Detail>
+      <Detail label="Last status check">{when(server.last_ping_at)}</Detail>
+      {server.consecutive_failures > 0 && (
+        <Detail label="Failed checks in a row">
+          {server.consecutive_failures}
+        </Detail>
+      )}
+    </dl>
+  );
+}
 
 export function McpGatewayView(): React.JSX.Element {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [query, setQuery] = useState<string>("");
 
-  // Inspector & Register modals
-  const [inspectingServer, setInspectingServer] = useState<
-    McpServer | IntegrationCatalogItem | null
-  >(null);
-  const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(false);
-  const [healthCheckingId, setHealthCheckingId] = useState<string | null>(null);
-  const [pingResult, setPingResult] = useState<{
+  const [inspecting, setInspecting] = useState<McpServer | null>(null);
+  const [removing, setRemoving] = useState<McpServer | null>(null);
+  const [removeBusy, setRemoveBusy] = useState<boolean>(false);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkNote, setCheckNote] = useState<{
     id: string;
-    latencyMs: number;
-    status: string;
+    ok: boolean;
+    text: string;
   } | null>(null);
 
-  // Filter & Search
-  const [transportFilter, setTransportFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-
-  // Registration form state
+  const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(false);
   const [name, setName] = useState<string>("");
-  const [transport, setTransport] = useState<
-    "stdio" | "http" | "streamable_http"
-  >("stdio");
+  const [transport, setTransport] = useState<"stdio" | "streamable_http">(
+    "stdio",
+  );
   const [command, setCommand] = useState<string>("");
   const [argsText, setArgsText] = useState<string>("");
   const [url, setUrl] = useState<string>("");
-  const [pinnedVersion, setPinnedVersion] = useState<string>("1.0.0");
-  const [schemaHashInput, setSchemaHashInput] = useState<string>("");
+  const [pinnedVersion, setPinnedVersion] = useState<string>("");
+  const [schemaHash, setSchemaHash] = useState<string>("");
   const [registering, setRegistering] = useState<boolean>(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
 
   const loadServers = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
-      const data = await listMcpServers();
-      setServers(data);
+      setServers(await listMcpServers());
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load MCP servers",
-      );
+      setLoadError(errorText(err, "The server list could not be loaded."));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadServers();
+    void loadServers();
   }, [loadServers]);
 
-  const handleHealthCheck = async (serverId: string) => {
-    setHealthCheckingId(serverId);
-    const startTime = performance.now();
+  const checkStatus = async (server: McpServer): Promise<void> => {
+    setCheckingId(server.id);
+    setCheckNote(null);
     try {
-      const health = await getMcpServerHealth(serverId);
-      const latencyMs = Math.round(performance.now() - startTime);
-      setPingResult({
-        id: serverId,
-        latencyMs,
-        status: health.health_status,
-      });
-
+      const result = await getMcpServerHealth(server.id);
       setServers((prev) =>
         prev.map((s) =>
-          s.id === serverId
+          s.id === server.id
             ? {
                 ...s,
-                health_status: health.health_status,
-                last_ping_at: health.last_ping_at,
-                consecutive_failures: health.consecutive_failures,
-                tool_count: health.tool_count,
+                health_status: result.health_status,
+                last_ping_at: result.last_ping_at,
+                consecutive_failures: result.consecutive_failures,
+                tool_count: result.tool_count,
               }
             : s,
         ),
       );
-    } catch {
-      setPingResult({
-        id: serverId,
-        latencyMs: Math.round(performance.now() - startTime),
-        status: "dead",
+      setCheckNote({
+        id: server.id,
+        ok: true,
+        text: `Status read: ${health(result.health_status).label.toLowerCase()}.`,
+      });
+    } catch (err) {
+      setCheckNote({
+        id: server.id,
+        ok: false,
+        text: errorText(err, "The status could not be read."),
       });
     } finally {
-      setHealthCheckingId(null);
+      setCheckingId(null);
     }
   };
 
-  const handleDelete = async (server: McpServer) => {
-    if (
-      !confirm(
-        `Are you sure you want to deactivate and remove MCP server "${server.name}"?`,
-      )
-    ) {
-      return;
-    }
+  const confirmRemove = async (): Promise<void> => {
+    if (!removing) return;
+    setRemoveBusy(true);
     try {
-      await deleteMcpServer(server.id);
+      await deleteMcpServer(removing.id);
+      setRemoving(null);
       await loadServers();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete MCP server",
-      );
+      setRemoving(null);
+      setActionError(errorText(err, "The server could not be removed."));
+    } finally {
+      setRemoveBusy(false);
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const openRegister = (): void => {
+    setRegisterError(null);
+    setIsRegisterOpen(true);
+  };
+
+  const submitRegister = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setRegistering(true);
     setRegisterError(null);
-
     const payload: McpServerCreate = {
       name: name.trim(),
       transport,
       command: transport === "stdio" ? command.trim() || undefined : undefined,
       args:
         transport === "stdio" && argsText.trim()
-          ? argsText.split(",").map((s) => s.trim())
+          ? argsText
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
           : undefined,
-      url: transport !== "stdio" ? url.trim() || undefined : undefined,
+      url:
+        transport === "streamable_http" ? url.trim() || undefined : undefined,
       pinned_version: pinnedVersion.trim() || undefined,
-      schema_hash: schemaHashInput.trim() || undefined,
+      schema_hash: schemaHash.trim() || undefined,
     };
-
     try {
       await registerMcpServer(payload);
       setIsRegisterOpen(false);
@@ -370,680 +304,370 @@ export function McpGatewayView(): React.JSX.Element {
       setCommand("");
       setArgsText("");
       setUrl("");
-      setPinnedVersion("1.0.0");
-      setSchemaHashInput("");
+      setPinnedVersion("");
+      setSchemaHash("");
       await loadServers();
     } catch (err) {
-      setRegisterError(
-        err instanceof Error ? err.message : "Failed to register server",
-      );
+      setRegisterError(errorText(err, "The server could not be added."));
     } finally {
       setRegistering(false);
     }
   };
 
-  // Filter integration cards
-  const filteredCatalog = useMemo(() => {
-    return CORE_INTEGRATIONS.filter((item) => {
-      if (transportFilter !== "all") {
-        if (transportFilter === "stdio" && item.transport !== "stdio") {
-          return false;
-        }
-        if (
-          transportFilter === "streaming" &&
-          item.transport !== "http" &&
-          item.transport !== "streamable_http"
-        ) {
-          return false;
-        }
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          item.name.toLowerCase().includes(q) ||
-          item.desc.toLowerCase().includes(q) ||
-          item.tools.some((t) => t.name.toLowerCase().includes(q))
-        );
-      }
-      return true;
-    });
-  }, [transportFilter, searchQuery]);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return servers;
+    return servers.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.transport.toLowerCase().includes(q) ||
+        (s.url ? safeUrl(s.url).toLowerCase().includes(q) : false),
+    );
+  }, [servers, query]);
 
-  const filteredTenantServers = useMemo(() => {
-    return servers.filter((s) => {
-      if (transportFilter !== "all") {
-        if (transportFilter === "stdio" && s.transport !== "stdio") {
-          return false;
-        }
-        if (
-          transportFilter === "streaming" &&
-          s.transport !== "http" &&
-          s.transport !== "streamable_http"
-        ) {
-          return false;
-        }
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          s.name.toLowerCase().includes(q) ||
-          s.transport.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [servers, transportFilter, searchQuery]);
-
-  const getTransportBadge = (transportType: string) => {
-    switch (transportType) {
-      case "stdio":
-        return (
-          <GlassBadge
-            variant="purple"
-            size="sm"
-            mono
-            icon={<Terminal className="w-3 h-3" />}
-          >
-            stdio
-          </GlassBadge>
-        );
-      case "streamable_http":
-        return (
-          <GlassBadge
-            variant="teal"
-            size="sm"
-            mono
-            icon={<Zap className="w-3 h-3" />}
-          >
-            streamable_http
-          </GlassBadge>
-        );
-      case "http":
-      default:
-        return (
-          <GlassBadge
-            variant="blue"
-            size="sm"
-            mono
-            icon={<Globe className="w-3 h-3" />}
-          >
-            http
-          </GlassBadge>
-        );
-    }
-  };
-
-  const getPermissionBadge = (tier: string) => {
-    switch (tier.toUpperCase()) {
-      case "RESTRICTED":
-        return (
-          <GlassBadge
-            variant="rose"
-            size="sm"
-            mono
-            icon={<ShieldAlert className="w-3 h-3" />}
-          >
-            RESTRICTED
-          </GlassBadge>
-        );
-      case "SENSITIVE":
-        return (
-          <GlassBadge
-            variant="amber"
-            size="sm"
-            mono
-            icon={<AlertTriangle className="w-3 h-3" />}
-          >
-            SENSITIVE
-          </GlassBadge>
-        );
-      case "WRITE":
-        return (
-          <GlassBadge variant="blue" size="sm" mono>
-            WRITE
-          </GlassBadge>
-        );
-      case "READ":
-      default:
-        return (
-          <GlassBadge variant="emerald" size="sm" mono>
-            READ
-          </GlassBadge>
-        );
-    }
-  };
-
-  const getHealthBadge = (health: string) => {
-    switch (health.toLowerCase()) {
-      case "healthy":
-        return (
-          <GlassBadge variant="emerald" size="sm" dot mono>
-            Healthy
-          </GlassBadge>
-        );
-      case "degraded":
-        return (
-          <GlassBadge variant="amber" size="sm" dot dotPulse mono>
-            Degraded
-          </GlassBadge>
-        );
-      case "dead":
-      default:
-        return (
-          <GlassBadge variant="rose" size="sm" dot mono>
-            Dead
-          </GlassBadge>
-        );
-    }
-  };
+  const manifest = inspecting?.tools_manifest;
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-6 max-w-7xl mx-auto w-full">
-      {/* Header Banner */}
-      <GlassCard
-        variant="teal"
-        padding="md"
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-teal-500/30"
-      >
-        <div className="flex items-start gap-3.5">
-          <div className="p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-400 mt-0.5">
-            <FolderGit2 className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-lg md:text-xl font-bold tracking-tight text-zinc-100 font-mono">
-                Model Context Protocol (MCP) Gateway
-              </h2>
-              <GlassBadge variant="teal" size="sm" mono>
-                Phase 08 Core
-              </GlassBadge>
+    <div className="h-full min-h-0 min-w-0">
+      <Pane as="div" bodyLabel="Connections">
+        <div className="mx-auto grid w-full max-w-(--maya-column-wide) min-w-0 gap-8 p-4 sm:p-6">
+          <header className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 basis-64">
+              <h1 className="m-0 text-maya-title font-semibold text-maya-text">
+                Connections
+              </h1>
+              <p className="m-0 mt-1 max-w-(--maya-measure) text-maya-small text-maya-secondary">
+                Tool servers you added for MAYA to use, and whether they are
+                reachable.
+              </p>
             </div>
-            <p className="text-xs md:text-sm text-zinc-400 mt-1.5 max-w-3xl leading-relaxed">
-              Unified runtime integration hub with RFC 8785 canonical
-              schema-hash poisoning defense, process heartbeats, 4-tier
-              permission governance, and live ping testers for external tool
-              servers.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 shrink-0">
-          <GlassButton
-            variant="secondary"
-            size="sm"
-            onClick={loadServers}
-            leftIcon={
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
-              />
-            }
-            aria-label="Refresh MCP servers"
-          >
-            Sync
-          </GlassButton>
-          <GlassButton
-            variant="primary"
-            size="sm"
-            onClick={() => setIsRegisterOpen(true)}
-            leftIcon={<PlusCircle className="w-4 h-4" />}
-          >
-            Register Server
-          </GlassButton>
-        </div>
-      </GlassCard>
-
-      {error && (
-        <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-950/30 backdrop-blur-md text-rose-200 text-xs flex items-center gap-2.5 shadow-sm">
-          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Filter and Search Bar */}
-      <GlassCard
-        variant="default"
-        padding="sm"
-        className="flex flex-col sm:flex-row items-center justify-between gap-3"
-      >
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto text-xs">
-          {[
-            { id: "all", label: "All Transports" },
-            { id: "stdio", label: "Subprocess (stdio)" },
-            { id: "streaming", label: "Streaming (HTTP/SSE)" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setTransportFilter(tab.id)}
-              className={`px-3 py-1.5 rounded-lg font-medium text-xs whitespace-nowrap transition-all duration-150 cursor-pointer ${
-                transportFilter === tab.id
-                  ? "bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-xs"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="w-full sm:w-72">
-          <GlassInput
-            placeholder="Search servers, tools, schema…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            leftIcon={<Search className="w-3.5 h-3.5 text-zinc-500" />}
-            clearable
-            onClear={() => setSearchQuery("")}
-            className="py-1.5 text-xs"
-          />
-        </div>
-      </GlassCard>
-
-      {/* Section 1: Core Integrations Catalog */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-teal-400" />
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300 font-mono">
-              Core Enterprise Integrations ({filteredCatalog.length})
-            </h3>
-          </div>
-          <span className="text-[11px] font-mono text-zinc-500">
-            Canonical RFC 8785 Verified
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCatalog.map((ci) => (
-            <GlassCard
-              key={ci.id}
-              variant="default"
-              hoverEffect="lift-glow"
-              padding="md"
-              className="flex flex-col justify-between gap-4 cursor-pointer group"
-              onClick={() => setInspectingServer(ci)}
-            >
-              <div className="flex flex-col gap-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-white/5 border border-white/10 group-hover:border-teal-500/30 transition-colors">
-                      {ci.category === "search" && (
-                        <Globe className="w-4 h-4 text-teal-400" />
-                      )}
-                      {ci.category === "vcs" && (
-                        <FolderGit2 className="w-4 h-4 text-blue-400" />
-                      )}
-                      {ci.category === "workspace" && (
-                        <Zap className="w-4 h-4 text-amber-400" />
-                      )}
-                      {ci.category === "productivity" && (
-                        <Activity className="w-4 h-4 text-purple-400" />
-                      )}
-                      {ci.category === "filesystem" && (
-                        <HardDrive className="w-4 h-4 text-emerald-400" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-zinc-100 font-mono group-hover:text-teal-300 transition-colors">
-                        {ci.name}
-                      </h4>
-                      <span className="text-[10px] font-mono text-zinc-500 uppercase">
-                        {ci.category}
-                      </span>
-                    </div>
-                  </div>
-
-                  <GlassBadge variant="emerald" size="sm" dot mono>
-                    {ci.status}
-                  </GlassBadge>
-                </div>
-
-                <p className="text-xs text-zinc-300/90 leading-relaxed line-clamp-3">
-                  {ci.desc}
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2 pt-3 border-t border-white/5">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  {getTransportBadge(ci.transport)}
-                  <span className="text-zinc-400 font-medium">
-                    {ci.toolsCount} registered tools
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-1">
-                  <span className="flex items-center gap-1 truncate max-w-[190px]">
-                    <ShieldCheck className="w-3 h-3 text-teal-400/80 shrink-0" />
-                    <span className="truncate">
-                      {ci.schemaHash.slice(0, 18)}…
-                    </span>
-                  </span>
-                  <span className="text-teal-400 group-hover:underline text-[11px]">
-                    Inspect Tools →
-                  </span>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-      </div>
-
-      {/* Section 2: Registered Tenant Custom Servers */}
-      <div className="flex flex-col gap-3 mt-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Server className="w-4 h-4 text-teal-400" />
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300 font-mono">
-              Tenant Custom Servers ({filteredTenantServers.length})
-            </h3>
-          </div>
-          <span className="text-[11px] font-mono text-zinc-500">
-            Postgres `mcp_servers` Tenant Isolation
-          </span>
-        </div>
-
-        <GlassCard variant="default" padding="none" className="overflow-hidden">
-          {loading && servers.length === 0 ? (
-            <div className="p-12 text-center text-zinc-400 text-xs flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-teal-400" />
-              <span>Inspecting registered MCP servers…</span>
-            </div>
-          ) : filteredTenantServers.length === 0 ? (
-            <div className="p-12 text-center text-zinc-400 text-xs flex flex-col items-center justify-center gap-3">
-              <Server className="w-8 h-8 text-zinc-600 opacity-60" />
-              <p>No tenant MCP servers registered yet.</p>
-              <GlassButton
-                variant="primary"
-                size="sm"
-                onClick={() => setIsRegisterOpen(true)}
-                leftIcon={<PlusCircle className="w-3.5 h-3.5" />}
+            <div className="flex min-w-0 flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                leftIcon={
+                  <RefreshCw
+                    size={16}
+                    aria-hidden="true"
+                    className={
+                      loading
+                        ? "animate-spin motion-reduce:animate-none"
+                        : undefined
+                    }
+                  />
+                }
+                onClick={() => void loadServers()}
+                disabled={loading}
               >
-                Register Custom Server
-              </GlassButton>
+                Refresh list
+              </Button>
+              <Button
+                variant="primary"
+                leftIcon={<Plus size={16} aria-hidden="true" />}
+                onClick={openRegister}
+              >
+                Register server
+              </Button>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-white/10 bg-white/[0.02] text-zinc-400 font-mono text-[11px]">
-                    <th className="py-3 px-4 font-medium">Server Name</th>
-                    <th className="py-3 px-4 font-medium">Transport</th>
-                    <th className="py-3 px-4 font-medium">Health Status</th>
-                    <th className="py-3 px-4 font-medium">Tools</th>
-                    <th className="py-3 px-4 font-medium">Schema Hash</th>
-                    <th className="py-3 px-4 font-medium">Last Ping</th>
-                    <th className="py-3 px-4 font-medium text-right">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5 text-zinc-300 font-mono">
-                  {filteredTenantServers.map((s) => (
-                    <tr
-                      key={s.id}
-                      className="hover:bg-white/[0.03] transition-colors"
-                    >
-                      <td className="py-3 px-4 font-semibold text-zinc-100">
-                        <div className="flex items-center gap-2">
-                          <Server className="w-3.5 h-3.5 text-teal-400/80" />
-                          <span>{s.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        {getTransportBadge(s.transport)}
-                      </td>
-                      <td className="py-3 px-4">
-                        {getHealthBadge(s.health_status)}
-                      </td>
-                      <td className="py-3 px-4 text-zinc-200">
-                        {s.tool_count} tools
-                      </td>
-                      <td className="py-3 px-4 text-[11px] text-zinc-400">
-                        {s.schema_hash ? (
-                          <span
-                            className="flex items-center gap-1 font-mono text-teal-400/90"
-                            title={s.schema_hash}
-                          >
-                            <ShieldCheck className="w-3 h-3 shrink-0" />
-                            <span>{s.schema_hash.slice(0, 12)}…</span>
-                          </span>
-                        ) : (
-                          <span className="text-zinc-500">Unspecified</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-zinc-400 text-[11px]">
-                        {s.last_ping_at
-                          ? new Date(s.last_ping_at).toLocaleTimeString()
-                          : "Never"}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <GlassButton
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleHealthCheck(s.id)}
-                            disabled={healthCheckingId === s.id}
-                            title="Ping server health tester"
-                            leftIcon={
-                              <RefreshCw
-                                className={`w-3.5 h-3.5 ${healthCheckingId === s.id ? "animate-spin" : ""}`}
-                              />
-                            }
-                          >
-                            Ping
-                          </GlassButton>
-                          <GlassButton
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setInspectingServer(s)}
-                          >
-                            Inspect
-                          </GlassButton>
-                          <GlassButton
-                            variant="danger"
-                            size="sm"
-                            onClick={() => handleDelete(s)}
-                            title="Delete server registration"
-                            aria-label={`Delete ${s.name}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </GlassButton>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          </header>
+
+          {actionError !== null && (
+            <Notice tone="danger" onDismiss={() => setActionError(null)}>
+              {actionError}
+            </Notice>
           )}
-        </GlassCard>
-      </div>
 
-      {/* Ping Tester Result Notification */}
-      {pingResult && (
-        <div className="fixed bottom-6 right-6 z-40 max-w-sm">
-          <GlassCard
-            variant="teal"
-            padding="sm"
-            className="flex items-center gap-3 shadow-2xl border-teal-500/40"
-          >
-            <CheckCircle2 className="w-5 h-5 text-teal-400 shrink-0" />
-            <div className="text-xs">
-              <p className="font-semibold text-zinc-100">
-                Server Health Ping Received
-              </p>
-              <p className="text-zinc-400 font-mono text-[11px] mt-0.5">
-                Latency:{" "}
-                <span className="text-teal-300 font-bold">
-                  {pingResult.latencyMs}ms
-                </span>{" "}
-                • Status:{" "}
-                <span className="uppercase text-emerald-300 font-bold">
-                  {pingResult.status}
-                </span>
-              </p>
+          <section aria-labelledby="mcp-servers" className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-maya-border pb-2">
+              <h2
+                id="mcp-servers"
+                className="m-0 text-maya-heading font-semibold text-maya-text"
+              >
+                Your servers
+                {!loading && loadError === null ? ` (${servers.length})` : ""}
+              </h2>
+              {servers.length > 0 && (
+                <div className="w-full min-w-0 sm:w-72">
+                  <GlassInput
+                    aria-label="Search servers"
+                    placeholder="Search servers"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    leftIcon={
+                      <Search className="size-3.5" aria-hidden="true" />
+                    }
+                    clearable
+                    onClear={() => setQuery("")}
+                  />
+                </div>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => setPingResult(null)}
-              className="ml-auto text-zinc-500 hover:text-zinc-200 cursor-pointer"
+
+            {loadError !== null ? (
+              <div className="mt-3">
+                <ErrorState
+                  title="Your servers could not be loaded"
+                  message={loadError}
+                  onRetry={() => void loadServers()}
+                />
+              </div>
+            ) : loading && servers.length === 0 ? (
+              <div aria-busy="true" className="mt-3">
+                <Skeleton lines={4} />
+              </div>
+            ) : servers.length === 0 ? (
+              <div className="mt-3">
+                <EmptyState
+                  icon={Server}
+                  title="No servers registered"
+                  description="Register a tool server to let MAYA use its tools."
+                  action={
+                    <Button variant="primary" onClick={openRegister}>
+                      Register a server
+                    </Button>
+                  }
+                />
+              </div>
+            ) : shown.length === 0 ? (
+              <p className="m-0 mt-3 text-maya-small text-maya-muted">
+                No server matches that search.
+              </p>
+            ) : (
+              <ul className="m-0 grid min-w-0 list-none gap-3 p-0 pt-3">
+                {shown.map((s) => {
+                  const h = health(s.health_status);
+                  return (
+                    <li
+                      key={s.id}
+                      className="grid min-w-0 shrink-0 gap-3 rounded-maya-lg border border-maya-border bg-maya-pane p-3"
+                    >
+                      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                        <div className="flex min-w-0 flex-1 basis-48 items-center gap-2">
+                          <Server
+                            size={16}
+                            aria-hidden="true"
+                            className="shrink-0 text-maya-muted"
+                          />
+                          <Truncate
+                            as="h3"
+                            dir="auto"
+                            className="m-0 text-maya-body font-semibold"
+                          >
+                            {s.name}
+                          </Truncate>
+                        </div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <Badge tone={h.tone}>{h.label}</Badge>
+                          <Badge
+                            tone="neutral"
+                            icon={s.transport === "stdio" ? Terminal : Globe}
+                          >
+                            {s.transport}
+                          </Badge>
+                          <Badge tone="neutral" icon={Server}>
+                            {s.tool_count === 1
+                              ? "1 tool"
+                              : `${s.tool_count} tools`}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <ServerDetails server={s} />
+
+                      {!usable(s) && (
+                        <Notice tone="warning">
+                          MAYA does not use this server yet: it needs a pinned
+                          version and a schema hash.
+                        </Notice>
+                      )}
+
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={checkingId === s.id}
+                          title="Reads the status the server list last recorded"
+                          onClick={() => void checkStatus(s)}
+                        >
+                          Refresh status
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setInspecting(s)}
+                        >
+                          Details
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          leftIcon={<Trash2 size={14} aria-hidden="true" />}
+                          aria-label={`Remove ${s.name}`}
+                          onClick={() => setRemoving(s)}
+                        >
+                          Remove
+                        </Button>
+                        {checkNote?.id === s.id && (
+                          <span
+                            role={checkNote.ok ? "status" : "alert"}
+                            className="min-w-0 text-maya-small text-maya-secondary [overflow-wrap:anywhere]"
+                          >
+                            {checkNote.text}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section aria-labelledby="mcp-suggestions" className="min-w-0">
+            <h2
+              id="mcp-suggestions"
+              className="m-0 border-b border-maya-border pb-2 text-maya-heading font-semibold text-maya-text"
             >
-              <X className="w-4 h-4" />
-            </button>
-          </GlassCard>
+              Suggestions, not connected
+            </h2>
+            <p className="m-0 mt-2 text-maya-small text-maya-secondary">
+              A fixed list of ideas. Nothing here is connected, and it is not
+              read from the server. Register a server above to connect one.
+            </p>
+            <ul className="m-0 mt-3 grid min-w-0 list-none gap-2 p-0 sm:grid-cols-2">
+              {SUGGESTIONS.map((item) => (
+                <li
+                  key={item.id}
+                  className="min-w-0 rounded-maya-lg border border-maya-border p-3"
+                >
+                  <p className="m-0 text-maya-body font-medium [overflow-wrap:anywhere]">
+                    {item.name}
+                  </p>
+                  <p className="m-0 mt-0.5 text-maya-small text-maya-secondary">
+                    {item.desc}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <p className="m-0 mt-3 text-maya-small text-maya-muted">
+              Planned: showing here whether GitHub, Gmail, Calendar and Notion
+              are set up on this server. The server does not report that yet.
+            </p>
+          </section>
         </div>
-      )}
+      </Pane>
 
-      {/* Schema Hash & Tool Manifest Inspector Modal */}
-      {inspectingServer && (
+      {inspecting !== null && (
         <GlassModal
-          isOpen={Boolean(inspectingServer)}
-          onClose={() => setInspectingServer(null)}
+          isOpen
+          onClose={() => setInspecting(null)}
           title={
-            <div className="flex items-center gap-2 text-zinc-100 font-mono">
-              <ShieldCheck className="w-5 h-5 text-teal-400" />
-              <span>{inspectingServer.name} — Schema Inspection</span>
-            </div>
+            <span className="[overflow-wrap:anywhere]">{inspecting.name}</span>
           }
-          description="RFC 8785 Canonical schema validation, tool permission tier verification, and anti-poisoning defenses."
+          description="What is recorded for this server."
           size="lg"
         >
-          <div className="flex flex-col gap-4 text-xs font-mono">
-            {/* Schema Defense Status Banner */}
-            <div className="p-3.5 rounded-xl border border-teal-500/30 bg-teal-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-teal-400 shrink-0" />
-                <div>
-                  <span className="font-bold text-zinc-200">
-                    Schema Hash Defense: ACTIVE
-                  </span>
-                  <p className="text-[11px] text-zinc-400">
-                    Manifest keys sorted lexicographically; whitespace
-                    normalized per RFC 8785.
-                  </p>
-                </div>
-              </div>
-              <GlassBadge variant="emerald" size="sm" mono>
-                VALIDATED
-              </GlassBadge>
-            </div>
-
-            {/* Cryptographic Hash */}
-            <div className="flex flex-col gap-1 p-3 rounded-xl border border-white/10 bg-white/[0.02]">
-              <span className="text-[11px] text-zinc-400 font-semibold uppercase">
-                Cryptographic Schema Hash (SHA-256)
-              </span>
-              <span className="text-xs text-teal-300 break-all select-all font-mono">
-                {"schemaHash" in inspectingServer
-                  ? inspectingServer.schemaHash
-                  : inspectingServer.schema_hash ||
-                    "sha256:computed_on_runtime_init"}
-              </span>
-            </div>
-
-            {/* Tools Manifest List */}
-            <div className="flex flex-col gap-2 mt-1">
-              <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-                Exposed Tool Manifest
-              </span>
-
-              {"tools" in inspectingServer && inspectingServer.tools ? (
-                <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
-                  {inspectingServer.tools.map((t) => (
-                    <div
-                      key={t.name}
-                      className="p-3 rounded-lg border border-white/10 bg-white/[0.03] flex flex-col gap-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-teal-300 text-xs">
-                          {t.name}
-                        </span>
-                        {getPermissionBadge(t.tier)}
-                      </div>
-                      <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                        {t.description}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : "tools_manifest" in inspectingServer &&
-                Array.isArray(inspectingServer.tools_manifest) &&
-                inspectingServer.tools_manifest.length > 0 ? (
-                <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
-                  {inspectingServer.tools_manifest.map((tool, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-lg border border-white/10 bg-white/[0.03] flex flex-col gap-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-teal-300 text-xs">
-                          {String(tool.name || `Tool #${idx + 1}`)}
-                        </span>
-                        <GlassBadge variant="blue" size="sm" mono>
-                          READ / WRITE
-                        </GlassBadge>
-                      </div>
-                      {Boolean(tool.description) && (
-                        <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                          {String(tool.description)}
+          <div className="grid min-w-0 gap-4">
+            <ServerDetails server={inspecting} />
+            <div className="min-w-0">
+              <h3 className="m-0 text-maya-body font-semibold">Tools</h3>
+              {Array.isArray(manifest) && manifest.length > 0 ? (
+                <ScrollArea
+                  label="Tools of this server"
+                  className="mt-2 max-h-72 rounded-maya-md border border-maya-border p-2"
+                >
+                  <ul className="m-0 grid list-none gap-2 p-0">
+                    {manifest.map((tool, idx) => (
+                      <li key={idx} className="min-w-0 shrink-0">
+                        <p className="m-0 font-mono text-maya-mono text-maya-text [overflow-wrap:anywhere]">
+                          {String(tool.name || `Tool ${idx + 1}`)}
                         </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                        {Boolean(tool.description) && (
+                          <p className="m-0 text-maya-small text-maya-secondary [overflow-wrap:anywhere]">
+                            {String(tool.description)}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
               ) : (
-                <div className="p-6 text-center text-zinc-500 text-xs border border-white/5 rounded-lg">
-                  No explicit tools manifest published by this endpoint.
-                </div>
+                <p className="m-0 mt-1 text-maya-small text-maya-muted">
+                  No tool list is recorded for this server.
+                </p>
               )}
             </div>
           </div>
         </GlassModal>
       )}
 
-      {/* Register Server Modal */}
+      {removing !== null && (
+        <GlassModal
+          isOpen
+          onClose={() => setRemoving(null)}
+          title="Remove this server?"
+          size="sm"
+        >
+          <div className="grid min-w-0 gap-4">
+            <p className="m-0 text-maya-body [overflow-wrap:anywhere]">
+              MAYA stops using {removing.name}. You can register it again later.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                loading={removeBusy}
+                onClick={() => void confirmRemove()}
+              >
+                Remove server
+              </Button>
+            </div>
+          </div>
+        </GlassModal>
+      )}
+
       <GlassModal
         isOpen={isRegisterOpen}
         onClose={() => setIsRegisterOpen(false)}
-        title="Register Custom MCP Server"
-        description="Connect custom tools to MAYA AI with transport validation and schema hash sealing."
+        title="Register a server"
+        description="MAYA only uses a server that has a pinned version and a schema hash."
         size="md"
       >
         <form
-          onSubmit={handleRegisterSubmit}
-          className="flex flex-col gap-4 text-xs"
+          onSubmit={(e) => void submitRegister(e)}
+          className="grid min-w-0 gap-4"
         >
-          {registerError && (
-            <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-950/40 text-rose-200">
-              {registerError}
-            </div>
+          {registerError !== null && (
+            <Notice tone="danger">{registerError}</Notice>
           )}
 
           <GlassInput
-            label="Server Name *"
+            label="Name"
             required
-            placeholder="e.g. custom_data_connector"
+            placeholder="analytics"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-zinc-300">
-              Transport Protocol *
+            <label
+              htmlFor="mcp-transport"
+              className="text-maya-caption font-medium text-maya-text"
+            >
+              Transport
             </label>
             <select
+              id="mcp-transport"
               value={transport}
               onChange={(e) =>
-                setTransport(
-                  e.target.value as "stdio" | "http" | "streamable_http",
-                )
+                setTransport(e.target.value as "stdio" | "streamable_http")
               }
-              className="w-full px-3 py-2 rounded-xl border border-white/15 bg-zinc-900/70 text-zinc-100 text-xs focus:outline-none focus:ring-2 focus:ring-teal-400"
+              className={FIELD}
             >
-              <option value="stdio">stdio (Local Subprocess Sandbox)</option>
-              <option value="http">http (Streaming HTTP/SSE Endpoint)</option>
+              <option value="stdio">stdio (a program on this computer)</option>
               <option value="streamable_http">
-                streamable_http (Bi-directional MCP Stream)
+                streamable_http (a web address)
               </option>
             </select>
           </div>
@@ -1051,63 +675,58 @@ export function McpGatewayView(): React.JSX.Element {
           {transport === "stdio" ? (
             <>
               <GlassInput
-                label="Executable Command *"
+                label="Command"
                 required
-                placeholder="e.g. node, python, or /usr/local/bin/mcp-server"
+                placeholder="node"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
               />
               <GlassInput
-                label="Arguments (comma separated)"
+                label="Arguments"
                 placeholder="dist/index.js, --port=8080"
+                helperText="Separate arguments with commas, so an argument cannot contain a comma. Do not put passwords or tokens here."
                 value={argsText}
                 onChange={(e) => setArgsText(e.target.value)}
               />
             </>
           ) : (
             <GlassInput
-              label="Endpoint URL *"
+              label="Address"
               type="url"
               required
-              placeholder="https://mcp.internal.acme.com/mcp"
+              placeholder="https://example.com/mcp"
+              helperText="Do not put passwords or tokens in the address."
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
             <GlassInput
-              label="Pinned Version"
-              placeholder="1.0.0"
+              label="Pinned version"
+              required
+              placeholder="1.2.0"
+              helperText="Unpinned launchers (@latest, npx -y) are refused."
               value={pinnedVersion}
               onChange={(e) => setPinnedVersion(e.target.value)}
             />
             <GlassInput
-              label="Schema Hash Override (Optional)"
+              label="Schema hash"
+              required
               placeholder="sha256:…"
-              value={schemaHashInput}
-              onChange={(e) => setSchemaHashInput(e.target.value)}
+              helperText="MAYA refuses the server if its tool list stops matching."
+              value={schemaHash}
+              onChange={(e) => setSchemaHash(e.target.value)}
             />
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10 mt-2">
-            <GlassButton
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsRegisterOpen(false)}
-            >
+          <div className="flex flex-wrap justify-end gap-2 border-t border-maya-border pt-3">
+            <Button variant="ghost" onClick={() => setIsRegisterOpen(false)}>
               Cancel
-            </GlassButton>
-            <GlassButton
-              type="submit"
-              variant="primary"
-              size="sm"
-              loading={registering}
-              loadingText="Registering…"
-            >
-              Register & Seal Hash
-            </GlassButton>
+            </Button>
+            <Button type="submit" variant="primary" loading={registering}>
+              Add server
+            </Button>
           </div>
         </form>
       </GlassModal>

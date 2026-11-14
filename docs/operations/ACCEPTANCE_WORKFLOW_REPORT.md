@@ -47,7 +47,7 @@ As required by Decision Principle 2 ("No success without proof"), MAYA AI requir
 ### Workflow 5: Deep Competitive Research -> Verified PDF (`ResearchAgent` & `DocumentAgent`)
 - **Objective:** Perform market intelligence research with source citations and synthesize findings into a verified multi-page PDF document.
 - **Agents Executed:**
-  1. `ResearchAgent`: queries Brave Search API with prompt injection sanitization.
+  1. `ResearchAgent`: queries the web (Brave Search at the time; superseded 2026-11-09, now Gemini Google Search grounding) with prompt injection sanitization.
   2. `DocumentAgent`: renders structured sections, headings, comparison tables, and page breaks into a PDF document via ReportLab.
 - **Deterministic Verifier (`verify_pdf`):**
   - Status: `verified`.
