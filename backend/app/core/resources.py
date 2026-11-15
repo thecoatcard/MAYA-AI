@@ -42,7 +42,7 @@ class Resources:
             budget_tracker=self.budget_tracker,
             key_pool=self.key_pool,
         )
-        self.subtask_queue = SubtaskQueue()
+        self.subtask_queue = SubtaskQueue(redis=self.redis)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.event_publisher = TaskEventPublisher(self.redis)
         self.active_workspaces: set[UUID] = set()

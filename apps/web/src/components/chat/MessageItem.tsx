@@ -257,13 +257,15 @@ function MessageItemImpl({
     };
   }, []);
 
-  const handleCopy = useCallback((textToCopy: string) => {
-    void copyText(textToCopy);
-    setCopied(true);
-    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-    copyTimeoutRef.current = setTimeout(() => {
-      setCopied(false);
-    }, 1500);
+  const handleCopy = useCallback(async (textToCopy: string) => {
+    const success = await copyText(textToCopy);
+    if (success) {
+      setCopied(true);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+      }, 1500);
+    }
   }, []);
 
   const handleToggleSpeak = useCallback(() => {

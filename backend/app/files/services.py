@@ -29,6 +29,7 @@ from app.db.tenant import tenant_session
 from app.files.folder import FolderService, FolderSettings
 from app.files.safepath import SafePathError, split_relative
 from app.files.uploads import UploadStore
+from app.files.workspace_service import ProjectWorkspaceService
 from app.services.audit_service import record_audit
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,13 @@ class FileServices:
     uploads: UploadStore
     artifacts_dir: Path
     engine: AsyncEngine | None = None
+    workspaces: ProjectWorkspaceService | None = None
+
+    @property
+    def workspace_service(self) -> ProjectWorkspaceService:
+        if self.workspaces is None:
+            self.workspaces = ProjectWorkspaceService(self.folders)
+        return self.workspaces
 
     async def audit(
         self,
@@ -85,8 +93,9 @@ def build_file_services(settings: Settings, engine: AsyncEngine | None) -> FileS
     else:  # no database (some test apps): the folder cannot be stored
         folder_settings = _NoSettings()
     artifacts = Path(settings.artifacts_dir).resolve()
+    folders = FolderService(folder_settings, artifacts_dir=artifacts)
     return FileServices(
-        folders=FolderService(folder_settings, artifacts_dir=artifacts),
+        folders=folders,
         uploads=UploadStore(
             artifacts,
             max_bytes=settings.upload_max_bytes,
@@ -94,6 +103,7 @@ def build_file_services(settings: Settings, engine: AsyncEngine | None) -> FileS
         ),
         artifacts_dir=artifacts,
         engine=engine,
+        workspaces=ProjectWorkspaceService(folders, folder_settings),
     )
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -51,17 +53,17 @@ class SubtaskJob:
 
 
 class SubtaskQueue:
-    """Async in-memory queue with per-workspace and per-task fairness.
+    """Async queue for subtask background jobs with Redis persistence or in-memory fairness.
 
-    Jobs are held per workspace and, inside a workspace, per task. ``dequeue`` serves the
-    workspace with the fewest jobs currently running (ties rotate round-robin), then rotates
-    over that workspace's tasks, so one busy workspace or one task with many ready subtasks
-    cannot starve another. It is work conserving: an idle worker always takes any waiting job.
-    The order of one task's own jobs is first in, first out; DAG ordering is enforced by the
-    worker through dependencies, not by this queue.
+    Jobs are held per workspace and, inside a workspace, per task. When Redis is configured,
+    jobs are persisted to a Redis list (key: maya:subtask_queue). When Redis is not available,
+    the queue runs with an in-memory fairness structure.
     """
 
-    def __init__(self) -> None:
+    REDIS_QUEUE_KEY = "maya:subtask_queue"
+
+    def __init__(self, redis: Any | None = None) -> None:
+        self._redis = redis
         # workspace -> task -> jobs. Dict order is the rotation order (served keys move last).
         self._pending: dict[UUID, dict[UUID, deque[SubtaskJob]]] = {}
         self._running: dict[UUID, int] = {}
@@ -69,6 +71,9 @@ class SubtaskQueue:
         self._size = 0
         # How many jobs the worker pool runs side by side; set by the runtime (None = unknown).
         self.capacity: int | None = None
+
+        if self._redis is None:
+            logger.warning("SubtaskQueue running in-memory — jobs will be lost on restart")
 
     def waiting_ahead(self) -> int | None:
         """``None`` when a worker is free, else how many OTHER tasks are queued ahead of a job
@@ -79,6 +84,18 @@ class SubtaskQueue:
 
     async def enqueue(self, job: SubtaskJob) -> None:
         """Push a subtask job to the queue."""
+        if self._redis is not None:
+            raw = json.dumps(job.to_dict())
+            await self._redis.rpush(self.REDIS_QUEUE_KEY, raw)
+            self._size += 1
+            self._available.release()
+            logger.debug(
+                "Enqueued subtask job %s for task %s to Redis",
+                job.subtask_id,
+                job.task_id,
+            )
+            return
+
         self._pending.setdefault(job.workspace_id, {}).setdefault(job.task_id, deque()).append(job)
         self._size += 1
         self._available.release()
@@ -108,6 +125,30 @@ class SubtaskQueue:
 
         The caller must report the job finished with ``task_done(job)``.
         """
+        if self._redis is not None:
+            if timeout_seconds is None:
+                while True:
+                    res = await self._redis.lpop(self.REDIS_QUEUE_KEY)
+                    if res is not None:
+                        data = json.loads(res) if isinstance(res, str) else res
+                        job = SubtaskJob.from_dict(data)
+                        self._size = max(0, self._size - 1)
+                        self._running[job.workspace_id] = self._running.get(job.workspace_id, 0) + 1
+                        return job
+                    await asyncio.sleep(0.05)
+            else:
+                start = time.monotonic()
+                while time.monotonic() - start < timeout_seconds:
+                    res = await self._redis.lpop(self.REDIS_QUEUE_KEY)
+                    if res is not None:
+                        data = json.loads(res) if isinstance(res, str) else res
+                        job = SubtaskJob.from_dict(data)
+                        self._size = max(0, self._size - 1)
+                        self._running[job.workspace_id] = self._running.get(job.workspace_id, 0) + 1
+                        return job
+                    await asyncio.sleep(min(0.01, timeout_seconds))
+                return None
+
         if timeout_seconds is None:
             await self._available.acquire()
         else:

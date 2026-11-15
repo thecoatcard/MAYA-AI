@@ -134,6 +134,28 @@ describe("InlineApproval", () => {
     ).not.toBeNull();
     expect(screen.getByText(/Only these buttons approve/)).toBeTruthy();
   });
+
+  it("renders dedicated preview for terminal commands", () => {
+    const cmdApproval = {
+      ...approval,
+      tool_name: "workspace_run_command",
+      tool_args: { command: "npm run build && npm test" },
+    } as unknown as ApprovalRequest;
+    render(<InlineApproval approval={cmdApproval} />);
+    expect(screen.getByText("Terminal Command to Execute")).toBeTruthy();
+    expect(screen.getByText("$ npm run build && npm test")).toBeTruthy();
+  });
+
+  it("renders dedicated preview for workspace deletions", () => {
+    const delApproval = {
+      ...approval,
+      tool_name: "workspace_delete_file",
+      tool_args: { path: "src/legacy/unused.ts" },
+    } as unknown as ApprovalRequest;
+    render(<InlineApproval approval={delApproval} />);
+    expect(screen.getByText("Target to Delete")).toBeTruthy();
+    expect(screen.getByText("src/legacy/unused.ts")).toBeTruthy();
+  });
 });
 
 describe("InlineApproval voice safety wording", () => {

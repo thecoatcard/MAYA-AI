@@ -192,3 +192,21 @@ def test_new_files_tasks_and_wrong_kind_keep_their_old_route(
 def test_without_a_live_file_the_edit_message_routes_as_before() -> None:
     decision = route_message("slide 3 mein ek point add karo")
     assert decision == Decision(Route.TASK, "binary_deliverable")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_reason"),
+    [
+        ("Write a 6-page study guide PDF on SQL joins", "binary_deliverable"),
+        ("15 slide ki ppt bana do Machine Learning par", "over_limit_slides"),
+        ("Make a 10-slide deck on solar energy, dark theme", "binary_deliverable"),
+        ("30 page ka Java notes PDF banao with chapters", "over_limit_pages"),
+        ("Build a multi-file landing page (HTML, CSS, JS) with contact form", "project"),
+        ("Write an 8000 word ebook on productivity", "over_limit_words"),
+        ("Ek poora 4 page ki portfolio website bana do", "project"),
+    ],
+)
+def test_tool_loop_routes_deliverables_to_model(text: str, expected_reason: str) -> None:
+    decision = route_message(text, tool_loop=True)
+    assert decision.route is Route.MODEL
+    assert decision.reason == expected_reason

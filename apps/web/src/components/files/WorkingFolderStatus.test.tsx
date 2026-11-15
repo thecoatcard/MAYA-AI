@@ -40,4 +40,54 @@ describe("WorkingFolderStatus", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByTestId("working-folder-status")).toBeNull();
   });
+
+  it("refreshes dynamically when 'maya:workspace-changed' event is dispatched", async () => {
+    const getFolderSpy = vi
+      .spyOn(filesClient, "getFolder")
+      .mockResolvedValueOnce({
+        path: "/home/user/workspace-1",
+        status: "ok",
+        writable: true,
+        name: "workspace-1",
+      })
+      .mockResolvedValueOnce({
+        path: "/home/user/workspace-2",
+        status: "ok",
+        writable: true,
+        name: "workspace-2",
+      });
+
+    render(<WorkingFolderStatus />);
+    const line = await screen.findByTestId("working-folder-status");
+    expect(line.textContent).toContain("Working folder: workspace-1");
+
+    window.dispatchEvent(new Event("maya:workspace-changed"));
+    await screen.findByText(/Working folder: workspace-2/);
+    expect(getFolderSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes dynamically when 'maya:workspace-changed' event is dispatched", async () => {
+    const getFolderSpy = vi
+      .spyOn(filesClient, "getFolder")
+      .mockResolvedValueOnce({
+        path: "/home/user/workspace-1",
+        status: "ok",
+        writable: true,
+        name: "workspace-1",
+      })
+      .mockResolvedValueOnce({
+        path: "/home/user/workspace-2",
+        status: "ok",
+        writable: true,
+        name: "workspace-2",
+      });
+
+    render(<WorkingFolderStatus />);
+    const line = await screen.findByTestId("working-folder-status");
+    expect(line.textContent).toContain("Working folder: workspace-1");
+
+    window.dispatchEvent(new Event("maya:workspace-changed"));
+    await screen.findByText(/Working folder: workspace-2/);
+    expect(getFolderSpy).toHaveBeenCalledTimes(2);
+  });
 });

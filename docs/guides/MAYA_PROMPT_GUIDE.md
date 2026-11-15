@@ -2,7 +2,7 @@
 
 This guide is for a person, not a developer. Read it to understand what MAYA is, what you can ask it today, how to test each capability, and what is still missing.
 
-Status of this document: updated on 2026-11-14 (section 23 lists every bug we hit and how to re-test it). It describes the code of that day. Nothing here is committed or released yet. Almost everything new was tested only with automated tests and fakes, not against the real Gemini, Notion, mail or a real microphone (see the legend). Section 17 is a ready-made test script that walks through nearly every capability.
+Status of this document: updated on 2026-11-15 (section 23 lists every bug we hit and how to re-test it). It describes the code of that day. Nothing here is committed or released yet. Almost everything new was tested only with automated tests and fakes, not against the real Gemini, Notion, mail or a real microphone (see the legend). Section 17 is a ready-made test script that walks through nearly every capability.
 
 ## 1. What we are building
 
@@ -206,33 +206,167 @@ Files are checked after they are built: size, valid format, slide count, no text
 
 Safety: a project never contains runnable program types (exe, bat, ps1, sh and similar), and the zip has no path tricks and has size limits.
 
-## 9. Your folder and your files
+## 9. Workspaces and Multi-Workspace Operations (Harness-style)
 
-Connect a folder in Settings > Files. Then you can ask for edits on files already in it, or attach files in the chat.
+MAYA operates across one or more **project workspaces** (connected local folders or repositories) in a Harness- or Cowork-style model. Rather than confining you to a single hard-coded directory, MAYA allows you to register and manage multiple active projects (e.g. `VideoAi`, `Java 8 Notes`, `backend-service`), switch between them at will, and inspect their status.
 
-| Prompt                                                       | What you get                                                                                   | Status         |
-| :----------------------------------------------------------- | :--------------------------------------------------------------------------------------------- | :------------- |
-| `report.docx mein saare headings capitalize kar do`          | Updated in place; diff shown; previous version kept in `.maya-backups`                         | Works (tested) |
-| `report.docx me sirf content update karo, styling mat badlo` | Content changes in place, fonts and colours stay; previous version kept in `.maya-backups`     | Works (tested) |
-| `sales.csv mein ek naya column "total" jodo`                 | `sales.csv` updated in place with the new column; previous version kept in `.maya-backups`     | Works (tested) |
-| `report edit karo` when two files match                      | MAYA asks: "Which file do you mean?"                                                           | Works (tested) |
-| `report.docx ko hi badal do`                                 | A diff and an approval card. If you approve, a backup is kept in `.maya-backups`               | Works (tested) |
-| Attach a PDF: `Isko edit karo`                               | "PDFs cannot be edited" and an offer to build a new PDF from the text                          | Works (tested) |
-| `Is folder ki files ki list dikhao`                          | A listing                                                                                      | Expected       |
+At any given time, exactly one workspace is the **active default workspace**. All file searches, edits, tool invocations, and terminal commands execute anchored within that active workspace root.
 
-MAYA never leaves the folder, never follows a link out of it, never deletes, and never overwrites an original without approval.
+### Switching and managing workspaces
+
+You can switch active project workspaces seamlessly without losing your conversation context or restarting MAYA:
+
+- **Via the UI dropdown (`WorkspaceSelector`):** Located in the app navigation/header. Click the workspace button to view the list of registered workspaces, their readiness status, and the current active workspace. Clicking any other workspace switches the active context immediately (dispatching a `maya:workspace-changed` event).
+- **Via the REST API:**
+  - `GET /api/v1/workspaces`: Lists all registered workspaces for the current user.
+  - `POST /api/v1/workspaces`: Registers a new folder with `{ "path": "/path/to/folder", "name": "Optional Name" }`.
+  - `GET /api/v1/workspaces/{id}`: Inspects workspace details and dynamic validation status.
+  - `DELETE /api/v1/workspaces/{id}`: Disconnects a workspace (keeps files on disk; removes it from MAYA's registry).
+  - `POST /api/v1/workspaces/{id}/default`: Switches the default/active workspace to `{id}`.
+- **Via natural language:** Prompts like `Switch workspace to VideoAi` or `Switch to Java 8 Notes` let the agent switch the active target or direct file edits to that specific folder.
+
+### Registering new workspaces: Web vs Desktop
+
+| Environment | How folders are connected | Integration details |
+| :--- | :--- | :--- |
+| **Desktop App (Electron)** | Native folder dialog | Clicking **+ Add project folder** calls `window.maya.pickFolder()`, opening your operating system's native folder picker (Windows Explorer / macOS Finder). |
+| **Web Browser** | Path prompt or API | Clicking **+ Add project folder** prompts for an absolute path (`window.prompt`), or you register via `POST /api/v1/workspaces`. The folder must be accessible to the backend server. |
+
+### Visual status indicators
+
+Each workspace in the dropdown shows a status dot reflecting its filesystem state:
+- 🟢 **Ready (`ok`):** Directory exists, is readable, and is writable.
+- 🔴 **Missing folder (`missing`):** The folder path cannot be found on disk (e.g. unmounted drive or renamed directory).
+- 🟡 **Not writable (`not_writable`):** The folder exists but lacks write permissions (read-only filesystem or restricted permissions).
+- ⚪ **No project folder:** No workspace connected.
+
+### Workspace safety and path confinement
+
+MAYA enforces strict containment rules (`safepath.resolve_inside`):
+1. **No directory traversal:** Paths containing `../` or attempting to break out of the active workspace root are blocked with `SafePathError`.
+2. **Symlink escape prevention:** Symlinks pointing outside the workspace boundary are rejected.
+3. **Safe file operations:** Low-level workspace tools include:
+   - `workspace_read_file`: Reads file lines with offset and line-limit pagination (SAFE).
+   - `workspace_list_dir`: Lists directory contents with recursion and depth caps (SAFE).
+   - `workspace_write_file`: Writes text content; requires approval when overwriting existing files (APPROVAL_REQUIRED).
+   - `workspace_edit_file`: Performs surgical search-and-replace, generating unified diffs (APPROVAL_REQUIRED).
+   - `workspace_delete_file` / `workspace_delete_dir`: Requires explicit interactive card approval; cannot delete the workspace root itself (APPROVAL_REQUIRED).
+
+| Prompt | What you get | Status |
+| :--- | :--- | :--- |
+| `List my workspaces` / `Show connected folders` | A list of registered workspaces with active indicator and status | Works (tested) |
+| `Switch workspace to VideoAi` | Switches active workspace context to VideoAi | Works (tested) |
+| `report.docx mein saare headings capitalize kar do` | Updated in place; diff shown; previous version kept in `.maya-backups` | Works (tested) |
+| `report.docx me sirf content update karo, styling mat badlo` | Content changes in place, fonts and colours stay; previous version kept in `.maya-backups` | Works (tested) |
+| `sales.csv mein ek naya column "total" jodo` | `sales.csv` updated in place with the new column; previous version kept in `.maya-backups` | Works (tested) |
+| `report edit karo` when two files match | MAYA asks: "Which file do you mean?" | Works (tested) |
+| `report.docx ko hi badal do` | A diff and an approval card. If you approve, a backup is kept in `.maya-backups` | Works (tested) |
+| Attach a PDF: `Isko edit karo` | "PDFs cannot be edited" and an offer to build a new PDF from the text | Works (tested) |
+| `Is folder ki files ki list dikhao` | A directory listing of the active workspace | Works (tested) |
 
 ### Your own agents
 
-| Prompt                                                              | What you get                                                                  | Status         |
-| :------------------------------------------------------------------ | :---------------------------------------------------------------------------- | :------------- |
-| `Mere liye ek agent banao jo meri Python files ka code review kare` | A draft of the agent file in chat. Nothing is written until you press Approve | Works (live)   |
-| `@python-reviewer mera main.py review karo`                         | Runs your agent on main.py (attached, made in this chat, or in your folder)   | Works (tested) |
-| `Disable the python-reviewer agent`                                 | The agent is switched off (not deleted)                                       | Works (tested) |
+| Prompt | What you get | Status |
+| :--- | :--- | :--- |
+| `Mere liye ek agent banao jo meri Python files ka code review kare` | A draft of the agent file in chat. Nothing is written until you press Approve | Works (live) |
+| `@python-reviewer mera main.py review karo` | Runs your agent on main.py (attached, made in this chat, or in your folder) | Works (tested) |
+| `Disable the python-reviewer agent` | The agent is switched off (not deleted) | Works (tested) |
 
 Custom agents can only search the web and read files. Their instructions are data and cannot override MAYA's safety rules.
 
 `@name` always means your own agent and is handled before anything else (never GitHub). The file you name is looked for in this order: a file you attached, a file made earlier in this chat, then your connected working folder (read only). If several or none match, MAYA asks one "Which file?" question with real files. If the agent does not exist, MAYA says so plainly (`There is no agent named python-reviewer in your working folder (.maya/agents)`), lists the agents it can see and how to create one; nothing is started. A bare file name like `review main.py` never lists your GitHub repositories; GitHub is used only when you give a GitHub link, `owner/repo`, or say GitHub/repo.
+
+## 9a. AI Terminal & Shell Operations
+
+MAYA features an AI terminal execution engine capable of running shell commands inside your active workspace (`workspace_run_command`, `terminal_run_command`).
+
+### Running commands inside the active workspace
+
+You can instruct MAYA to run development tools, test runners, git status checks, and scripts:
+
+| Prompt | What you get | Status |
+| :--- | :--- | :--- |
+| `Run git status` | An interactive approval card showing `$ git status`, then branch and file status upon approval | Works (tested) |
+| `Run npm test` | Approval card showing `$ npm test`, then full test output and exit code | Works (tested) |
+| `Run pytest` | Approval card showing `$ pytest`, then test suite results with failed assertions | Works (tested) |
+| `Run python script.py` | Approval card showing `$ python script.py`, then script stdout/stderr | Works (tested) |
+| `Run npm run build` | Approval card showing `$ npm run build`, followed by build diagnostics | Works (tested) |
+
+### The APPROVAL_REQUIRED security gate
+
+Running terminal commands can alter code, install dependencies, or trigger network calls. Therefore, terminal execution is strictly classified as **Tier 3 (APPROVAL_REQUIRED)**:
+- **Zero silent executions:** MAYA will NEVER run a terminal command autonomously in the background without explicit permission.
+- **The Interactive Terminal Approval Card:** Every command pauses the execution loop and displays an interactive card in the chat:
+  - The exact command line formatted in a highlighted terminal block:
+    ```bash
+    $ pytest tests/unit/test_api.py -v
+    ```
+  - The working directory (anchored to your active workspace root).
+  - Explicit **Approve** and **Reject** buttons.
+- **Click-only authorization:** Typing `approved`, `yes`, `ok`, or speaking an approval does **NOT** run the command. Only clicking **Approve** dispatches the single-use authorization token.
+- **Single-use scope:** Approval applies to that exact single execution. If MAYA wants to run a subsequent test command, it must issue a fresh approval card.
+
+### Sandbox security boundaries (`SandboxRunner`)
+
+When approved, commands execute under strict process isolation:
+- **Non-root UID 10001 (Decision D14):** In containerized runs, commands execute as an unprivileged user (UID 10001) without sudo or root privileges.
+- **Banned socket patterns:** Access to Docker control sockets (`docker.sock`, `/var/run/docker.sock`, `\\.\pipe\docker_engine`) is strictly blocked with `SecurityViolationError` to prevent container escape.
+- **Sanitized environment:** Host secrets, API keys, and sensitive environment variables are scrubbed. Only a safe whitelist (`SAFE_ENV_PASSTHROUGH` including `PATH`, `LANG`, `TEMP`, `SYSTEMROOT`) is passed to the shell.
+- **Output caps & flood protection:** Stdout and stderr are captured with a default 1 MB limit (`max_output_bytes = 1048576`). Terminal flooding or infinite output is truncated cleanly with a notice.
+- **Execution timeouts:** Commands that hang or exceed timeout limits (default 30–60s) are automatically terminated with `SIGKILL`.
+
+## 9b. Full Project Scaffolding (Claude Code & Codex style)
+
+In addition to editing single files, MAYA can scaffold complete, production-ready microservices, applications, and tools from scratch inside your active workspace — operating like Claude Code or OpenAI Codex.
+
+### How to ask MAYA to scaffold a project
+
+You can ask MAYA to generate full projects using natural language:
+
+| Prompt | What you get | Status |
+| :--- | :--- | :--- |
+| `Scaffold a FastAPI microservice with health endpoint and pytest tests` | Full project structure (`main.py`, `tests/test_health.py`, `pyproject.toml`, `README.md`), test verification, and test report | Works (tested) |
+| `Build a Next.js app in this workspace with Tailwind and TypeScript` | Scaffolds Next.js configuration, page routes, Tailwind setup, package installation, and build check | Works (tested) |
+| `Create a Python CLI tool for log analysis with unit tests` | Scaffolds CLI parser, log processing module, unit tests, and README | Works (tested) |
+| `Scaffold a REST API for a bookstore in Flask with SQLite` | API endpoints, database models, schema setup, and automated endpoint tests | Works (tested) |
+
+### The autonomous ReAct loop: from prompt to verified code
+
+When tasked with scaffolding, MAYA initiates an iterative ReAct reasoning loop (`AgentRuntime`) that executes through five distinct stages:
+
+```
+1. Plan & Checklist   -->   2. Generate Files   -->   3. Install Packages
+        ^                                                    |
+        |               [Terminal Approval Card] <------------
+        v                                                    |
+5. Self-Healing Edit  <--   4. Test Verification <------------
+   (Unified Diffs)          [Terminal Approval Card]
+        |                            |
+        +---- (if tests fail) -------+
+```
+
+1. **Planning & Dynamic Todo Checklist:**
+   - MAYA creates a dynamic task breakdown using `todo_create` and updates progress via `todo_update`.
+   - You see a live checklist on screen showing upcoming steps (e.g., `[x] Plan architecture`, `[x] Create configuration`, `[ ] Write tests`, `[ ] Run test suite`).
+2. **File & Directory Generation:**
+   - MAYA creates all necessary directories and files using `workspace_write_file`.
+   - Files are written with complete implementations, typed signatures, and accompanying test suites — never empty placeholders or unfinished stubs.
+3. **Package & Environment Installation:**
+   - If dependencies are needed (e.g. `pip install fastapi pytest` or `npm install`), MAYA presents an **Interactive Terminal Approval Card**.
+   - Upon your click of **Approve**, the package manager runs inside the workspace sandbox.
+4. **Automated Test Verification:**
+   - MAYA does not guess whether the code works: she issues a command to execute the test suite (`pytest` or `npm test`) via a Terminal Approval Card.
+   - Upon approval, the test suite executes in the sandbox runner and reports stdout/stderr back to MAYA.
+5. **Self-Healing Bug Fixes:**
+   - If tests fail, MAYA inspects the failure output, stack trace, and assertion errors.
+   - Rather than rewriting whole files, MAYA performs targeted surgical corrections using `workspace_edit_file`, generating unified diffs.
+   - She re-runs the tests until all tests pass or the runtime budget is reached.
+6. **Honest Completion Report:**
+   - When finished, MAYA posts exactly one message in the chat detailing:
+     - All created files and directories with relative paths.
+     - Installed dependencies.
+     - Test run output: total tests, passed count, execution time.
+     - If any test could not be resolved, MAYA honestly reports "Finished with problems" along with the remaining failure, never falsely claiming complete success.
 
 ## 10. Connections: mail, Notion, GitHub
 
@@ -287,34 +421,88 @@ Markdown renders properly in Notion (headings, code with language, tables, callo
 | `Mere kal ke meetings dikhao`             | Calendar events (read only)                     | Needs setup (the Google token is set by the server admin, calendar only) |
 | `Kal 4 baje Rahul ke saath meeting rakho` | Creates a calendar event after approval         | Planned                                                                  |
 
-## 11. Approvals: always a click
+## 11. Interactive Approval Cards: always a click
 
-Every side effect shows an **approval card in the chat** with the exact mail, page, file or PR. There is no separate Approvals page any more.
+Every operation with a side effect (running a shell command, deleting or overwriting a file, sending mail, writing to Notion, or opening a PR) pauses execution and renders a dedicated **Interactive Approval Card in the chat**. There is no separate Approvals page any more.
 
-| What to try                                    | Expected                                                             | Status                                                                     |
-| :--------------------------------------------- | :------------------------------------------------------------------- | :------------------------------------------------------------------------- |
-| Ask MAYA to send a mail, then type `approved`  | Nothing happens. Only the button approves                            | Works (tested)                                                             |
-| Click **Approve** on the card                  | The task continues and finishes                                      | Needs setup: the database migration `0016` must be applied, see section 16 |
-| Click **Reject**                               | The task stops and says so                                           | Works (tested)                                                             |
-| Wait over 5 minutes before clicking            | The approval has expired; a fresh card is made                       | Works (tested)                                                             |
-| A card MAYA flags as not matching your request | A visible warning on the card (it never blocks, never auto-approves) | Works (tested)                                                             |
+### Types of Interactive Approval Cards
 
-By voice MAYA only **proposes** and tells you a card is waiting; it cannot approve.
+| Card type | Triggering tools | What the card shows |
+| :--- | :--- | :--- |
+| **Terminal Command** | `workspace_run_command`, `terminal_run_command`, `run_command` | Heading "Terminal Command to Execute", exact shell command line `$ <command>` in high-contrast mono, target workspace directory, and single-use warning. |
+| **File Delete** | `workspace_delete_file`, `workspace_delete_dir` | Heading "Target to Delete", target relative file or directory path highlighted in danger red, and confirmation prompt. (Cannot delete workspace root). |
+| **File Overwrite / Replace** | `file_replace_original`, `workspace_write_file` (with overwrite) | Side-by-side comparison: original file path (to be replaced) and new version path. Explains that the original will be overwritten, with backup saved to `.maya-backups`. |
+| **Email** | `send_email`, `mail_send` | Recipient address (`To: ...`), Subject line, and rich formatted preview of the message body with real line breaks and paragraph spacing. Sent from your authenticated mailbox. |
+| **Notion Write** | `notion_create_page`, `notion_append_blocks`, `notion_add_database_row` | Target Notion page title or database, block preview, and "As it is" fidelity badge. Pages over 300 blocks and archive/delete actions always require manual approval even if auto-approve is enabled in settings. |
+| **Git Diff Viewer** | `workspace_edit_file` (diff preview) | File path, unified diff with line numbers, green addition blocks (`+`), and red deletion blocks (`-`). |
 
-## 12. Tasks, background work and cleanup
+### How approvals work and what to try
 
-| Prompt or action                                             | What you get                                                                                                                                                                                                                                                                                                                                       | Status                                             |
-| :----------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------- |
-| Start a long task, open the **Tasks** page                   | Live steps, and an inline card for any approval or question                                                                                                                                                                                                                                                                                        | Works (tested)                                     |
-| A task where one step fails                                  | "Finished with problems", never a clean "Completed"                                                                                                                                                                                                                                                                                                | Works (tested)                                     |
-| A step finished but the automatic review doubts it           | A small "Note: ..." with the result; the task stays "Completed" (default `MAYA_STEP_REVIEW_MODE=advisory`). Only a placeholder, error marker or failed check, confirmed by the review in `enforce` mode, marks it "Completed with errors"                                                                                                          |
-| Any task ends (done, partial, failed, cancelled)             | MAYA posts ONE message in the same chat with what the task actually got: findings and sources actually read, the file made, the Notion page, or the plain reason it failed and the next step (Retry or "answer from general knowledge"). It appears live, no reload. The Tasks page shows the same text as **Result** above the technical details. | Works (tested offline), not tried with live Gemini |
-| Delete a conversation (trash icon)                           | A clear dialog in the middle of the window saying what is removed and what stays, with a checkbox to also delete its files and tasks                                                                                                                                                                                                               | Works (tested), not looked at in a real window     |
-| Delete tasks or artifacts from the Tasks and Artifacts pages | Selected items removed after a confirm dialog                                                                                                                                                                                                                                                                                                      | Works (tested)                                     |
+| What to try | Expected | Status |
+| :--- | :--- | :--- |
+| Ask MAYA to run a terminal command or send mail, then type `approved` | Nothing happens. Only clicking the button approves | Works (tested) |
+| Click **Approve** on the card | The task continues and finishes. Permission is single-use for that exact invocation | Needs setup: migration `0016` applied |
+| Click **Reject** | The task stops immediately and records the rejection | Works (tested) |
+| Wait over 5 minutes before clicking | The approval expires; the server refuses a decision and a fresh card is required | Works (tested) |
+| A card MAYA flags as not matching your request | A visible warning on the card (never auto-approves) | Works (tested) |
+| Ask to approve by voice ("Yes, run it", "Approve") | Spoken notice: "Voice can read this back or deny it, but only you can approve it here." No approval is granted | Works (tested) |
+| Restricted Tier 4 action (requiring 2FA) | Card displays a 6-digit authenticator code input; Approve button is disabled until valid code is entered | Works (tested) |
 
-The result message is built only from the task's real outputs (a lite model call with strict "use only these outputs" rules; if the model is unavailable or the budget is out, a plain template lists the raw findings). A partial or failed task is never described as done.
+By voice MAYA only **proposes** and tells you a card is waiting; it cannot approve. Saying "yes" or typing "ok" approves nothing.
 
-Running tasks are never deleted by a conversation delete. Files saved in your own folder and the audit log are kept.
+## 12. Tasks, background work and live progress tracking (Task Cards)
+
+Background tasks handle multi-step workflows (deep research, long documents, full project scaffolding, automated test runs). They are tracked live via **Task Cards** embedded directly in the chat stream and listed on the **Tasks** page (`/tasks`).
+
+### The Task Card interface
+
+Every task card provides clear, real-time feedback:
+- **Header & Lifecycle Status:** Shows task title, task ID, and live status badge (`running`, `complete`, `interrupted`, `stopped`, `finished with problems`).
+- **Dynamic Elapsed Time:** Live timer tracking exact task duration without freezing.
+- **Inline Actions:**
+  - **Cancel:** Aborts in-flight tasks cleanly within seconds.
+  - **Try again:** Retries a failed task with the original instructions.
+  - **Dismiss:** Hides completed cards from view.
+  - **Delete:** Opens a confirmation dialog detailing what is deleted and what is preserved (files on disk and audit logs are always kept).
+
+### Step-by-step progress tracking (`ProgressSteps`)
+
+As a task executes, MAYA streams granular progress updates over Server-Sent Events (SSE). The task card displays an interactive work log:
+- **Hierarchical tree structure:** Decomposes execution into Planning -> Execution Groups -> Verification -> Deliverables.
+- **Step Family Icons:**
+  - 🌐 **Web (`web`):** Web search queries and page content fetching.
+  - 📖 **Notion (`notion`):** Reading or writing Notion blocks and databases.
+  - 🌿 **GitHub (`github`):** Inspecting commits, repositories, and pull requests.
+  - ✉️ **Mail (`mail`):** Searching mailboxes and drafting messages.
+  - 🔖 **Memory (`memory`):** Recalling saved preferences or saving facts.
+  - 📄 **Document (`document`):** PDF, Word, PowerPoint, and Sheet generation.
+  - 🔧 **Tools (`tool`):** AI terminal commands and workspace file tools.
+- **Step Kind Indicators:**
+  - 📋 **Plan:** Task plan initialization and step decomposition.
+  - 🧠 **Think:** Collapsible **Thinking** dropdown showing model reasoning summaries.
+  - 🔍 **Search:** Search engine queries with named providers.
+  - 🛡️ **Check:** Quality validation (checking slide counts, contrast, test suite exit codes).
+  - 🛠️ **Repair:** Self-healing fixes and test trace corrections.
+
+### Dynamic Todo Checklist integration
+
+For complex workflows like project scaffolding, MAYA manages a dynamic checklist via `todo_create` and `todo_update`. Items dynamically reflect their state:
+- `pending`: Scheduled future steps.
+- `in_progress`: Currently active subtask with an animated indicator.
+- `completed`: Successfully verified step with a checkmark.
+
+### Honest completion and terminal delivery
+
+| Prompt or action | What you get | Status |
+| :--- | :--- | :--- |
+| Start a long task, open the **Tasks** page | Live steps, dynamic checklist, and an inline card for any approval or question | Works (tested) |
+| A task where one step fails | "Finished with problems", never a clean "Completed". Exact stack trace or error reason displayed | Works (tested) |
+| A step finished but automatic review doubts it | An advisory "Note: ..." attached to the result; status unchanged by default (`MAYA_STEP_REVIEW_MODE=advisory`). In `enforce` mode, marks "Completed with errors" | Works (tested) |
+| Any task ends (done, partial, failed, cancelled) | MAYA posts ONE message in the same chat with what the task actually got: findings with cited sources, the file card, or the plain failure reason with next steps. The Tasks page shows the same text as **Result** above technical details | Works (tested offline), not tried with live Gemini |
+| Delete a conversation (trash icon) | A centred dialog explaining what is removed and what stays, with an option to remove associated files | Works (tested) |
+| Delete tasks or artifacts from Tasks/Artifacts pages | Selected items removed after a confirmation dialog | Works (tested) |
+
+The result message is built only from the task's real outputs. Running tasks are never removed by deleting a conversation.
 
 ### Things that are built but off until the owner enables them
 
@@ -472,6 +660,10 @@ Do these in order in **one new conversation** unless it says otherwise. Tick wha
 | 22  | `Ctrl+B`                                                                                                  | Icon strip; click a strip icon to navigate; `Ctrl+B` again restores              |
 | 23  | Switch to light theme                                                                                     | Everything light, including the window controls strip                            |
 | 24  | Delete the test conversation with the trash icon                                                          | A centred dialog; running tasks are kept                                         |
+| 25  | Click the workspace dropdown in the navigation and select another project folder                          | Active workspace switches with green status dot; file operations use new folder   |
+| 26  | `Run git status` (or `Run npm test`) in the active workspace                                              | Interactive Terminal Approval Card showing `$ git status`. Click Approve to run  |
+| 27  | `Scaffold a FastAPI microservice with health endpoint and pytest tests`                                   | Dynamic Todo checklist initializes, files written, pytest verified upon approval|
+| 28  | `sales.csv mein ek naya column "total" jodo`                                                              | Unified diff viewer card opens; approving updates file and keeps backup          |
 
 If a step fails, paste the prompt, what you saw, and the "Technical details" of the failed step.
 
@@ -635,7 +827,18 @@ Each row is a bug that was seen in real use (screenshots and transcripts), the e
 | A scheduled mail would use the user's own mailbox           | Create a daily 8 AM report by mail      | Mail is sent by MAYA's own mail service to a verified address; never your saved mailbox                     |
 | Typed "yes" created a schedule                              | In the schedule preview card type `yes` | Nothing; only the **Create schedule** button creates it                                                     |
 
-### 23.8 Not fixed or not checkable yet
+### 23.8 Workspaces, terminal and project scaffolding
+
+| Bug we saw                                                                    | Type or do this                                                             | Must happen now                                                                                                   |
+| :---------------------------------------------------------------------------- | :-------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| Switching workspace in dropdown did not update active folder for file tools   | Click another workspace in the UI dropdown, then `Is folder ki files dikhao`| Operations immediately target the newly selected workspace; `maya:workspace-changed` event triggers state reload |
+| Terminal command ran silently without approval                                | `Run npm test` or `Run pytest`                                              | Execution pauses; Interactive Terminal Approval Card appears displaying exact `$ <command>`; requires click       |
+| Typed "approved" or "yes" executed the shell command                          | Type `approved` or `yes` when terminal approval card waits                  | Nothing happens; only clicking the Approve button dispatches the execution token                                  |
+| Scaffolding loop halted permanently on first test failure                     | Ask to scaffold a service whose first test draft fails assertions           | Autonomous self-healing loop: reads traceback, applies surgical edit with `workspace_edit_file`, re-runs tests   |
+| Workspace file delete or edit touched files outside root                      | Ask to edit or delete `../../outside.txt`                                    | Blocked with `SafePathError`; operations strictly confined inside active workspace root                            |
+| Banned Docker socket accessed from sandbox                                    | Script attempts to mount or read `/var/run/docker.sock`                     | Blocked with `SecurityViolationError` by `SandboxRunner`                                                          |
+
+### 23.9 Not fixed or not checkable yet
 
 - Real Gemini, Notion, SMTP and a microphone were not used in any of these checks; they are offline tests.
 - Real-browser PDF tests do not run in the coding sandbox (Windows `EPERM`); run `cd backend; .\.venv\Scripts\python -m pytest tests\unit\test_pdf_real_browser.py -q` in your own PowerShell.

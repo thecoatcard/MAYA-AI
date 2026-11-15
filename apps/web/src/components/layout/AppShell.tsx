@@ -48,6 +48,7 @@ import { TOGGLE_SIDEBAR_EVENT } from "../chat/ConversationSidebar";
 import { useTheme } from "../../lib/theme";
 import { useOverlay, useShellMode, type ShellMode } from "./useOverlay";
 import { useWorkspace } from "./WorkspaceProvider";
+import { WorkspaceSelector } from "../navigation/WorkspaceSelector";
 
 export interface NavItem {
   readonly label: string;
@@ -611,22 +612,25 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
                 : undefined,
           }}
         >
-          <div className="flex items-center gap-2 p-3">
-            <button
-              type="button"
-              onClick={newConversation}
-              className="motion-interactive motion-press motion-lift inline-flex min-h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-maya-md border border-maya-accent bg-maya-accent text-maya-small font-medium text-maya-accent-text hover:bg-maya-accent-hover hover:shadow-maya-lift pointer-coarse:min-h-11"
-            >
-              <Plus size={16} aria-hidden="true" className="shrink-0" />
-              <span className="truncate">New conversation</span>
-            </button>
-            {navIsOverlay && (
-              <IconButton
-                label="Close navigation"
-                icon={<X size={16} />}
-                onClick={() => setNavOpen(false)}
-              />
-            )}
+          <div className="flex flex-col gap-2 p-3">
+            <WorkspaceSelector />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={newConversation}
+                className="motion-interactive motion-press motion-lift inline-flex min-h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-maya-md border border-maya-accent bg-maya-accent text-maya-small font-medium text-maya-accent-text hover:bg-maya-accent-hover hover:shadow-maya-lift pointer-coarse:min-h-11"
+              >
+                <Plus size={16} aria-hidden="true" className="shrink-0" />
+                <span className="truncate">New conversation</span>
+              </button>
+              {navIsOverlay && (
+                <IconButton
+                  label="Close navigation"
+                  icon={<X size={16} />}
+                  onClick={() => setNavOpen(false)}
+                />
+              )}
+            </div>
           </div>
 
           <div

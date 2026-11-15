@@ -13,6 +13,7 @@ from app.agents import capabilities, model_policy
 from app.agents.registry import create_default_fleet
 from app.api.v1.errors import install_error_handlers
 from app.api.v1.router import api_router
+from app.api.v1.workspaces import router as workspaces_router
 from app.auth.factory import build_auth_service
 from app.auth.service import AuthService
 from app.automation.browser_pdf import shutdown_browser_renderer, start_browser_warm_up
@@ -239,6 +240,18 @@ def create_app(
                 )
                 app.state.agent_fleet = fleet
 
+                from app.tools.registry import get_global_registry
+                from app.tools.startup import register_global_tools
+
+                register_global_tools(
+                    get_global_registry(),
+                    engine=resources.engine,
+                    tool_gateway=tool_gateway,
+                    configuration=configuration,
+                    gateway=gateway,
+                )
+                app.state.tool_registry = get_global_registry()
+
                 runtime = TaskRuntime(
                     engine=resources.engine,
                     queue=resources.subtask_queue,
@@ -390,5 +403,6 @@ def create_app(
     )
     install_error_handlers(app)
     app.include_router(api_router)
+    app.include_router(workspaces_router, prefix="/api/v1/workspaces", tags=["workspaces"])
     mount_static_web(app, configuration)
     return app

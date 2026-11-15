@@ -99,6 +99,13 @@ export function InlineApproval({
   const isEmail = /email|gmail/i.test(approval.tool_name);
   const isNotion = NOTION_WRITE_TOOLS.includes(approval.tool_name);
   const isFileReplace = approval.tool_name === "file_replace_original";
+  const isTerminalCommand =
+    approval.tool_name === "workspace_run_command" ||
+    approval.tool_name === "terminal_run_command" ||
+    approval.tool_name === "run_command";
+  const isWorkspaceDelete =
+    approval.tool_name === "workspace_delete_file" ||
+    approval.tool_name === "workspace_delete_dir";
   const diffText = diffTextOf(approval);
   const replacePath = typeof args.path === "string" ? args.path : undefined;
   const replaceNew =
@@ -233,6 +240,22 @@ export function InlineApproval({
           <p className="m-0 mt-1 text-maya-small text-maya-secondary">
             Approving writes the new version over the original. The original
             file&apos;s content is lost unless you have your own copy.
+          </p>
+        </div>
+      )}
+      {isTerminalCommand && (
+        <div className="min-w-0">
+          <h3 className="maya-label m-0 mb-1">Terminal Command to Execute</h3>
+          <pre className="rounded-maya-md bg-maya-bg p-2 font-mono text-maya-small text-maya-accent [overflow-wrap:anywhere] whitespace-pre-wrap">
+            $ {String(args.command || "")}
+          </pre>
+        </div>
+      )}
+      {isWorkspaceDelete && (
+        <div className="min-w-0">
+          <h3 className="maya-label m-0 mb-1">Target to Delete</h3>
+          <p className="m-0 font-mono text-maya-small text-maya-danger [overflow-wrap:anywhere]">
+            {String(args.path || "")}
           </p>
         </div>
       )}

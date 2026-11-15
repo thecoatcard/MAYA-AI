@@ -50,6 +50,15 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.agent.events import (
+    AgentEvent,
+    ApprovalNeededEvent,
+    TextDeltaEvent,
+    TodoStateEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
+from app.agent.runtime import AgentRuntime
 from app.agents.custom import CustomAgentError
 from app.agents.custom import mention as agent_mention
 from app.agents.custom.definition import clean_text
@@ -351,6 +360,7 @@ from app.services.sheet_tools import (
 )
 from app.services.task_submission import TaskSubmission, TaskSubmitter, chat_task_idempotency_key
 from app.tasks.needs_input import DEFAULT_PARENT_KEY, parse_default
+from app.tools.todo import get_todo_store
 
 logger = logging.getLogger("maya")
 
@@ -1818,6 +1828,18 @@ class _LiveTurn:
                             yield frame
                         for frame in self._file_frames(sequence):
                             yield frame
+                        todo_store = get_todo_store()
+                        if todo_store.tasks:
+                            todo_evt = TodoStateEvent(
+                                tasks=[t.model_dump() for t in todo_store.tasks],
+                                counts={
+                                    status: sum(1 for t in todo_store.tasks if t.status == status)
+                                    for status in ("pending", "in_progress", "done", "blocked")
+                                },
+                                note=todo_store.note,
+                            )
+                            for frame in self._convert_agent_event(todo_evt, sequence):
+                                yield frame
                         if progress.task is not None and not self._loop_task_sent:
                             self._loop_task_sent = True
                             for task_frame in self._task_frames(sequence):
@@ -1914,6 +1936,18 @@ class _LiveTurn:
                             yield frame
                         for frame in self._file_frames(sequence):
                             yield frame
+                        todo_store = get_todo_store()
+                        if todo_store.tasks:
+                            todo_evt = TodoStateEvent(
+                                tasks=[t.model_dump() for t in todo_store.tasks],
+                                counts={
+                                    status: sum(1 for t in todo_store.tasks if t.status == status)
+                                    for status in ("pending", "in_progress", "done", "blocked")
+                                },
+                                note=todo_store.note,
+                            )
+                            for frame in self._convert_agent_event(todo_evt, sequence):
+                                yield frame
                         if progress.task is not None:
                             for task_frame in self._task_frames(sequence):
                                 yield task_frame
@@ -2196,6 +2230,106 @@ class _LiveTurn:
         except Exception:
             logger.warning("chat_progress_frames_failed")
             return []
+
+    def _convert_agent_event(
+        self, event: AgentEvent, sequence: "itertools.count[int]"
+    ) -> list[str]:
+        """Convert an AgentRuntime streaming event into chat SSE stream frames.
+
+        Converts:
+        - ToolCallEvent -> tool.started SSE + live progress step
+        - ToolResultEvent -> tool.finished SSE + live progress step finish
+        - TodoStateEvent -> todo.state SSE + planning progress step
+        - TextDeltaEvent -> delta SSE + think summary step
+        - ApprovalNeededEvent -> check step
+        """
+        frames: list[str] = []
+        if isinstance(event, TextDeltaEvent):
+            if event.delta:
+                self._progress.parts.append(event.delta)
+                frames.append(encode_sse(next(sequence), "delta", DeltaEvent(text=event.delta)))
+            if event.thought:
+                self._think(event.thought)
+                frames.extend(self._step_frames(sequence))
+        elif isinstance(event, ToolCallEvent):
+            frames.append(
+                encode_sse(
+                    next(sequence),
+                    "tool.started",
+                    ToolStartedEvent(call_id=event.call_id, name=event.tool_name),
+                )
+            )
+            call_req = ToolCallRequest(
+                call_id=event.call_id,
+                tool_name=event.tool_name,
+                arguments=event.arguments,
+            )
+            self._tool_step_start(call_req)
+            frames.extend(self._step_frames(sequence))
+        elif isinstance(event, ToolResultEvent):
+            status: Literal["ok", "error", "skipped"] = "error" if event.error else "ok"
+            self._tool_status[event.call_id] = status
+            if event.error:
+                self._tool_detail[event.call_id] = event.error
+            frames.append(
+                encode_sse(
+                    next(sequence),
+                    "tool.finished",
+                    ToolFinishedEvent(
+                        call_id=event.call_id,
+                        name=event.tool_name,
+                        status=status,
+                    ),
+                )
+            )
+            call_req = ToolCallRequest(
+                call_id=event.call_id,
+                tool_name=event.tool_name,
+                arguments={},
+            )
+            self._tool_step_finish(call_req)
+            frames.extend(self._step_frames(sequence))
+            frames.extend(self._file_frames(sequence))
+        elif isinstance(event, TodoStateEvent):
+            frames.append(encode_sse(next(sequence), "todo.state", event))
+            step_label = event.note or "Task checklist"
+            counts_str = f" ({event.counts})" if event.counts else ""
+            self._step_start(
+                "plan",
+                f"{step_label}{counts_str}",
+                state="done",
+                detail=f"{len(event.tasks)} tasks" if event.tasks else None,
+            )
+            frames.extend(self._step_frames(sequence))
+        elif isinstance(event, ApprovalNeededEvent):
+            self._step_start(
+                "check",
+                f"Approval required for {event.tool_name}",
+                state="running",
+                detail=event.reason,
+            )
+            frames.extend(self._step_frames(sequence))
+        return frames
+
+    async def _stream_agent_runtime(
+        self,
+        runtime: AgentRuntime,
+        sequence: "itertools.count[int]",
+        messages: list[dict[str, Any]] | str,
+        tools: Any = None,
+        context: Any = None,
+        budget: Any = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream turn execution through AgentRuntime, converting events to chat SSE frames."""
+        async for agent_event in runtime.run_stream(
+            messages=messages,
+            tools=tools,
+            context=context,
+            budget=budget,
+            system_instruction=self._system(),
+        ):
+            for frame in self._convert_agent_event(agent_event, sequence):
+                yield frame
 
     def _think(self, text: str) -> None:
         """A thought-summary fragment: one open think step per model round."""
@@ -3655,6 +3789,7 @@ class _LiveTurn:
             has_attachments=bool(self._plan.attachments),
             live_formats=frozenset(live) if self._w.tool_loop else frozenset(),
             schedules=self._schedule_on(),
+            tool_loop=self._w.tool_loop,
         )
         if (
             decision.route is Route.MODEL

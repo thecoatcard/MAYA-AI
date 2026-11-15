@@ -7,6 +7,13 @@ files:
   - package.json
   - src/**/*
 asar: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 extraResources:
   # The static web export built by `npm run build:web` (apps/web/.next-desktop).
   - from: ../web/.next-desktop

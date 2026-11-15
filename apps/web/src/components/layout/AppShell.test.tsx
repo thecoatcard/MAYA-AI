@@ -98,6 +98,11 @@ describe("AppShell", () => {
     expect(userLabel(auth.user!)).toBe("alice@example.test");
   });
 
+  it("renders workspace selector in the sidebar header", () => {
+    renderShell();
+    expect(screen.getByTestId("workspace-selector")).toBeInTheDocument();
+  });
+
   it("caps the pending badge at 50+", async () => {
     vi.mocked(listApprovals).mockResolvedValue(
       Array.from({ length: 50 }, () => ({}) as never),

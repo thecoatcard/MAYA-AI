@@ -15,13 +15,24 @@ export function WorkingFolderStatus(): React.JSX.Element | null {
 
   useEffect(() => {
     let live = true;
-    getFolder()
-      .then((value) => {
-        if (live) setFolder(value);
-      })
-      .catch(() => undefined);
+    const refresh = (): void => {
+      getFolder()
+        .then((value) => {
+          if (live) setFolder(value);
+        })
+        .catch(() => undefined);
+    };
+
+    refresh();
+
+    const onWorkspaceChanged = (): void => {
+      refresh();
+    };
+
+    window.addEventListener("maya:workspace-changed", onWorkspaceChanged);
     return () => {
       live = false;
+      window.removeEventListener("maya:workspace-changed", onWorkspaceChanged);
     };
   }, []);
 

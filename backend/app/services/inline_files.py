@@ -265,7 +265,7 @@ class InlineFiles:
                 "The edited file is larger than the chat limit. Nothing was saved."
             )
         try:
-            result = await ctx.create_new_version(source, {"new_content": revised})
+            result = await ctx.create_new_version(source, {"new_content": revised}, make_copy=True)
         except FileAccessError as error:
             raise InlineFileError(str(error)) from None
         name = result.name

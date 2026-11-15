@@ -95,7 +95,8 @@ _REFERENCE: Final = re.compile(
     r"|\b(?:isi|usi|same)\s+(?:topic|subject|cheez)\b"
     r"|\b(?:this|that|these|same|above|previous|last|earlier)\s+(?:topic|subject|file|doc|"
     r"document|message|chat|conversation|content|one)\b"
-    r"|\b(?:on|about|from|of|for)\s+(?:this|that|it|the\s+above)\b|\bisi\s+par\b|\bis\s+par\b",
+    r"|\b(?:on|about|from|of|for)\s+(?:this|that|it|the\s+above)\b|\bisi\s+par\b|\bis\s+par\b"
+    r"|\b(?:proceed|continue|go\s+ahead|aage\s+bado|bana\s+do|give\s+me)\b",
     re.IGNORECASE,
 )
 _HINGLISH: Final = re.compile(

@@ -69,8 +69,44 @@ class TestBrowserRunner:
         ]
         for url in blocked_urls:
             req = BrowserActionRequest(action_type="navigate", url=url)
-            with pytest.raises(SecurityEgressViolationError):
-                await browser_runner.execute_action(req)
+            result = await browser_runner.execute_action(req)
+            assert result.success is False
+            assert result.error_message is not None
+            assert any(
+                term in result.error_message.lower() for term in ("blocked", "prohibited", "egress")
+            )
+
+    @pytest.mark.asyncio
+    async def test_execute_action_catches_egress_violation_error(self) -> None:
+        class AlwaysRejectFilter(EgressSecurityFilter):
+            def validate_url(self, url: str) -> str:
+                raise SecurityEgressViolationError(f"Rejected domain in test: {url}")
+
+        runner = BrowserRunner(
+            egress_filter=AlwaysRejectFilter(),
+            anti_bot_detector=AntiBotDetector(),
+            timeout_seconds=5.0,
+            use_simulation=True,
+        )
+        req = BrowserActionRequest(action_type="navigate", url="https://example.com")
+        result = await runner.execute_action(req)
+        assert result.success is False
+        assert result.error_message is not None
+        assert "Rejected domain in test" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_execute_action_catches_slow_hook_runtime_error(
+        self, browser_runner: BrowserRunner
+    ) -> None:
+        async def failing_hook() -> None:
+            raise RuntimeError("Hook failure in test")
+
+        browser_runner._slow_hook = failing_hook
+        req = BrowserActionRequest(action_type="navigate", url="https://example.com")
+        result = await browser_runner.execute_action(req)
+        assert result.success is False
+        assert result.error_message is not None
+        assert "Hook failure in test" in result.error_message
 
     @pytest.mark.asyncio
     async def test_navigate_detects_captcha_and_triggers_takeover(

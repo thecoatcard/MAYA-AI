@@ -281,7 +281,7 @@ async def test_the_time_budget_refuses_tool_calls_once_it_has_passed(
 async def test_with_the_flag_off_a_deck_request_is_submitted_directly_as_before(
     tmp_path: Path,
 ) -> None:
-    async with make_world(artifacts_dir=tmp_path / "artifacts") as legacy:
+    async with make_world(artifacts_dir=tmp_path / "artifacts", chat_tool_loop=False) as legacy:
         submitter = IdempotentSubmitter()
         wire(legacy, submitter=submitter)
         account = await sign_in(legacy)

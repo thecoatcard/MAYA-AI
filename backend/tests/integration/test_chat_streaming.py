@@ -548,9 +548,11 @@ class World:
 
 
 @asynccontextmanager
-async def make_world(*, with_client: bool = True, **settings: Any) -> AsyncIterator[World]:
+async def make_world(
+    *, with_client: bool = True, chat_tool_loop: bool = False, **settings: Any
+) -> AsyncIterator[World]:
     harness = build_harness(FakeAuthStore())
-    configuration = make_settings(gemini_api_key=None, **settings)
+    configuration = make_settings(gemini_api_key=None, chat_tool_loop=chat_tool_loop, **settings)
     app = create_app(configuration, auth_service=harness.service)
     app.state.auth_service = harness.service  # no lifespan runs under ASGITransport
     fake = FakeGeminiClient()

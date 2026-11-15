@@ -134,3 +134,55 @@ async def test_queue_interleaves_tasks_of_one_workspace_and_keeps_task_order() -
     popped = [await queue.dequeue(timeout_seconds=1) for _ in range(4)]
     assert popped == [a1, b1, a2, a3]  # B is not stuck behind A's whole backlog; A stays FIFO
     assert queue.is_empty
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.lists: dict[str, list[str]] = {}
+
+    async def rpush(self, key: str, value: str) -> int:
+        self.lists.setdefault(key, []).append(value)
+        return len(self.lists[key])
+
+    async def lpop(self, key: str) -> str | None:
+        lst = self.lists.get(key, [])
+        if lst:
+            return lst.pop(0)
+        return None
+
+    async def llen(self, key: str) -> int:
+        return len(self.lists.get(key, []))
+
+
+@pytest.mark.asyncio
+async def test_subtask_queue_in_memory_path_works_with_no_redis() -> None:
+    queue = SubtaskQueue(redis=None)
+    job = _job(uuid4(), uuid4())
+    await queue.enqueue(job)
+    assert queue.qsize() == 1
+    dequeued = await queue.dequeue(timeout_seconds=0.5)
+    assert dequeued == job
+
+
+@pytest.mark.asyncio
+async def test_subtask_queue_redis_path_enqueues_to_correct_key() -> None:
+    fake_redis = _FakeRedis()
+    queue = SubtaskQueue(redis=fake_redis)
+    job = _job(uuid4(), uuid4())
+    await queue.enqueue(job)
+
+    assert SubtaskQueue.REDIS_QUEUE_KEY in fake_redis.lists
+    assert len(fake_redis.lists[SubtaskQueue.REDIS_QUEUE_KEY]) == 1
+
+
+@pytest.mark.asyncio
+async def test_subtask_queue_job_recovered_after_reconstruction() -> None:
+    fake_redis = _FakeRedis()
+    q1 = SubtaskQueue(redis=fake_redis)
+    job = _job(uuid4(), uuid4())
+    await q1.enqueue(job)
+
+    # Reconstruct queue from same Redis instance (simulating restart)
+    q2 = SubtaskQueue(redis=fake_redis)
+    dequeued = await q2.dequeue(timeout_seconds=0.5)
+    assert dequeued == job

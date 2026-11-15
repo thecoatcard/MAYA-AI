@@ -282,9 +282,12 @@ class Settings(BaseSettings):
     # Kill switch: false restores the previous chat behaviour (submit_task only, no router).
     chat_inline_files: bool = True
     # Chat tool loop (ADR-0026, Phase 1): create_document, preview_document, start_job and
-    # check_job for document, deck and website requests. Off by default: the previous behaviour.
+    # check_job for document, deck and website requests. Enabled by default for unified runtime.
     # Needs chat_inline_files (the router decides which requests the loop takes).
-    chat_tool_loop: bool = False
+    chat_tool_loop: bool = True
+    # Unified Agent Runtime tool loop budgets
+    chat_tool_loop_max_rounds: int = Field(default=30, ge=1, le=100)
+    chat_tool_loop_token_budget: int = Field(default=100_000, ge=1_000, le=1_000_000)
     # Runtime tools (ADR-0027): the model may write a small Python tool, show it for approval and
     # run it ONLY inside an isolated container. Off by default; it also needs chat_tool_loop and
     # a sandbox image (runtime_tools_sandbox_image). Empty image = no isolated runtime = refuse.

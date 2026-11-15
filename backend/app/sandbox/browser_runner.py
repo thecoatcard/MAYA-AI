@@ -145,6 +145,7 @@ class BrowserRunner:
         except TimeoutError:
             elapsed = time.monotonic() - start_time
             msg = f"Browser action '{request.action_type}' timed out after {self.timeout_seconds}s."
+            logger.error("Browser action '%s' timed out: %s", request.action_type, msg)
             return BrowserActionResult(
                 success=False,
                 current_url=request.url or "",
@@ -156,6 +157,25 @@ class BrowserRunner:
                 action_type=request.action_type,
                 execution_time_seconds=elapsed,
             )
+        except Exception as exc:
+            elapsed = time.monotonic() - start_time
+            logger.error(
+                "Browser action '%s' failed with exception: %s",
+                request.action_type,
+                exc,
+                exc_info=True,
+            )
+            return BrowserActionResult(
+                success=False,
+                current_url=request.url or "",
+                dom_summary="",
+                screenshot_base64=None,
+                bot_detected=False,
+                bot_type=None,
+                error_message=str(exc),
+                action_type=request.action_type,
+                execution_time_seconds=elapsed,
+            )
 
     async def _execute_action_internal(
         self,
@@ -163,6 +183,33 @@ class BrowserRunner:
         start_time: float,
     ) -> BrowserActionResult:
         """Internal dispatch of browser actions."""
+        try:
+            return await self._dispatch_action(request, start_time)
+        except Exception as exc:
+            elapsed = time.monotonic() - start_time
+            logger.error(
+                "Internal browser action '%s' failed with exception: %s",
+                request.action_type,
+                exc,
+                exc_info=True,
+            )
+            return BrowserActionResult(
+                success=False,
+                current_url=request.url or "",
+                dom_summary="",
+                screenshot_base64=None,
+                bot_detected=False,
+                bot_type=None,
+                error_message=str(exc),
+                action_type=request.action_type,
+                execution_time_seconds=elapsed,
+            )
+
+    async def _dispatch_action(
+        self,
+        request: BrowserActionRequest,
+        start_time: float,
+    ) -> BrowserActionResult:
         if self._slow_hook:
             await self._slow_hook()
 

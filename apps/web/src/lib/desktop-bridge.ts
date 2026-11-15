@@ -3,6 +3,8 @@
  * In a plain browser there is no bridge and these helpers return null.
  */
 
+import { useEffect, useState } from "react";
+
 export interface DesktopBridge {
   readonly isDesktop: true;
   /** Native folder dialog. Resolves the absolute path, or null when the person cancels. */
@@ -152,4 +154,37 @@ export async function registerScheduleWake(
   } catch {
     return { ok: false, reason: "failed" };
   }
+}
+
+export interface DesktopBridgeState {
+  readonly isDesktop: boolean;
+  readonly pickFolder: (() => Promise<string | null>) | null;
+  readonly revealPath: ((path: string) => Promise<boolean>) | null;
+}
+
+/**
+ * React hook exposing desktop bridge capabilities (e.g. native folder picker).
+ */
+export function useDesktopBridge(): DesktopBridgeState {
+  const [bridge, setBridge] = useState<DesktopBridgeState>(() => {
+    const picker = getFolderPicker();
+    const revealer = getPathRevealer();
+    return {
+      isDesktop: picker !== null,
+      pickFolder: picker,
+      revealPath: revealer,
+    };
+  });
+
+  useEffect(() => {
+    const picker = getFolderPicker();
+    const revealer = getPathRevealer();
+    setBridge({
+      isDesktop: picker !== null,
+      pickFolder: picker,
+      revealPath: revealer,
+    });
+  }, []);
+
+  return bridge;
 }

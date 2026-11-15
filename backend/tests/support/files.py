@@ -25,6 +25,7 @@ class MemorySettings:
 
     def __init__(self) -> None:
         self.paths: dict[tuple[UUID, UUID], str | None] = {}
+        self.texts: dict[tuple[UUID, UUID, str], str | None] = {}
 
     async def get_workspace_folder(self, workspace_id: UUID, user_id: UUID) -> str | None:
         return self.paths.get((workspace_id, user_id))
@@ -33,6 +34,14 @@ class MemorySettings:
         self, workspace_id: UUID, user_id: UUID, path: str | None
     ) -> None:
         self.paths[(workspace_id, user_id)] = path
+
+    async def get_text(self, workspace_id: UUID, user_id: UUID, key: str) -> str | None:
+        return self.texts.get((workspace_id, user_id, key))
+
+    async def set_text(
+        self, workspace_id: UUID, user_id: UUID, key: str, value: str | None
+    ) -> None:
+        self.texts[(workspace_id, user_id, key)] = value
 
 
 class RecordingServices(FileServices):

@@ -330,11 +330,14 @@ def route_message(
     has_attachments: bool = False,
     live_formats: frozenset[str] = frozenset(),
     schedules: bool = False,
+    tool_loop: bool = False,
 ) -> Decision:
     """The deterministic route for one message. ``model`` means the model must choose.
 
     ``live_formats`` are the formats of the file(s) already made or shown in this conversation;
     a message that edits one of them is an edit turn, never a new background task.
+    When ``tool_loop`` is True, binary deliverables, project requests, and text length limits
+    route to the model with the unified agent runtime rather than preemptively forcing a task.
     """
     value = " ".join((text or "").split())
     lower = value.lower()
@@ -386,13 +389,13 @@ def route_message(
     text_file = _TEXT_FILE.search(lower) is not None or _TEXT_EXT.search(lower) is not None
     text_noun = _TEXT_NOUN.search(lower) is not None
     if (creation or binary or text_file or text_noun) and (size := _size_over_limit(lower)):
-        return Decision(Route.TASK, f"over_limit_{size}")
+        return Decision(Route.MODEL if tool_loop else Route.TASK, f"over_limit_{size}")
     if creation and _PROJECT_NOUN.search(lower):
-        return Decision(Route.TASK, "project")
+        return Decision(Route.MODEL if tool_loop else Route.TASK, "project")
     if live_formats and _edits_working_file(lower, live_formats):
         return Decision(Route.MODEL, EDIT_WORKING_FILE_REASON)
     if binary and not has_attachments and not _is_bare(lower):
-        return Decision(Route.TASK, "binary_deliverable")
+        return Decision(Route.MODEL if tool_loop else Route.TASK, "binary_deliverable")
     if binary or text_file:
         return Decision(Route.MODEL, "file_candidate")
     if creation and text_noun:
