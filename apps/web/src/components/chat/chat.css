@@ -1,0 +1,2009 @@
+/*
+ * Conversation, composer and shared sign-in rules.
+ *
+ * Imported by the chat view and by the sign-in components. Everything themeable comes from the
+ * design tokens in app/globals.css (docs/architecture/UI_DESIGN_SYSTEM.md): this file declares no
+ * colours and no theme of its own. Rules of the standards document that apply here:
+ *  - tokens only (colours, sizes, spacing, radii, durations, easing);
+ *  - motion animates transform and opacity only, and every animation has a static equivalent
+ *    under prefers-reduced-motion (see the end of the file);
+ *  - nothing is blurred, glowing or gradient, and nothing requests an external resource.
+ *
+ * Message arrival and the voice orb use the motion classes of globals.css (motion-message,
+ * motion-orb), not keyframes written here.
+ */
+
+/* ------------------------------------------------ chat-local sizes and timings */
+
+/*
+ * Non-theme values that only this file needs. Theme colours, the type scale, spacing, radii,
+ * layers and the main durations are tokens in globals.css.
+ */
+:root {
+  --maya-composer-max: 12rem;
+  --maya-dot: 0.375rem;
+  --maya-dur-loop: calc(1200ms * var(--maya-motion-scale));
+  --maya-dur-ripple: calc(360ms * var(--maya-motion-scale));
+  --maya-ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --maya-state-hover-opacity: 0.06;
+  --maya-state-focus-opacity: 0.08;
+  --maya-state-pressed-opacity: 0.12;
+  --maya-state-ripple-opacity: 0.18;
+  --maya-ripple-size: 14rem;
+}
+
+/* The sign-in pages are a fixed-height shell; keep the page from rubber-banding. */
+:root:has(.maya-chat) {
+  overscroll-behavior: none;
+}
+
+/* ------------------------------------------------------------------- shell */
+
+/* Used by the sign-in pages (their own package restyles them). */
+.maya-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--maya-bg);
+  color: var(--maya-text);
+  font-family: var(--maya-font-sans);
+  font-size: var(--maya-text-body);
+  line-height: var(--maya-leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.maya-chat :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+.maya-chat__header {
+  position: sticky;
+  top: 0;
+  z-index: var(--maya-z-float);
+  flex: none;
+  border-bottom: 1px solid var(--maya-border);
+  background: var(--maya-raised);
+}
+
+.maya-chat__header-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-2) var(--maya-space-3);
+  max-width: var(--maya-column-wide);
+  min-height: 3.5rem;
+  margin: 0 auto;
+  padding: var(--maya-space-2) var(--maya-space-4);
+}
+
+.maya-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  padding: var(--maya-space-2) 0;
+  border-radius: var(--maya-radius-sm);
+  color: var(--maya-text);
+  font-size: var(--maya-text-small);
+  font-weight: 600;
+  letter-spacing: var(--maya-tracking-label);
+  text-decoration: none;
+}
+
+.maya-brand svg {
+  color: var(--maya-accent);
+}
+
+@media (hover: hover) {
+  .maya-brand:hover {
+    color: var(--maya-link);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.3em;
+  }
+}
+
+.maya-chat__divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--maya-border-strong);
+}
+
+.maya-chat__title {
+  margin: 0;
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+}
+
+.maya-chat__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin-left: auto;
+}
+
+.maya-chat__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+.maya-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-3);
+  border: 1px solid var(--maya-control-border);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-raised);
+  color: var(--maya-text);
+  font: inherit;
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-standard),
+    border-color var(--maya-dur-fast) var(--maya-ease-standard),
+    color var(--maya-dur-fast) var(--maya-ease-standard);
+}
+
+.maya-btn::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--maya-state-layer);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--maya-dur-fast) var(--maya-ease-standard);
+}
+
+.maya-btn:hover:not(:disabled)::before {
+  opacity: var(--maya-state-hover-opacity);
+}
+
+.maya-btn:focus-visible::before {
+  opacity: var(--maya-state-focus-opacity);
+}
+
+.maya-btn:active:not(:disabled)::before {
+  opacity: var(--maya-state-pressed-opacity);
+}
+
+.maya-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.maya-ripple::after {
+  position: absolute;
+  top: var(--y, 50%);
+  left: var(--x, 50%);
+  width: var(--maya-ripple-size);
+  height: var(--maya-ripple-size);
+  border-radius: 50%;
+  background: var(--maya-state-layer);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0);
+}
+
+.maya-ripple:active::after {
+  animation: maya-ripple var(--maya-dur-ripple) var(--maya-ease-emphasized)
+    forwards;
+}
+
+.maya-btn--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--maya-text-muted);
+}
+
+.maya-btn:disabled {
+  border-color: var(--maya-border);
+  background: var(--maya-disabled-bg);
+  color: var(--maya-disabled-text);
+  cursor: not-allowed;
+}
+
+/* The lead action of a notice. A disabled button falls back to .maya-btn:disabled. */
+.maya-btn--primary {
+  border-color: transparent;
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+}
+
+@media (hover: hover) {
+  .maya-btn:hover:not(:disabled) {
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+
+  .maya-btn--primary:hover:not(:disabled) {
+    background: var(--maya-accent-hover);
+    color: var(--maya-accent-text);
+  }
+}
+
+/* ------------------------------------------------------------------ thread */
+
+.maya-thread {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The one scroll region of the conversation pane. */
+.maya-thread__scroll {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.maya-thread__scroll:focus-visible {
+  outline-offset: -2px;
+}
+
+.maya-thread__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--maya-space-6);
+  width: 100%;
+  min-width: 0;
+  max-width: var(--maya-column);
+  margin: 0 auto;
+  padding: var(--maya-space-6) var(--maya-space-4) var(--maya-space-6);
+}
+
+/* Sits inside the thread pane, above the composer dock, so it can never cover the composer. */
+.maya-jump {
+  position: absolute;
+  right: 0;
+  bottom: var(--maya-space-3);
+  left: 0;
+  z-index: var(--maya-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  width: fit-content;
+  max-width: calc(100% - var(--maya-space-8));
+  min-height: var(--maya-control);
+  margin: 0 auto;
+  padding: 0 var(--maya-space-3);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-raised);
+  box-shadow: var(--maya-shadow-2);
+  color: var(--maya-text);
+  font: inherit;
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+  cursor: pointer;
+  animation: maya-message var(--maya-dur-fast) var(--maya-ease-out) backwards;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+/* Hide while an inline approval card is pending in view: it must never float over Approve/Reject. */
+.maya-thread:has([data-testid="inline-approval"]:not([data-pending="false"]))
+  .maya-jump {
+  display: none;
+}
+
+.maya-jump:active {
+  transform: scale(var(--maya-press-scale));
+}
+
+.maya-jump__icon {
+  flex: none;
+  transition: transform var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-jump__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 var(--maya-space-1);
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  font-weight: 600;
+  line-height: 1;
+}
+
+@media (hover: hover) {
+  .maya-jump:hover {
+    background: var(--maya-hover);
+    box-shadow: var(--maya-shadow-3);
+  }
+
+  .maya-jump:hover .maya-jump__icon {
+    transform: translateY(var(--maya-nudge));
+  }
+}
+
+/* ---------------------------------------------------------------- messages */
+
+.maya-msg {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* You: a tailored bubble on the right with smooth corners. */
+.maya-msg--user {
+  position: relative;
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(85%, 36rem);
+  padding: var(--maya-space-3) var(--maya-space-4);
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-lg) var(--maya-radius-lg)
+    var(--maya-radius-xs) var(--maya-radius-lg);
+  background: var(--maya-raised);
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+@media (hover: hover) {
+  .maya-msg--user:hover {
+    box-shadow: var(--maya-shadow-lift);
+  }
+}
+
+.maya-msg__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* MAYA: calm, airy, elegant layout, subtle brand accent pip, preserved markdown. */
+.maya-msg--assistant {
+  display: grid;
+  align-self: stretch;
+  gap: var(--maya-space-2);
+  padding: var(--maya-space-1) 0;
+}
+
+.maya-msg--assistant > * {
+  min-width: 0;
+}
+
+.maya-msg__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--maya-space-2);
+  margin-bottom: var(--maya-space-1);
+}
+
+.maya-msg__time {
+  color: var(--maya-text-muted);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  line-height: var(--maya-leading-label);
+  letter-spacing: var(--maya-tracking-label);
+}
+
+.maya-msg__mark {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-accent);
+  transition: transform var(--maya-dur-fast) var(--maya-ease-spring);
+}
+
+.maya-msg__who {
+  color: var(--maya-text-muted);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  font-weight: 500;
+  line-height: var(--maya-leading-label);
+  letter-spacing: var(--maya-tracking-label);
+}
+
+/*
+ * Quiet meta chip ("Spoken"): icon plus text, only as wide as its text, never a bordered box that
+ * spans the thread. It is rendered only for turns that really were spoken.
+ */
+.maya-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 var(--maya-space-2);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-raised);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+.maya-msg__speak {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  min-height: var(--maya-control);
+  margin-left: auto;
+  padding: 0 var(--maya-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .maya-msg__speak:hover {
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+
+  .maya-msg__pill:hover:not(:disabled) {
+    border-color: var(--maya-border);
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+
+  .maya-msg__pill[data-active="true"]:hover:not(:disabled),
+  .maya-msg__pill[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--maya-accent-soft);
+    color: var(--maya-accent-hover);
+  }
+}
+
+.maya-msg__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--maya-space-2);
+  margin: var(--maya-space-2) 0 0;
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+  overflow-wrap: anywhere;
+}
+
+.maya-msg__note svg {
+  flex: none;
+  margin-top: 0.2rem;
+}
+
+.maya-msg__note--error {
+  color: var(--maya-danger);
+}
+
+.maya-msg__note--warning {
+  color: var(--maya-warning);
+}
+
+/* An inline control that continues the sentence of a note ("Ask again"). */
+.maya-msg__action {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--maya-control);
+  margin-left: var(--maya-space-2);
+  padding: 0 var(--maya-space-3);
+  border: 1px solid var(--maya-control-border);
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+@media (hover: hover) {
+  .maya-msg__action:hover {
+    background: var(--maya-hover);
+  }
+}
+
+/* Waiting state: dots carry the motion, the label carries the meaning. */
+.maya-pending {
+  display: flex;
+  align-items: center;
+  gap: var(--maya-space-3);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+}
+
+.maya-dots {
+  display: inline-flex;
+  gap: var(--maya-space-1);
+}
+
+.maya-dots i {
+  width: var(--maya-dot);
+  height: var(--maya-dot);
+  border-radius: 50%;
+  background: var(--maya-accent);
+  animation: maya-pulse var(--maya-dur-loop) var(--maya-ease-in-out) infinite;
+}
+
+.maya-dots i:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.maya-dots i:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+/* Streaming caret: solid and still. It moves because the text moves. */
+.maya-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.1em;
+  margin-left: 0.15em;
+  border-radius: 1px;
+  background: var(--maya-accent);
+  vertical-align: text-bottom;
+  animation: maya-fade-in var(--maya-dur-fast) var(--maya-ease-out) backwards;
+}
+
+/* --------------------------------------------------------------- markdown */
+
+.maya-md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-md--streaming > :last-child {
+  animation: maya-fade-in var(--maya-dur-fast) var(--maya-ease-out) backwards;
+}
+
+.maya-md > :first-child {
+  margin-top: 0;
+}
+
+.maya-md > :last-child {
+  margin-bottom: 0;
+}
+
+.maya-md p {
+  margin: 0 0 var(--maya-space-4);
+}
+
+.maya-md > p,
+.maya-md > ul,
+.maya-md > ol,
+.maya-md > blockquote,
+.maya-md > .maya-md__h {
+  max-width: var(--maya-measure);
+}
+
+.maya-md ul,
+.maya-md ol {
+  margin: 0 0 var(--maya-space-4);
+  padding-inline-start: var(--maya-space-6);
+}
+
+.maya-md ul {
+  list-style: disc;
+}
+
+.maya-md ul ul {
+  list-style: circle;
+}
+
+.maya-md ol {
+  list-style: decimal;
+}
+
+.maya-md li {
+  margin: var(--maya-space-1) 0;
+  padding-inline-start: var(--maya-space-1);
+}
+
+.maya-md li::marker {
+  color: var(--maya-text-muted);
+}
+
+.maya-md li > p {
+  margin: 0;
+}
+
+.maya-md li > ul,
+.maya-md li > ol {
+  margin: var(--maya-space-1) 0 0;
+}
+
+.maya-md blockquote {
+  margin: 0 0 var(--maya-space-4);
+  padding: 0;
+  padding-inline-start: var(--maya-space-4);
+  border-inline-start: 2px solid var(--maya-border-strong);
+  color: var(--maya-text-muted);
+}
+
+.maya-md hr {
+  margin: var(--maya-space-6) 0;
+  border: 0;
+  border-top: 1px solid var(--maya-border);
+}
+
+.maya-md__h {
+  margin: var(--maya-space-6) 0 var(--maya-space-2);
+  font-size: var(--maya-text-body);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.maya-md__h--1 {
+  font-size: var(--maya-text-title);
+  line-height: var(--maya-leading-title);
+  letter-spacing: var(--maya-tracking-display);
+}
+
+.maya-md__h--2 {
+  font-size: var(--maya-text-heading);
+}
+
+.maya-md__code {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-code-bg);
+  font-family: var(--maya-font-mono);
+  font-size: 0.9em;
+}
+
+.maya-md__math {
+  font-style: italic;
+  font-family: var(--maya-font-mono);
+  font-size: 0.95em;
+}
+
+.maya-md__math-block {
+  margin: var(--maya-space-3) 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-code-bg);
+  font-style: italic;
+  font-family: var(--maya-font-mono);
+  text-align: center;
+  overflow-x: auto;
+}
+
+.maya-md__math-block--raw {
+  font-style: normal;
+  text-align: start;
+}
+
+.maya-md__link {
+  color: var(--maya-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+@media (hover: hover) {
+  .maya-md__link:hover {
+    text-decoration-thickness: 2px;
+  }
+}
+
+/* A citation marker: a small superscript number linking to its source. */
+.maya-md__cite {
+  font-size: 0.72em;
+  line-height: 0;
+  margin-inline: 0.1em;
+}
+
+.maya-md__cite a {
+  color: var(--maya-link);
+  text-decoration: none;
+}
+
+.maya-md__cite a:hover,
+.maya-md__cite a:focus-visible {
+  text-decoration: underline;
+}
+
+/* Where the link really goes. inline-block keeps the link underline off it. */
+.maya-md__host {
+  display: inline-block;
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+  text-decoration: none;
+}
+
+/*
+ * A real table inside a scroll wrapper (TableScroll): wide tables scroll sideways in their own
+ * box and never widen the message. Cells keep their natural width, so a column never collapses
+ * to a sliver; a very long unbroken value scrolls instead of being cut.
+ */
+.maya-md__table {
+  margin: 0 0 var(--maya-space-4);
+  border-radius: var(--maya-radius-md);
+}
+
+.maya-md__table table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+}
+
+.maya-md__table th,
+.maya-md__table td {
+  min-width: 5rem;
+  max-width: 28rem;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border-bottom: 1px solid var(--maya-border);
+  overflow-wrap: break-word;
+  text-align: start;
+  vertical-align: top;
+}
+
+.maya-md__table th {
+  background: var(--maya-raised);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.maya-md__table [data-align="center"] {
+  text-align: center;
+}
+
+.maya-md__table [data-align="left"] {
+  text-align: left;
+}
+
+.maya-md__table [data-align="right"] {
+  text-align: right;
+}
+
+.maya-md__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* -------------------------------------------------------------- code block */
+
+.maya-codeblock {
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 var(--maya-space-4);
+  overflow: hidden;
+  border: 1px solid var(--maya-border);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-code-bg);
+}
+
+.maya-codeblock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--maya-space-3);
+  min-height: 2.25rem;
+  padding: 0 var(--maya-space-2) 0 var(--maya-space-4);
+  border-bottom: 1px solid var(--maya-border);
+}
+
+.maya-codeblock__tools {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
+.maya-code__lang {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--maya-text-muted);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  letter-spacing: var(--maya-tracking-label);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.maya-code__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  min-height: 1.75rem;
+  padding: 0 var(--maya-space-2);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-code__copy[aria-pressed="true"] {
+  background: var(--maya-hover);
+  color: var(--maya-text);
+}
+
+.maya-code__copy[data-state="failed"] {
+  color: var(--maya-danger);
+}
+
+@media (hover: hover) {
+  .maya-code__copy:hover {
+    background: var(--maya-hover);
+    color: var(--maya-text);
+  }
+}
+
+.maya-code__icons {
+  display: grid;
+}
+
+.maya-code__icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-code__icon--check,
+.maya-code__copy[data-state="copied"] .maya-code__icon--copy {
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+.maya-code__copy[data-state="copied"] .maya-code__icon--check {
+  opacity: 1;
+  transform: none;
+}
+
+/*
+ * The scrolling listing (a CodeBlockShell). Long lines scroll inside it by default; the Wrap
+ * toggle folds them instead. Unbroken strings wrap in wrap mode, so nothing is ever cut off.
+ */
+.maya-code__pre {
+  max-height: 28rem;
+  margin: 0;
+  padding: var(--maya-space-3) var(--maya-space-4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--maya-text);
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-mono);
+  line-height: var(--maya-leading-mono);
+  tab-size: 2;
+}
+
+.maya-code__pre[data-wrap="true"] {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.maya-code__pre:focus-visible {
+  outline-offset: -2px;
+}
+
+.maya-tok--keyword {
+  color: var(--maya-tok-keyword);
+}
+
+.maya-tok--string {
+  color: var(--maya-tok-string);
+}
+
+.maya-tok--number {
+  color: var(--maya-tok-number);
+}
+
+.maya-tok--comment {
+  color: var(--maya-tok-comment);
+  font-style: italic;
+}
+
+.maya-tok--name {
+  color: var(--maya-tok-name);
+}
+
+.maya-tok--type {
+  color: var(--maya-tok-type);
+}
+
+/* ---------------------------------------------------------------- composer */
+
+/*
+ * The dock holds the notice, the voice dock and the composer. It is a flex sibling below the
+ * thread, so nothing in the thread can slide under it.
+ */
+.maya-chat__dock {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--maya-space-2);
+  width: 100%;
+  min-width: 0;
+  max-width: var(--maya-column);
+  margin: 0 auto;
+  padding: var(--maya-space-2) var(--maya-space-4)
+    max(var(--maya-space-3), var(--maya-safe-bottom));
+}
+
+.maya-composer {
+  min-width: 0;
+  container-name: composer;
+  container-type: inline-size;
+}
+
+/* One row: mic, text field, Run as task, send. It reflows (below) when the pane is narrow. */
+.maya-composer__box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--maya-space-2);
+  min-width: 0;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-xl);
+  background: var(--maya-pane);
+  box-shadow: var(--maya-shadow-2);
+  transition:
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-base) var(--maya-ease-spring),
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-fast) var(--maya-ease-spring);
+}
+
+@media (hover: hover) {
+  .maya-composer__box:hover {
+    box-shadow: var(--maya-shadow-lift);
+  }
+}
+
+/* The same 2 px indicator as every other control; a 1 px border change alone
+   is far below 3:1 against the idle border. */
+.maya-composer__box:focus-within {
+  border-color: var(--maya-focus);
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+  box-shadow: var(--maya-shadow-lift);
+}
+
+.maya-composer__lead,
+.maya-composer__extra {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * The text field never collapses: it keeps a 12rem basis, and takes a whole line when the pane
+ * is narrower than the row needs (see the container rule below).
+ */
+.maya-composer__field {
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-height: var(--maya-composer-max);
+  padding: var(--maya-space-2) var(--maya-space-3);
+  overflow-y: auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--maya-text);
+  font: inherit;
+  line-height: var(--maya-leading-body);
+  resize: none;
+}
+
+.maya-composer__field::placeholder {
+  color: var(--maya-text-muted);
+  opacity: 1;
+}
+
+.maya-composer__field:disabled {
+  cursor: not-allowed;
+}
+
+.maya-composer__mic {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 var(--maya-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-full);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
+}
+
+.maya-composer__mic:active {
+  transform: scale(0.94);
+}
+
+@media (hover: hover) {
+  .maya-composer__mic:hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-composer__action {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+  cursor: pointer;
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
+}
+
+.maya-composer__action:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.maya-composer__action:disabled {
+  border-color: var(--maya-border);
+  background: var(--maya-disabled-bg);
+  color: var(--maya-disabled-text);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.maya-composer__action[data-mode="stop"] {
+  border-color: var(--maya-control-border);
+  background: var(--maya-raised);
+  color: var(--maya-text);
+}
+
+@media (hover: hover) {
+  .maya-composer__action:hover:not(:disabled) {
+    background: var(--maya-accent-hover);
+    box-shadow: var(--maya-shadow-lift);
+  }
+
+  .maya-composer__action[data-mode="stop"]:hover:not(:disabled) {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-composer__icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--maya-dur-base) var(--maya-ease-spring),
+    transform var(--maya-dur-base) var(--maya-ease-spring);
+}
+
+.maya-composer__action[data-mode="send"] .maya-composer__icon--stop {
+  opacity: 0;
+  transform: scale(0.4) rotate(90deg);
+}
+
+.maya-composer__action[data-mode="send"] .maya-composer__icon--send {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.maya-composer__action[data-mode="stop"] .maya-composer__icon--send {
+  opacity: 0;
+  transform: scale(0.4) rotate(-90deg);
+}
+
+.maya-composer__action[data-mode="stop"] .maya-composer__icon--stop {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.maya-composer__task {
+  border-radius: var(--maya-radius-full);
+  font-size: var(--maya-text-small);
+  font-weight: var(--maya-weight-medium);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-fast) var(--maya-ease-spring),
+    transform var(--maya-dur-instant) var(--maya-ease-spring);
+}
+
+.maya-composer__task:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.maya-composer__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--maya-space-1) var(--maya-space-3);
+  min-width: 0;
+  padding: var(--maya-space-2) var(--maya-space-2) 0;
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+.maya-composer__hint,
+.maya-composer__count {
+  margin: 0;
+}
+
+.maya-composer__count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.maya-composer__count[data-level="near"] {
+  color: var(--maya-warning);
+}
+
+.maya-composer__count[data-level="over"] {
+  color: var(--maya-danger);
+  font-weight: 600;
+}
+
+/*
+ * Narrow pane (measured on the composer, not the window): the field takes a whole first line
+ * and the mic, Run as task and send sit together on the line below.
+ */
+@container composer (max-width: 30rem) {
+  .maya-composer__field {
+    flex-basis: 100%;
+    order: -1;
+  }
+
+  .maya-composer__extra {
+    margin-left: auto;
+  }
+
+  .maya-composer__hint {
+    display: none;
+  }
+}
+
+/* Attachment chips under a sent message. */
+.maya-msg__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-2);
+  min-width: 0;
+  margin: var(--maya-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ------------------------------------------------------- composer attachments */
+
+/* Chips wrap onto as many lines as they need; nothing overflows at 320 px. */
+.maya-composer__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--maya-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 var(--maya-space-2);
+  list-style: none;
+}
+
+.maya-composer__file {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.maya-attachment__bar {
+  display: block;
+  width: 100%;
+  height: 4px;
+  accent-color: var(--maya-accent);
+}
+
+.maya-composer__attach-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-1) var(--maya-space-2);
+  margin: 0;
+  padding: 0 var(--maya-space-1) var(--maya-space-2);
+  color: var(--maya-warning);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+/*
+ * Drop overlay: covers the conversation while files are dragged over it. It never takes pointer
+ * events, so typing, clicking and the drop itself keep working; it has no animation.
+ */
+.maya-dropzone {
+  position: absolute;
+  inset: var(--maya-space-2);
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--maya-focus);
+  border-radius: var(--maya-radius-md);
+  pointer-events: none;
+}
+
+.maya-dropzone::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--maya-pane);
+  opacity: 0.88;
+  content: "";
+}
+
+.maya-dropzone__label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin: 0;
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-raised);
+  color: var(--maya-text);
+  font-size: var(--maya-text-small);
+  font-weight: 500;
+}
+
+/* ----------------------------------------------------------- composer notice */
+
+.maya-cnotice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--maya-space-2) var(--maya-space-3);
+  align-items: start;
+  min-width: 0;
+  padding: var(--maya-space-3) var(--maya-space-4);
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-md);
+  background: var(--maya-pane);
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+  animation: maya-message var(--maya-dur-fast) var(--maya-ease-out) backwards;
+}
+
+.maya-cnotice--error {
+  border-color: var(--maya-danger);
+  background: var(--maya-danger-soft);
+}
+
+.maya-cnotice__icon {
+  margin-top: 0.1rem;
+  color: var(--maya-accent);
+}
+
+.maya-cnotice--error .maya-cnotice__icon {
+  color: var(--maya-danger);
+}
+
+.maya-cnotice__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-cnotice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  grid-column: 2;
+  gap: var(--maya-space-2);
+}
+
+/* Visual only (aria-hidden): the wait is also in the alert text, once. */
+.maya-cnotice__countdown {
+  color: var(--maya-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- empty conversation */
+
+.maya-chat-empty {
+  max-width: 34rem;
+  padding: clamp(var(--maya-space-6), 10vh, 5rem) 0 var(--maya-space-4);
+}
+
+.maya-chat-empty__title {
+  margin: 0 0 var(--maya-space-3);
+  font-size: var(--maya-text-title);
+  font-weight: 600;
+  line-height: var(--maya-leading-title);
+  letter-spacing: var(--maya-tracking-display);
+}
+
+.maya-chat-empty__body {
+  margin: 0 0 var(--maya-space-4);
+  color: var(--maya-text-muted);
+}
+
+/* ---------------------------------------------------------------- voice orb */
+
+/* Nine-bar level meter (the motion-orb class animates the bars). Resting height is --h. */
+.maya-orb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 1.75rem;
+}
+
+.maya-orb[data-size="sm"] {
+  gap: 1px;
+  height: 1rem;
+}
+
+.maya-orb > i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform: scaleY(var(--h, 1));
+}
+
+.maya-orb[data-size="sm"] > i {
+  width: 2px;
+}
+
+/* Voice unavailable or failed: an icon in the same box, no bars. */
+.maya-orb--icon {
+  width: 1.75rem;
+}
+
+.maya-orb--icon[data-size="sm"] {
+  width: 1rem;
+}
+
+/* ------------------------------------------------------------- responsive */
+
+@media (max-width: 30rem) {
+  .maya-chat__divider {
+    display: none;
+  }
+
+  /* Visually hidden, not display: none, so the h1 stays in the outline. */
+  .maya-chat__title,
+  .maya-btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .maya-thread__inner {
+    gap: var(--maya-space-5);
+    padding-top: var(--maya-space-4);
+  }
+
+  .maya-msg--user {
+    max-width: 92%;
+  }
+}
+
+/* Touch targets are at least 44 px on touch layouts. */
+@media (pointer: coarse), (max-width: 40rem) {
+  .maya-btn,
+  .maya-jump,
+  .maya-composer__mic,
+  .maya-composer__action {
+    min-width: var(--maya-touch);
+    min-height: var(--maya-touch);
+  }
+
+  .maya-composer__action {
+    width: var(--maya-touch);
+    height: var(--maya-touch);
+  }
+
+  .maya-code__copy,
+  .maya-msg__speak {
+    min-width: var(--maya-touch);
+    min-height: var(--maya-touch);
+    justify-content: center;
+  }
+
+  /* Stand-alone links and inline note actions: tall enough, width as written. */
+  .maya-brand,
+  .maya-msg__action {
+    min-height: var(--maya-touch);
+  }
+
+  .maya-msg__pill {
+    min-height: var(--maya-touch);
+  }
+}
+
+/* Windows high contrast: shadows are dropped, so state needs real outlines. */
+@media (forced-colors: active) {
+  .maya-dropzone {
+    border-color: Highlight;
+  }
+
+  .maya-chat__header {
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .maya-composer__box,
+  .maya-codeblock,
+  .maya-chip {
+    border: 1px solid CanvasText;
+  }
+
+  .maya-composer__box:focus-within {
+    outline: 2px solid Highlight;
+  }
+
+  .maya-composer__action:disabled,
+  .maya-btn:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .maya-orb > i {
+    background: Highlight;
+  }
+}
+
+/* ----------------------------------------------------------------- motion */
+
+@keyframes maya-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes maya-ripple {
+  from {
+    opacity: var(--maya-state-ripple-opacity);
+    transform: translate(-50%, -50%) scale(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.6);
+  }
+}
+
+/* The waiting dots: a loop next to a text label ("Thinking", "Sending"), so it is never alone. */
+@keyframes maya-pulse {
+  0%,
+  40%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+}
+
+/*
+ * Reduced motion: no animation and no timed transitions. Each state keeps its
+ * static signal: the dots stay visible next to their text label, the caret is
+ * already a still bar, and messages appear in place.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .maya-app *,
+  .maya-app *::before,
+  .maya-app *::after,
+  .maya-chat *,
+  .maya-chat *::before,
+  .maya-chat *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+}
+
+/* Live step list under an assistant reply (ProgressSteps). Text wraps; nothing scrolls sideways. */
+.maya-steps {
+  min-width: 0;
+  max-width: 100%;
+  margin-top: var(--maya-space-2);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+}
+
+.maya-steps__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  max-width: 100%;
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  margin-left: calc(var(--maya-space-2) * -1);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-steps__toggle:focus-visible,
+.maya-steps__more:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+.maya-steps__summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) {
+  .maya-steps__toggle:hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--maya-space-2);
+  margin: var(--maya-space-2) 0 0;
+  padding: 0 0 0 var(--maya-space-2);
+  border-left: 1px solid var(--maya-border);
+  list-style: none;
+}
+
+.maya-steps__children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--maya-space-2);
+  margin: var(--maya-space-2) 0 0;
+  padding: 0 0 0 var(--maya-space-3);
+  border-left: 1px solid var(--maya-border);
+  list-style: none;
+}
+
+.maya-steps__item {
+  min-width: 0;
+}
+
+.maya-steps__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-steps__icon {
+  flex: none;
+  margin-top: 0.2rem;
+}
+
+.maya-steps__icon--running {
+  color: var(--maya-accent);
+}
+
+.maya-steps__icon--done {
+  color: var(--maya-success);
+}
+
+.maya-steps__icon--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--maya-space-1);
+  min-width: 0;
+}
+
+.maya-steps__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--maya-space-1) var(--maya-space-2);
+  min-width: 0;
+}
+
+.maya-steps__label {
+  min-width: 0;
+  color: var(--maya-text);
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__meta {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.maya-steps__status--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__detail {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__detail--failed {
+  color: var(--maya-danger);
+}
+
+.maya-steps__thought {
+  margin: 0;
+}
+
+.maya-steps__thought-text {
+  margin: 0;
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  overflow-wrap: anywhere;
+}
+
+.maya-steps__more {
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-steps__toggle {
+    transition: none;
+  }
+}
+
+/* The model's reasoning summary as a dropdown inside the step list (ProgressSteps). */
+.maya-steps__timer {
+  color: var(--maya-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.maya-think {
+  min-width: 0;
+}
+
+.maya-think__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  max-width: 100%;
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  margin-left: calc(var(--maya-space-2) * -1);
+  border: 0;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-think__toggle:disabled {
+  cursor: default;
+}
+
+.maya-think__toggle:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .maya-think__toggle:not(:disabled):hover {
+    background: var(--maya-hover);
+  }
+}
+
+.maya-think__icon {
+  flex: none;
+}
+
+/* Live state is colour only: no loop runs next to the reasoning text. */
+.maya-think__icon--live {
+  color: var(--maya-accent);
+}
+
+.maya-think__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maya-think__body {
+  max-height: 14rem;
+  margin: var(--maya-space-1) 0 var(--maya-space-1) var(--maya-space-2);
+  padding: var(--maya-space-2) var(--maya-space-3);
+  overflow-y: auto;
+  border-left: 2px solid var(--maya-border);
+  color: var(--maya-text-muted);
+}
+
+.maya-think__caption {
+  margin: 0 0 var(--maya-space-1);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  color: var(--maya-text-muted);
+}
+
+.maya-think__text {
+  margin: 0;
+  font-size: var(--maya-text-small);
+  line-height: var(--maya-leading-small);
+  overflow-wrap: anywhere;
+}
+
+/* The summary is Markdown: bold lead-ins read as small headings, paragraphs are spaced. */
+.maya-think__text p {
+  margin: 0 0 var(--maya-space-2);
+}
+
+.maya-think__text p:last-child {
+  margin-bottom: 0;
+}
+
+.maya-think__text strong {
+  color: var(--maya-text-secondary);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-think__toggle {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------- composer voice toggle and modes */
+
+.maya-composer__voice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
+/* Voice on: soft accent fill plus the animated wave; glowing pill active state */
+.maya-composer__voice-toggle {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__voice-toggle[data-active="true"] {
+  background: var(--maya-accent-soft);
+  border-color: var(--maya-accent);
+  color: var(--maya-accent);
+}
+
+.maya-composer__voice-toggle[data-muted="true"] {
+  color: var(--maya-warning);
+}
+
+.maya-composer__mute {
+  border: 0;
+  background: transparent;
+}
+
+/* Deep research: active glowing pill */
+.maya-composer__research {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__research[aria-pressed="true"],
+.maya-composer__research[data-on="true"] {
+  background: var(--maya-accent-soft);
+  border-color: var(--maya-accent);
+  color: var(--maya-accent);
+}
+
+.maya-composer__research:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.maya-composer__mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin-bottom: var(--maya-space-2);
+}
+
+.maya-chip--accent {
+  background: var(--maya-accent-soft);
+  color: var(--maya-text);
+}
+
+.maya-composer__mode .maya-chip--accent {
+  border-radius: var(--maya-radius-full);
+}
+
+.maya-composer__mode-x {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--maya-radius-full);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: transform var(--maya-dur-instant) var(--maya-ease-out);
+}
+
+.maya-composer__mode-x:hover {
+  transform: scale(1.1);
+}
+
+.maya-composer__mode-x:active {
+  transform: scale(0.92);
+}
+
+.maya-composer__mode-hint {
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+.maya-chat__folder-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 var(--maya-space-2);
+  color: var(--maya-text-muted);
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+}
+
+/* Row of per-message tools ("..." button) under a user bubble; appears on hover or focus. */
+.maya-msg__tools {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 0;
+  margin-top: var(--maya-space-1);
+}
+
+/* Your own message is only its bubble: the time and actions sit just below it, out of the flow,
+   so they never make the bubble taller. */
+.maya-msg--user > .maya-msg__tools {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  z-index: 1;
+  align-items: center;
+  gap: var(--maya-space-2);
+  margin-top: 2px;
+}
+
+.maya-msg__footer {
+  display: flex;
+  align-items: center;
+  min-height: var(--maya-control);
+  margin-top: var(--maya-space-1);
+}
+
+.maya-msg__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+}
+
+.maya-msg__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--maya-space-1);
+  min-height: var(--maya-control);
+  padding: 0 var(--maya-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--maya-radius-sm);
+  background: transparent;
+  color: var(--maya-text-muted);
+  font: inherit;
+  font-size: var(--maya-text-caption);
+  line-height: var(--maya-leading-caption);
+  cursor: pointer;
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+.maya-msg__pill:active:not(:disabled) {
+  transform: scale(var(--maya-press-scale-small));
+}
+
+.maya-msg__pill[data-active="true"],
+.maya-msg__pill[aria-pressed="true"] {
+  border-color: var(--maya-border);
+  background: var(--maya-accent-soft);
+  color: var(--maya-accent);
+}
+
+/* A scheduled report fills its box; the reading measure is for the conversation column. */
+.maya-report-preview .maya-md > p,
+.maya-report-preview .maya-md > ul,
+.maya-report-preview .maya-md > ol,
+.maya-report-preview .maya-md > blockquote,
+.maya-report-preview .maya-md > .maya-md__h {
+  max-width: none;
+}

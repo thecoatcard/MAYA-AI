@@ -20,8 +20,8 @@
 ## Diagnosis
 
 | Observation | Likely cause | Next step |
-| :--- | :--- | :--- |
-| <signal> | <cause> | <action> |
+| :---------- | :----------- | :-------- |
+| <signal>    | <cause>      | <action>  |
 
 ## Mitigation
 

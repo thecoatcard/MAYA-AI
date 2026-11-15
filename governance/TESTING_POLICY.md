@@ -15,17 +15,17 @@ A change is **Tested** only when the relevant tests or checks were executed, pas
 
 ## 3. Layers
 
-| Layer | Purpose | Runs in |
-| :--- | :--- | :--- |
-| Unit | Pure logic, parsers, validators, ciphers, verifiers | pre-commit (where fast), pre-push, CI |
-| Integration | Components together with mock MCP servers, queue and database fixtures | pre-push (when present), CI |
-| Gate and safety | The permission gate: no mutating call without a valid, unexpired, unconsumed, hash-matching approval | CI, required |
-| Tenant isolation | Two workspaces; every endpoint and table shows zero cross-reads | CI, required |
-| File verifiers | Generated documents are rejected when corrupt, truncated or out of bounds | CI |
-| End-to-end | Approval flow, task status, voice states | CI, nightly |
-| Evals (LLM-as-judge) | Plan quality, tool selection, parameter fidelity | CI or nightly; deterministic checks come first, because the judge shares a model family with the agents |
-| Voice latency | First-audio latency and interrupt latency benchmarks | nightly |
-| Chaos | Kill a worker, tool server or Redis mid-task and confirm resume without duplicate side effects | pre-release |
+| Layer                | Purpose                                                                                              | Runs in                                                                                                 |
+| :------------------- | :--------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------ |
+| Unit                 | Pure logic, parsers, validators, ciphers, verifiers                                                  | pre-commit (where fast), pre-push, CI                                                                   |
+| Integration          | Components together with mock MCP servers, queue and database fixtures                               | pre-push (when present), CI                                                                             |
+| Gate and safety      | The permission gate: no mutating call without a valid, unexpired, unconsumed, hash-matching approval | CI, required                                                                                            |
+| Tenant isolation     | Two workspaces; every endpoint and table shows zero cross-reads                                      | CI, required                                                                                            |
+| File verifiers       | Generated documents are rejected when corrupt, truncated or out of bounds                            | CI                                                                                                      |
+| End-to-end           | Approval flow, task status, voice states                                                             | CI, nightly                                                                                             |
+| Evals (LLM-as-judge) | Plan quality, tool selection, parameter fidelity                                                     | CI or nightly; deterministic checks come first, because the judge shares a model family with the agents |
+| Voice latency        | First-audio latency and interrupt latency benchmarks                                                 | nightly                                                                                                 |
+| Chaos                | Kill a worker, tool server or Redis mid-task and confirm resume without duplicate side effects       | pre-release                                                                                             |
 
 Layers beyond unit tests are introduced with the code they test.
 

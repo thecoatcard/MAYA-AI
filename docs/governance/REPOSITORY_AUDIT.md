@@ -1,11 +1,11 @@
 # Repository Audit
 
-| | |
-| :--- | :--- |
-| **Date** | 2026-11-05 |
-| **Scope** | Stage A of the AI-agent governance setup: inspect before changing anything |
+|             |                                                                                                                                 |
+| :---------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| **Date**    | 2026-11-05                                                                                                                      |
+| **Scope**   | Stage A of the AI-agent governance setup: inspect before changing anything                                                      |
 | **Project** | MAYA AI (also written "MYAI" in the setup request; this repository uses "MAYA AI" because that is the name in the project plan) |
-| **Auditor** | Claude Code (agent). Findings were produced by reading the working directory and running read-only commands. |
+| **Auditor** | Claude Code (agent). Findings were produced by reading the working directory and running read-only commands.                    |
 
 ## 1. Current repository structure
 
@@ -29,13 +29,13 @@ Key facts:
 
 **Of the developer machine (observed 2026-11-05).**
 
-| Tool | Status |
-| :--- | :--- |
-| Git | 2.56.0 (Windows) |
-| Node.js / npm | 24.21.0 / 11.19.0 |
-| Docker | present |
-| Python | **not usable**: only the Microsoft Store launcher shim resolves; no interpreter |
-| `make`, `gh`, `gitleaks`, `semgrep`, `trivy`, `pre-commit`, PowerShell 7 | **not installed** |
+| Tool                                                                     | Status                                                                          |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| Git                                                                      | 2.56.0 (Windows)                                                                |
+| Node.js / npm                                                            | 24.21.0 / 11.19.0                                                               |
+| Docker                                                                   | present                                                                         |
+| Python                                                                   | **not usable**: only the Microsoft Store launcher shim resolves; no interpreter |
+| `make`, `gh`, `gitleaks`, `semgrep`, `trivy`, `pre-commit`, PowerShell 7 | **not installed**                                                               |
 
 **Consequences for the design.**
 
@@ -46,28 +46,28 @@ Key facts:
 
 ## 3. Existing documentation, CI and conventions
 
-| Area | Finding |
-| :--- | :--- |
-| Documentation | One plan document. No README, no ADRs, no architecture docs. |
-| CI/CD | None (no `.github/`, no other CI configuration). |
-| Git hooks | None. |
-| Linters / formatters / test commands | None. |
-| Coding conventions | Stated only inside the plan (§8, §11, §12, §21). Not enforceable as written. |
+| Area                                            | Finding                                                                                          |
+| :---------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| Documentation                                   | One plan document. No README, no ADRs, no architecture docs.                                     |
+| CI/CD                                           | None (no `.github/`, no other CI configuration).                                                 |
+| Git hooks                                       | None.                                                                                            |
+| Linters / formatters / test commands            | None.                                                                                            |
+| Coding conventions                              | Stated only inside the plan (§8, §11, §12, §21). Not enforceable as written.                     |
 | `.gitignore`, `.gitattributes`, `.editorconfig` | None. Without `.gitattributes`, Windows line-ending conversion would corrupt shell hook scripts. |
-| `.env.example` | None. |
+| `.env.example`                                  | None.                                                                                            |
 
 ## 4. Existing AI-agent instruction files and configuration
 
-| Agent | Repository-level configuration found |
-| :--- | :--- |
-| Claude Code | None (`CLAUDE.md`, `.claude/` absent) |
-| GitHub Copilot | None |
-| Google Antigravity | None |
-| Cursor | None |
-| Gemini CLI | None |
-| OpenAI Codex | None |
-| Windsurf | None |
-| CodeMie | Empty `.codemie/` directory only |
+| Agent              | Repository-level configuration found  |
+| :----------------- | :------------------------------------ |
+| Claude Code        | None (`CLAUDE.md`, `.claude/` absent) |
+| GitHub Copilot     | None                                  |
+| Google Antigravity | None                                  |
+| Cursor             | None                                  |
+| Gemini CLI         | None                                  |
+| OpenAI Codex       | None                                  |
+| Windsurf           | None                                  |
+| CodeMie            | Empty `.codemie/` directory only      |
 
 No duplicated, conflicting or outdated agent rules exist, because none exist. The risk is future divergence: seven tools reading seven different files.
 
@@ -84,22 +84,22 @@ No duplicated, conflicting or outdated agent rules exist, because none exist. Th
 
 ## 6. Security concerns
 
-| # | Concern | Severity | Handling |
-| :-- | :--- | :--- | :--- |
-| S1 | No Git history, `.gitignore` or secret protection: a `.env` or key file could be committed on the first `git add .` | High | `.gitignore`, sensitive-file blocking, secret scan in hook and CI |
-| S2 | `.codemie/` contents are unknown | Low | Ignored until reviewed; confirm manually |
-| S3 | Automated scan of `MAYA_AI_FINAL_PLAN.md` for credential patterns (AWS, GitHub, Google, Slack, OpenAI-style keys, private-key headers, JWTs) | Info | **No matches.** The plan contains no secrets. |
-| S4 | No branch protection or required reviews (no remote exists yet) | High once a remote is added | Documented as a manual step in `docs/operations/BRANCH_PROTECTION.md` |
-| S5 | Local Git hooks can be skipped (`--no-verify`) and agent permission rules are advisory | Medium | CI re-runs every critical check; branch protection is the real gate |
-| S6 | Agent-instruction files are themselves a prompt-injection target | Medium | Policy that repository and external content is untrusted data; sensitive instruction files require human approval |
-| S7 | The project plan describes an agent that can reach the Docker socket in one place of the original specs | Medium (design) | Already resolved in the plan (decision D14); noted so agents do not reintroduce it |
+| #   | Concern                                                                                                                                      | Severity                    | Handling                                                                                                          |
+| :-- | :------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| S1  | No Git history, `.gitignore` or secret protection: a `.env` or key file could be committed on the first `git add .`                          | High                        | `.gitignore`, sensitive-file blocking, secret scan in hook and CI                                                 |
+| S2  | `.codemie/` contents are unknown                                                                                                             | Low                         | Ignored until reviewed; confirm manually                                                                          |
+| S3  | Automated scan of `MAYA_AI_FINAL_PLAN.md` for credential patterns (AWS, GitHub, Google, Slack, OpenAI-style keys, private-key headers, JWTs) | Info                        | **No matches.** The plan contains no secrets.                                                                     |
+| S4  | No branch protection or required reviews (no remote exists yet)                                                                              | High once a remote is added | Documented as a manual step in `docs/operations/BRANCH_PROTECTION.md`                                             |
+| S5  | Local Git hooks can be skipped (`--no-verify`) and agent permission rules are advisory                                                       | Medium                      | CI re-runs every critical check; branch protection is the real gate                                               |
+| S6  | Agent-instruction files are themselves a prompt-injection target                                                                             | Medium                      | Policy that repository and external content is untrusted data; sensitive instruction files require human approval |
+| S7  | The project plan describes an agent that can reach the Docker socket in one place of the original specs                                      | Medium (design)             | Already resolved in the plan (decision D14); noted so agents do not reintroduce it                                |
 
 ## 7. Verification of AI-agent conventions
 
 Each tool's entry points were checked against its official documentation on 2026-11-05 rather than assumed. Results are in `docs/governance/AI_AGENT_COMPATIBILITY.md`. Two findings changed the layout requested in the setup brief:
 
 - **Antigravity** reads `.agents/` (plural). The `.agent/` folder is accepted only as a legacy path for rules, and Antigravity's own migration page says legacy workflows stop working on **2026-10-19**, which has passed. So workflows are delivered as skills in `.agents/skills/`, and no `.agent/workflows/` is created.
-- **Codex** does not read a `.codex/` folder for instructions. `AGENTS.md` is its entry point, so no `.codex/README.md` is created.
+- **Codex** does not read a `.codex/` folder for instructions. `AGENTS.md` is its entry point, so no Codex-specific README is created.
 
 ## 8. Recommended setup (what was built)
 
@@ -114,15 +114,15 @@ Each tool's entry points were checked against its official documentation on 2026
 
 All files are new; nothing pre-existing was modified or deleted (`MAYA_AI_FINAL_PLAN.md` is unchanged).
 
-| Group | Paths |
-| :--- | :--- |
-| Canonical instructions | `AGENTS.md` |
-| Agent entry points | `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/instructions/`, `.cursor/rules/`, `.claude/settings.json` |
-| Generated wrappers | `.claude/skills/`, `.claude/agents/`, `.agents/skills/`, `.github/prompts/`, `.cursor/rules/gov-*.mdc` |
-| Governance | `governance/*.md`, `governance/workflows/`, `governance/roles/`, `governance/governance.config.json` |
-| Automation | `scripts/lib/`, `scripts/validation/`, `scripts/governance/`, `scripts/hooks/`, `package.json`, lockfile |
-| CI | `.github/workflows/`, `.github/dependabot.yml`, `.github/PULL_REQUEST_TEMPLATE.md` |
-| Documentation | `README.md`, `CHANGELOG.md`, `.env.example`, `docs/architecture/`, `docs/adr/`, `docs/guides/`, `docs/operations/`, `docs/governance/`, `templates/` |
-| Repository hygiene | `.gitignore`, `.gitattributes`, `.editorconfig` |
+| Group                  | Paths                                                                                                                                                |
+| :--------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical instructions | `AGENTS.md`                                                                                                                                          |
+| Agent entry points     | `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/instructions/`, `.cursor/rules/`, `.claude/settings.json`                      |
+| Generated wrappers     | `.claude/skills/`, `.claude/agents/`, `.agents/skills/`, `.github/prompts/`, `.cursor/rules/gov-*.mdc`                                               |
+| Governance             | `governance/*.md`, `governance/workflows/`, `governance/roles/`, `governance/governance.config.json`                                                 |
+| Automation             | `scripts/lib/`, `scripts/validation/`, `scripts/governance/`, `scripts/hooks/`, `package.json`, lockfile                                             |
+| CI                     | `.github/workflows/`, `.github/dependabot.yml`, `.github/PULL_REQUEST_TEMPLATE.md`                                                                   |
+| Documentation          | `README.md`, `CHANGELOG.md`, `.env.example`, `docs/architecture/`, `docs/adr/`, `docs/guides/`, `docs/operations/`, `docs/governance/`, `templates/` |
+| Repository hygiene     | `.gitignore`, `.gitattributes`, `.editorconfig`                                                                                                      |
 
 Directories the brief listed for later features (`docs/api/`, `docs/modules/`, `docs/security/`, `docs/testing/`, `.codex/`, `.agent/`) are deliberately not created: they would be empty or unsupported. The change-rule engine tells contributors which of them to create when the first matching code appears.

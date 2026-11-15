@@ -1,0 +1,98 @@
+[project]
+name = "maya-backend"
+version = "0.1.0"
+description = "MAYA AI local API foundation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic==1.20.1",
+    "argon2-cffi==25.1.0",
+    "asyncpg==0.32.0",
+    "cryptography==50.0.2",
+    "ddgs==9.16.1",
+    "fastapi==0.162.0",
+    "google-genai==2.34.0",
+    "langgraph>=1.2.0",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "lxml>=6.1.0",
+    "mcp==2.3.0",
+    "openpyxl>=3.1.5",
+    "playwright==1.64.1",
+    "psycopg[binary]>=3.2.0",
+    "pydantic==2.14.2",
+    "pydantic-settings==2.16.2",
+    "pypdf>=7.0.0",
+    "pyjwt==2.15.1",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
+    "redis==8.1.0",
+    "reportlab>=5.1.0",
+    "sqlalchemy[asyncio]==2.0.57",
+    "uvicorn==0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "asyncpg-stubs==0.32.0",
+    "httpx==0.28.1",
+    "httpx2==2.16.0",
+    "lxml-stubs>=0.5.1",
+    "mypy==2.4.1",
+    "pytest==9.2.0",
+    "pytest-asyncio==1.4.1.post1",
+    "ruff==0.17.3",
+    "types-openpyxl>=3.1.5",
+    "types-reportlab>=5.1.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.exclude-newer-package]
+google-auth = "2026-10-22T00:00:00Z"
+pyasn1 = "2026-10-22T00:00:00Z"
+websockets = "2026-10-22T00:00:00Z"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/auth"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "postgres: needs the local PostgreSQL service (MAYA_TEST_POSTGRES_* variables); skipped otherwise",
+    "redis: needs the local Redis service (MAYA_TEST_REDIS_URL); skipped otherwise",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app", "tests"]
+plugins = ["pydantic.mypy"]
+# Isolated worker/SDK projects have their own locked dependencies and strict checks.
+# Host orchestration, metrics, offline CLIs and deterministic tests remain checked here.
+# arq_worker.py imports ARQ-only SDKs and is checked through the S1 spike environment.
+# storage/ holds generated user documents and artifacts at runtime, not source code.
+exclude = ['^storage/', '^tests/spikes/s1/(driver|runtime|arq_worker)\.py$', '^tests/spikes/gemini/']
+
+[[tool.mypy.overrides]]
+module = [
+    "app.automation.pptx_engine",
+    "app.automation.deck_pptx_scene",
+    "docx",
+    "docx.*",
+    "pptx",
+    "pptx.*",
+    "reportlab",
+    "reportlab.*",
+    "openpyxl",
+    "openpyxl.*",
+]
+ignore_missing_imports = true
+disallow_untyped_calls = false
+disallow_subclassing_any = false

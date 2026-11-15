@@ -1,0 +1,1007 @@
+@import "tailwindcss";
+
+/*
+ * MAYA design tokens, Direction C "Console" (owner decision 2026-11-09).
+ *
+ * Single source of truth for the whole app: docs/architecture/UI_DESIGN_SYSTEM.md
+ * (tokens, themes, primitives) and docs/architecture/UI_UX_STANDARDS.md (rules).
+ *
+ * Theme contract
+ *  - Exactly two themes: dark (default) and light. There is no "system" mode.
+ *  - The theme is the data-theme attribute on <html>: "dark" or "light". No attribute means dark.
+ *  - src/lib/theme.ts owns the choice (per-device localStorage, default dark); an inline script in
+ *    app/layout.tsx sets the attribute before first paint so there is no flash.
+ *  - Components never read a theme. They use token classes (bg-maya-pane, text-maya-text, ...)
+ *    and the correct values follow the attribute.
+ *
+ * Legacy aliases
+ *  - The old copy of the tokens in components/chat/chat.css is gone (WP2); these are the only
+ *    token rules. The rules below are written on :root.
+ *  - Legacy token names (--maya-surface, --maya-control-border, --maya-glass-*, ...) stay defined
+ *    here as aliases so components that are not migrated yet keep compiling and rendering.
+ *
+ * Banned here: gradient buttons, glow shadows, raw hex colours outside this file. The one
+ * allowed blur is the "vibrancy" of bars, popovers and sheets (owner decision 2026-11-12): its
+ * rules live in ui-surfaces.css (never in this file), behind @supports, with an opaque fallback.
+ * No external fonts or requests: IBM Plex is self-hosted from /fonts/ibm-plex/ (SIL OFL 1.1).
+ */
+
+/* ------------------------------------------------------------------- fonts */
+
+/* Latin subset (also covers the Latin glyphs used in Hindi UI text). */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-latin-400-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-latin-500-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-latin-600-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-mono-latin-400-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-mono-latin-500-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+/* Devanagari subset: only downloaded when a page actually shows Hindi text. */
+@font-face {
+  font-family: "IBM Plex Sans Devanagari";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-devanagari-devanagari-400-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC,
+    U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Devanagari";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-devanagari-devanagari-500-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC,
+    U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Devanagari";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex/ibm-plex-sans-devanagari-devanagari-600-normal.woff2")
+    format("woff2");
+  unicode-range:
+    U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC,
+    U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
+}
+
+/* ------------------------------------------------- tokens: shared + dark */
+
+:root {
+  color-scheme: dark;
+
+  /*
+   * Fonts. A missing file falls through to the system faces, so the UI never breaks.
+   * Plex Sans Devanagari sits second so Hindi text gets a matched face.
+   */
+  --maya-font-sans:
+    "IBM Plex Sans", "IBM Plex Sans Devanagari", system-ui,
+    "Segoe UI Variable Text", "Segoe UI", Roboto, "Nirmala UI",
+    "Noto Sans Devanagari", sans-serif;
+  --maya-font-mono:
+    "IBM Plex Mono", ui-monospace, "Cascadia Mono", "SF Mono", Consolas,
+    "Liberation Mono", monospace;
+
+  /*
+   * Type scale (rem, so browser zoom and OS text scaling apply).
+   * Prose and form text: 1rem. Chrome text (labels, nav, meta, timestamps): never below
+   * 0.8125rem (13 px). Mono labels: never below 0.75rem (12 px), uppercase only with tracking.
+   */
+  --maya-text-label: 0.75rem;
+  --maya-leading-label: 1rem;
+  --maya-text-caption: 0.8125rem;
+  --maya-leading-caption: 1.125rem;
+  --maya-text-small: 0.875rem;
+  --maya-leading-small: 1.25rem;
+  --maya-text-body: 1rem;
+  --maya-leading-body: 1.5rem;
+  --maya-text-heading: 1.0625rem;
+  --maya-leading-heading: 1.5rem;
+  --maya-text-title: 1.5rem;
+  --maya-leading-title: 2rem;
+  --maya-text-display: 2.125rem;
+  --maya-leading-display: 2.5rem;
+  --maya-text-mono: 0.8125rem;
+  --maya-leading-mono: 1.25rem;
+  --maya-tracking-label: 0.08em;
+  --maya-tracking-display: -0.015em;
+  --maya-weight-regular: 400;
+  --maya-weight-medium: 500;
+  --maya-weight-strong: 600;
+
+  /* Spacing, 4 px base */
+  --maya-space-0: 0;
+  --maya-space-1: 0.25rem;
+  --maya-space-2: 0.5rem;
+  --maya-space-3: 0.75rem;
+  --maya-space-4: 1rem;
+  --maya-space-5: 1.25rem;
+  --maya-space-6: 1.5rem;
+  --maya-space-8: 2rem;
+  --maya-space-10: 2.5rem;
+  --maya-space-12: 3rem;
+  --maya-space-14: 3.5rem;
+  --maya-space-16: 4rem;
+
+  /*
+   * Radius, soft "continuous corner" scale (ui-surfaces.css upgrades to squircle corners where
+   * the browser supports corner-shape). sm: chips, keys, small marks. md: controls (buttons,
+   * inputs, rows). lg: cards and panes. xl: sheets and dialogs. full: pills and switches.
+   */
+  --maya-radius-xs: 6px;
+  --maya-radius-sm: 8px;
+  --maya-radius-md: 12px;
+  --maya-radius-lg: 18px;
+  --maya-radius-xl: 24px;
+  --maya-radius-full: 9999px;
+
+  /* Layout, shared by the shell packages */
+  --maya-nav-width: 3.5rem;
+  --maya-sidebar-width: 18.75rem;
+  --maya-header-height: 3rem;
+  --maya-titlebar-height: 2.25rem;
+  --maya-statusbar-height: 1.75rem;
+  --maya-column: 44rem;
+  --maya-column-wide: 64rem;
+  --maya-measure: 70ch;
+  --maya-control: 2rem;
+  --maya-touch: 2.75rem;
+  --maya-safe-top: env(safe-area-inset-top, 0px);
+  --maya-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --maya-safe-left: env(safe-area-inset-left, 0px);
+  --maya-safe-right: env(safe-area-inset-right, 0px);
+
+  /* Z-index: named layers, no magic numbers */
+  --maya-z-base: 0;
+  --maya-z-sticky: 10;
+  --maya-z-float: 10;
+  --maya-z-nav: 20;
+  --maya-z-dropdown: 40;
+  --maya-z-modal: 50;
+  --maya-z-overlay: 50;
+  --maya-z-toast: 60;
+  --maya-z-tooltip: 70;
+
+  /*
+   * Motion. Durations are scaled by --maya-motion-scale, which becomes 0 under reduced motion.
+   * Character: "settle", soft springs that arrive fast and land gently. instant is press and
+   * hover feedback, fast is small state changes, base is panels and popovers, slow is sheets,
+   * drawers and the sidebar fold.
+   */
+  --maya-motion-scale: 1;
+  --maya-dur-instant: calc(90ms * var(--maya-motion-scale));
+  --maya-dur-fast: calc(160ms * var(--maya-motion-scale));
+  --maya-dur-base: calc(240ms * var(--maya-motion-scale));
+  --maya-dur-slow: calc(360ms * var(--maya-motion-scale));
+  --maya-stagger: calc(32ms * var(--maya-motion-scale));
+  --maya-ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --maya-ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --maya-ease-press: cubic-bezier(0.3, 0, 0.2, 1);
+  --maya-ease-overshoot: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --maya-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --maya-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --maya-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --maya-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --maya-enter-from: translateX(-6px);
+  --maya-rise: 4px;
+
+  /*
+   * Interaction recipe (hover, pressed, selected). Hover tints with --maya-hover and lifts 1 px,
+   * pressed tints with --maya-pressed and scales down a little, selected uses --maya-accent-soft.
+   * The icon inside a control nudges --maya-nudge on hover. Movement is dropped under reduced
+   * motion (ui-surfaces.css); the colour change stays.
+   */
+  --maya-lift: -1px;
+  --maya-press-scale: 0.98;
+  --maya-press-scale-small: 0.94;
+  --maya-nudge: 2px;
+  --maya-modal-from: 0.97;
+  --maya-icon-stroke: 1.75;
+
+  /* The glass blur of the previous direction is retired; legacy rules that read it get 0. */
+  --maya-glass-blur: 0px;
+
+  /* Surface layers (dark) */
+  --maya-bg: #0b0d11;
+  --maya-pane: #12151b;
+  --maya-raised: #1b1f27;
+  --maya-overlay: #232833;
+  --maya-hover: #262b36;
+  --maya-pressed: #303644;
+  --maya-code-bg: #0e1015;
+  --maya-disabled-bg: #1b1f27;
+  --maya-scrim: rgb(0 0 0 / 0.6);
+
+  /*
+   * Vibrancy: translucent surfaces for the sidebar, title bar, status bar, popovers and sheets.
+   * ui-surfaces.css paints them with a blur behind @supports; the opaque surface tokens are the
+   * fallback (no blur support, forced colours, reduced transparency). Contrast is checked on
+   * the translucent colour blended over the surfaces behind it (scripts/design-tokens.mjs).
+   */
+  --maya-vib-bar: rgb(18 21 27 / 0.78);
+  --maya-vib-side: rgb(18 21 27 / 0.74);
+  --maya-vib-pop: rgb(27 31 39 / 0.8);
+  --maya-vib-sheet: rgb(27 31 39 / 0.86);
+  --maya-vib-scrim: rgb(0 0 0 / 0.5);
+  --maya-vib-blur: 24px;
+  --maya-vib-blur-scrim: 8px;
+  --maya-vib-saturate: 1.6;
+  --maya-hairline: rgb(255 255 255 / 0.09);
+  --maya-highlight: rgb(255 255 255 / 0.05);
+
+  /* Text roles (dark) */
+  --maya-text: #e8eaee;
+  --maya-text-secondary: #c2c7d1;
+  --maya-text-muted: #98a0ae;
+  --maya-disabled-text: #8a93a3;
+
+  /* Seams and borders (dark): hairline is decorative, strong is the 3:1 control boundary */
+  --maya-border: #272c36;
+  --maya-border-strong: #6a7384;
+  --maya-control-border: #6a7384;
+
+  /* Accent: ultramarine (dark) */
+  --maya-accent: #8da0ff;
+  --maya-accent-hover: #9dafff;
+  --maya-accent-active: #b1beff;
+  --maya-accent-soft: #1b2250;
+  --maya-accent-text: #0a1030;
+  --maya-link: #9dafff;
+  --maya-focus: #9dafff;
+
+  /* Semantic colours with tints (dark) */
+  --maya-success: #6fd29a;
+  --maya-success-soft: #13301f;
+  --maya-warning: #e6b450;
+  --maya-warning-soft: #35290e;
+  --maya-danger: #ff8a80;
+  --maya-danger-soft: #3d1c19;
+  --maya-info: #86b6f2;
+  --maya-info-soft: #16294a;
+
+  /* Selection and scrollbars (dark) */
+  --maya-selection: #2b3680;
+  --maya-selection-text: #ffffff;
+  --maya-scroll-thumb: #6a7384;
+  --maya-scroll-thumb-hover: #8a93a3;
+  --maya-scroll-track: transparent;
+
+  /* Syntax colours on --maya-code-bg (dark) */
+  --maya-tok-keyword: #9dafff;
+  --maya-tok-string: #f0c27a;
+  --maya-tok-number: #86b6f2;
+  --maya-tok-comment: #98a0ae;
+  --maya-tok-name: #d3b4ff;
+  --maya-tok-type: #6fd29a;
+
+  /* Legacy aliases (chat.css and unmigrated components): flat, never translucent or glowing */
+  --maya-surface: var(--maya-pane);
+  --maya-glass-surface: var(--maya-pane);
+  --maya-glass-raised: var(--maya-raised);
+  --maya-glass-border: var(--maya-border);
+  --maya-state-layer: var(--maya-text);
+  --maya-ambient: transparent;
+
+  /*
+   * Elevation, layered and soft: a hairline ring, a tight ambient shadow and a wider key-light
+   * shadow. Dark mode keeps the shadows lighter and leans on the ring and a top highlight.
+   * 1: resting card. 2: popover, toast, hovered card. 3: sheet and dialog. No glow.
+   */
+  --maya-shadow-1:
+    0 0 0 1px var(--maya-border), 0 1px 2px rgb(0 0 0 / 0.22),
+    inset 0 1px 0 var(--maya-highlight);
+  --maya-shadow-2:
+    0 0 0 1px var(--maya-hairline), 0 2px 6px rgb(0 0 0 / 0.18),
+    0 10px 24px rgb(0 0 0 / 0.26), inset 0 1px 0 var(--maya-highlight);
+  --maya-shadow-3:
+    0 0 0 1px var(--maya-hairline), 0 4px 12px rgb(0 0 0 / 0.22),
+    0 24px 56px rgb(0 0 0 / 0.42), inset 0 1px 0 var(--maya-highlight);
+  --maya-shadow-lift:
+    0 0 0 1px var(--maya-border), 0 3px 8px rgb(0 0 0 / 0.22),
+    inset 0 1px 0 var(--maya-highlight);
+}
+
+/* ------------------------------------------------------------ tokens: light */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --maya-bg: #f1f2f5;
+  --maya-pane: #ffffff;
+  --maya-raised: #e6e8ed;
+  --maya-overlay: #ffffff;
+  --maya-hover: #dcdfe6;
+  --maya-pressed: #cfd3dc;
+  --maya-code-bg: #eceef3;
+  --maya-disabled-bg: #e6e8ed;
+  --maya-scrim: rgb(16 18 22 / 0.45);
+
+  --maya-vib-bar: rgb(255 255 255 / 0.8);
+  --maya-vib-side: rgb(246 247 250 / 0.76);
+  --maya-vib-pop: rgb(255 255 255 / 0.82);
+  --maya-vib-sheet: rgb(255 255 255 / 0.88);
+  --maya-vib-scrim: rgb(16 18 22 / 0.32);
+  --maya-hairline: rgb(16 18 22 / 0.1);
+  --maya-highlight: rgb(255 255 255 / 0.7);
+
+  --maya-text: #101216;
+  --maya-text-secondary: #343944;
+  --maya-text-muted: #525967;
+  --maya-disabled-text: #626977;
+
+  --maya-border: #d3d6dd;
+  --maya-border-strong: #7c8392;
+  --maya-control-border: #7c8392;
+
+  --maya-accent: #3046d4;
+  --maya-accent-hover: #2a3fc4;
+  --maya-accent-active: #2335b0;
+  --maya-accent-soft: #e2e6fb;
+  --maya-accent-text: #ffffff;
+  --maya-link: #2a3fc4;
+  --maya-focus: #3046d4;
+
+  --maya-success: #17683a;
+  --maya-success-soft: #d8ede0;
+  --maya-warning: #7c4f00;
+  --maya-warning-soft: #f4e5c4;
+  --maya-danger: #b0241c;
+  --maya-danger-soft: #f8dad7;
+  --maya-info: #1d5aa6;
+  --maya-info-soft: #d9e6f6;
+
+  --maya-selection: #c9d1fa;
+  --maya-selection-text: #101216;
+  --maya-scroll-thumb: #7c8392;
+  --maya-scroll-thumb-hover: #5d6575;
+
+  --maya-tok-keyword: #2a3fc4;
+  --maya-tok-string: #8a4b00;
+  --maya-tok-number: #1d5aa6;
+  --maya-tok-comment: #525967;
+  --maya-tok-name: #7a3fa8;
+  --maya-tok-type: #17683a;
+
+  --maya-shadow-1:
+    0 0 0 1px var(--maya-border), 0 1px 2px rgb(16 18 22 / 0.06),
+    0 1px 1px rgb(16 18 22 / 0.04);
+  --maya-shadow-2:
+    0 0 0 1px var(--maya-hairline), 0 2px 6px rgb(16 18 22 / 0.08),
+    0 10px 28px rgb(16 18 22 / 0.14);
+  --maya-shadow-3:
+    0 0 0 1px var(--maya-hairline), 0 4px 14px rgb(16 18 22 / 0.1),
+    0 28px 64px rgb(16 18 22 / 0.22);
+  --maya-shadow-lift:
+    0 0 0 1px var(--maya-border), 0 4px 12px rgb(16 18 22 / 0.1),
+    0 1px 2px rgb(16 18 22 / 0.06);
+}
+
+/* Reduced motion: every duration token collapses to 0, so transitions become instant. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --maya-motion-scale: 0;
+  }
+}
+
+/* ------------------------------------------------ Tailwind utilities (tokens) */
+
+@theme inline {
+  --font-sans: var(--maya-font-sans);
+  --font-mono: var(--maya-font-mono);
+
+  --color-maya-bg: var(--maya-bg);
+  --color-maya-pane: var(--maya-pane);
+  --color-maya-surface: var(--maya-pane);
+  --color-maya-raised: var(--maya-raised);
+  --color-maya-overlay: var(--maya-overlay);
+  --color-maya-hover: var(--maya-hover);
+  --color-maya-pressed: var(--maya-pressed);
+  --color-maya-code: var(--maya-code-bg);
+  --color-maya-border: var(--maya-border);
+  --color-maya-border-strong: var(--maya-border-strong);
+  --color-maya-control-border: var(--maya-control-border);
+  --color-maya-text: var(--maya-text);
+  --color-maya-secondary: var(--maya-text-secondary);
+  --color-maya-muted: var(--maya-text-muted);
+  --color-maya-accent: var(--maya-accent);
+  --color-maya-accent-hover: var(--maya-accent-hover);
+  --color-maya-accent-active: var(--maya-accent-active);
+  --color-maya-accent-soft: var(--maya-accent-soft);
+  --color-maya-accent-text: var(--maya-accent-text);
+  --color-maya-link: var(--maya-link);
+  --color-maya-focus: var(--maya-focus);
+  --color-maya-danger: var(--maya-danger);
+  --color-maya-danger-soft: var(--maya-danger-soft);
+  --color-maya-warning: var(--maya-warning);
+  --color-maya-warning-soft: var(--maya-warning-soft);
+  --color-maya-success: var(--maya-success);
+  --color-maya-success-soft: var(--maya-success-soft);
+  --color-maya-info: var(--maya-info);
+  --color-maya-info-soft: var(--maya-info-soft);
+  --color-maya-disabled-bg: var(--maya-disabled-bg);
+  --color-maya-disabled-text: var(--maya-disabled-text);
+  --color-maya-scrim: var(--maya-scrim);
+  --color-maya-selection: var(--maya-selection);
+
+  --radius-maya-sm: var(--maya-radius-sm);
+  --radius-maya-md: var(--maya-radius-md);
+  --radius-maya-lg: var(--maya-radius-lg);
+  --radius-maya-xs: var(--maya-radius-xs);
+  --radius-maya-xl: var(--maya-radius-xl);
+
+  --shadow-maya-1: var(--maya-shadow-1);
+  --shadow-maya-2: var(--maya-shadow-2);
+  --shadow-maya-3: var(--maya-shadow-3);
+  --shadow-maya-lift: var(--maya-shadow-lift);
+
+  --text-maya-label: var(--maya-text-label);
+  --text-maya-label--line-height: var(--maya-leading-label);
+  --text-maya-caption: var(--maya-text-caption);
+  --text-maya-caption--line-height: var(--maya-leading-caption);
+  --text-maya-small: var(--maya-text-small);
+  --text-maya-small--line-height: var(--maya-leading-small);
+  --text-maya-body: var(--maya-text-body);
+  --text-maya-body--line-height: var(--maya-leading-body);
+  --text-maya-heading: var(--maya-text-heading);
+  --text-maya-heading--line-height: var(--maya-leading-heading);
+  --text-maya-title: var(--maya-text-title);
+  --text-maya-title--line-height: var(--maya-leading-title);
+  --text-maya-display: var(--maya-text-display);
+  --text-maya-display--line-height: var(--maya-leading-display);
+  --text-maya-mono: var(--maya-text-mono);
+  --text-maya-mono--line-height: var(--maya-leading-mono);
+}
+
+/* Named z-index layers as utilities: z-maya-modal, z-maya-toast, ... */
+@utility z-maya-base {
+  z-index: var(--maya-z-base);
+}
+@utility z-maya-sticky {
+  z-index: var(--maya-z-sticky);
+}
+@utility z-maya-nav {
+  z-index: var(--maya-z-nav);
+}
+@utility z-maya-dropdown {
+  z-index: var(--maya-z-dropdown);
+}
+@utility z-maya-modal {
+  z-index: var(--maya-z-modal);
+}
+@utility z-maya-toast {
+  z-index: var(--maya-z-toast);
+}
+@utility z-maya-tooltip {
+  z-index: var(--maya-z-tooltip);
+}
+
+/* --------------------------------------------------------------- base styles */
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+html {
+  /* 100% keeps the user's browser and OS text size; sizes are rem tokens. */
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--maya-bg);
+  color: var(--maya-text);
+  font-family: var(--maya-font-sans);
+  font-size: var(--maya-text-body);
+  line-height: var(--maya-leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--maya-selection);
+  color: var(--maya-selection-text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--maya-scroll-thumb) var(--maya-scroll-track);
+}
+
+::-webkit-scrollbar {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--maya-scroll-track);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background: var(--maya-scroll-thumb);
+  background-clip: content-box;
+  border-radius: var(--maya-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--maya-scroll-thumb-hover);
+  background-clip: content-box;
+}
+
+/* Visible focus everywhere: 2 px ring, 2 px offset. Components may refine, never remove it. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: 2px;
+}
+
+/* Chrome label: mono, uppercase, tracked. 12 px minimum. */
+.maya-label {
+  font-family: var(--maya-font-mono);
+  font-size: var(--maya-text-label);
+  line-height: var(--maya-leading-label);
+  letter-spacing: var(--maya-tracking-label);
+  text-transform: uppercase;
+  color: var(--maya-text-muted);
+}
+
+/* Tabular figures for tables, costs, timings. */
+.maya-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visually hidden, still read by assistive technology. */
+.maya-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Desktop shell: draggable title bar (Electron later; inert in a browser). */
+.maya-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.maya-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/*
+ * Title bar. The window-controls overlay (Windows and Linux: right; macOS: left) sits on top of
+ * the page, so the bar pads itself clear of it. env(titlebar-area-*) is the real overlay when the
+ * browser or Electron reports it; data-desktop-controls (set from window.maya.platform) is the
+ * floor for when it does not, so no control is ever under the window buttons (owner defect 9).
+ */
+.maya-titlebar {
+  padding-inline-start: max(var(--maya-space-3), env(titlebar-area-x, 0px));
+  padding-inline-end: max(
+    var(--maya-space-3),
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+  );
+}
+
+.maya-titlebar[data-desktop-controls="right"] {
+  padding-inline-end: max(
+    9rem,
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+  );
+}
+
+.maya-titlebar[data-desktop-controls="left"] {
+  padding-inline-start: max(5rem, env(titlebar-area-x, 0px));
+}
+
+.maya-skip-link {
+  position: absolute;
+  left: var(--maya-space-2);
+  top: var(--maya-space-2);
+  z-index: var(--maya-z-overlay);
+  padding: var(--maya-space-2) var(--maya-space-3);
+  border-radius: var(--maya-radius-sm);
+  background: var(--maya-accent);
+  color: var(--maya-accent-text);
+  font-size: var(--maya-text-small);
+  transform: translateY(-200%);
+}
+
+.maya-skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .maya-skip-link {
+    transition: transform var(--maya-dur-fast) var(--maya-ease-out);
+  }
+}
+
+/* ------------------------------------------------------------- motion kit */
+
+/*
+ * CSS only, transform and opacity only, never layout properties.
+ * Each class has a job (comment) and a reduced-motion equivalent (the block at the end).
+ * Nothing inside or near approval controls animates: wrap them in .motion-none.
+ */
+
+@keyframes maya-enter {
+  from {
+    opacity: 0;
+    transform: var(--maya-enter-from);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes maya-message {
+  from {
+    opacity: 0;
+    transform: translateY(var(--maya-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes maya-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--maya-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes maya-toast-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--maya-rise));
+  }
+}
+
+@keyframes maya-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes maya-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* Orb level meter: --h is the bar's resting height (0 to 1). */
+@keyframes maya-orb-level {
+  from {
+    transform: scaleY(var(--h, 1));
+  }
+  to {
+    transform: scaleY(calc(var(--h, 1) * 0.35));
+  }
+}
+
+@keyframes maya-orb-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes maya-orb-scan {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+/* Job: explain where a panel or page came from (it slides in from the nav side). */
+.motion-enter {
+  animation: maya-enter var(--maya-dur-slow) var(--maya-ease-out) both;
+}
+
+/* Job: show that a new message arrived, without moving the ones already read. */
+.motion-message {
+  animation: maya-message var(--maya-dur-base) var(--maya-ease-out) both;
+}
+
+/* Job: toast arrives and leaves from the edge it is anchored to. */
+.motion-toast-in {
+  animation: maya-toast-in var(--maya-dur-base) var(--maya-ease-out) both;
+}
+
+.motion-toast-out {
+  animation: maya-toast-out var(--maya-dur-fast) var(--maya-ease-in) both;
+}
+
+/*
+ * Job: progress that really advances. The fill is full width and scaled with transform, so the
+ * bar never changes layout. Set --maya-progress (0 to 1) on the fill.
+ */
+.motion-progress {
+  transform: scaleX(var(--maya-progress, 0));
+  transform-origin: left center;
+  transition: transform var(--maya-dur-base) var(--maya-ease-out);
+}
+
+/* Job: "working, amount unknown". Only used together with a text label. */
+.motion-progress-indeterminate {
+  width: 40%;
+  animation: maya-sweep 1100ms var(--maya-ease-in-out) infinite;
+}
+
+/* Job: a loading placeholder that tells the user content is on its way. */
+.motion-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.motion-shimmer::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--maya-hover),
+    transparent
+  );
+  content: "";
+  transform: translateX(-100%);
+  animation: maya-shimmer 1200ms var(--maya-ease-in-out) infinite;
+}
+
+/*
+ * Job: the voice orb as a nine-bar level meter. data-state picks the behaviour:
+ * idle breathes, listening follows the mic, thinking scans, speaking follows output.
+ * The state is also always written as text next to the orb.
+ */
+.motion-orb[data-state="idle"] > * {
+  animation: maya-orb-breathe 5s var(--maya-ease-in-out) infinite;
+  animation-delay: calc(var(--n, 0) * -120ms);
+}
+
+.motion-orb[data-state="listening"] > * {
+  animation: maya-orb-level 500ms var(--maya-ease-in-out) infinite alternate;
+  animation-delay: calc(var(--n, 0) * -70ms);
+}
+
+.motion-orb[data-state="thinking"] > * {
+  animation: maya-orb-scan 1100ms var(--maya-ease-in-out) infinite;
+  animation-delay: calc(var(--n, 0) * -110ms);
+}
+
+.motion-orb[data-state="speaking"] > * {
+  animation: maya-orb-level 320ms var(--maya-ease-in-out) infinite alternate;
+  animation-delay: calc(var(--n, 0) * -45ms);
+}
+
+/* Orb loops pause while the tab is hidden (layout sets data-paused on <html>). */
+:root[data-paused] .motion-orb > *,
+:root[data-paused] .motion-shimmer::after,
+:root[data-paused] .motion-progress-indeterminate {
+  animation-play-state: paused;
+}
+
+/*
+ * Job: hover, press and focus feedback on controls. Colour and shadow ease in over the fast
+ * duration; the lift and the press scale are transform only and use the spring and press eases.
+ */
+.motion-interactive {
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    border-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out),
+    opacity var(--maya-dur-fast) var(--maya-ease-out),
+    box-shadow var(--maya-dur-base) var(--maya-ease-out),
+    transform var(--maya-dur-instant) var(--maya-ease-press);
+}
+
+/* Pressed: the control gives a little under the finger or pointer. Disabled controls stay put. */
+.motion-press:active:not(:disabled, [aria-disabled="true"]) {
+  transform: scale(var(--maya-press-scale));
+}
+
+/* Lift: a hovering pointer raises a card or button by 1 px (pointer devices only). */
+@media (hover: hover) {
+  .motion-lift:hover:not(:disabled, [aria-disabled="true"]) {
+    transform: translateY(var(--maya-lift));
+  }
+}
+
+/* Job: theme icon cross-fade and quarter turn, under 200 ms. */
+.motion-swap {
+  transition:
+    opacity var(--maya-dur-fast) var(--maya-ease-out),
+    rotate var(--maya-dur-fast) var(--maya-ease-out),
+    transform var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+/* Guard: approval controls and anything that must stay still. */
+.motion-none,
+.motion-none *,
+.motion-none *::before,
+.motion-none *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/*
+ * Reduced motion equivalents:
+ *  - enter, message, toast: the element simply appears (an instant state change);
+ *  - progress: the fill jumps to its value (the percentage text carries the information);
+ *  - indeterminate progress: a static half-width bar plus its text label;
+ *  - shimmer: a flat placeholder block;
+ *  - orb: bars hold their resting heights; the state label carries the information;
+ *  - hover, press, theme swap: instant colour or opacity change, no movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .motion-shimmer::after {
+    display: none;
+  }
+
+  .motion-progress-indeterminate {
+    animation: none;
+    transform: none;
+    opacity: 0.6;
+  }
+
+  .motion-orb[data-state] > * {
+    animation: none;
+  }
+
+  .motion-orb[data-state="idle"] > * {
+    opacity: 0.5;
+  }
+
+  .motion-press:active,
+  .motion-lift:hover {
+    transform: none !important;
+  }
+}
+
+/* ------------------------------------------- forced colours (high contrast) */
+
+@media (forced-colors: active) {
+  :where(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* Seams and control edges must survive the colour override. */
+  .maya-pane,
+  .maya-pane-header,
+  .maya-pane-footer,
+  .maya-button,
+  .maya-badge,
+  .maya-skeleton,
+  .maya-popover,
+  .maya-notice,
+  .maya-code,
+  .maya-table-scroll,
+  .maya-kbd {
+    border-color: CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .maya-button[disabled] {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .motion-progress {
+    background: Highlight;
+  }
+
+  .motion-orb > * {
+    background: Highlight;
+  }
+}

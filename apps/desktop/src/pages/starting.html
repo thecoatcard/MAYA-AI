@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAYA</title>
+<style>
+:root {
+  --bg:#0b0d11; --surface:rgba(18,21,27,.82); --border:rgba(255,255,255,.09); --text:#e8eaee; --muted:#98a0ae;
+  --accent:#8da0ff; --accent-2:#6d8cff; --accent-text:#0a1030; --glow-a:rgba(141,160,255,.32); --glow-b:rgba(109,140,255,.26); --glow-c:rgba(75,95,210,.20);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:#f1f2f5; --surface:rgba(255,255,255,.86); --border:rgba(16,18,22,.10); --text:#101216; --muted:#525967;
+    --accent:#3046d4; --accent-2:#4f65f1; --accent-text:#ffffff; --glow-a:rgba(48,70,212,.22); --glow-b:rgba(79,101,241,.18); --glow-c:rgba(120,140,255,.12);
+  }
+}
+* { box-sizing:border-box; }
+html, body { height:100%; margin:0; }
+body { background:var(--bg); color:var(--text); font:15px/1.55 "IBM Plex Sans", system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif; display:flex; flex-direction:column; position:relative; overflow:hidden; }
+.drag { height:36px; flex:none; -webkit-app-region:drag; position:relative; z-index:2; }
+
+/* Slow drifting colour fields behind the card. Transform and opacity only; static under reduced motion. */
+.bg { position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; }
+.orb { position:absolute; width:56vmax; height:56vmax; border-radius:50%; filter:blur(70px); opacity:.9; will-change:transform; }
+.orb.a { background:radial-gradient(circle at 30% 30%, var(--glow-a), transparent 62%); left:-14vmax; top:-18vmax; animation:drift-a 22s ease-in-out infinite alternate; }
+.orb.b { background:radial-gradient(circle at 60% 40%, var(--glow-b), transparent 62%); right:-18vmax; top:8vmax; animation:drift-b 27s ease-in-out infinite alternate; }
+.orb.c { background:radial-gradient(circle at 50% 50%, var(--glow-c), transparent 64%); left:18vmax; bottom:-30vmax; animation:drift-c 31s ease-in-out infinite alternate; }
+@keyframes drift-a { to { transform:translate3d(16vmax, 10vmax, 0) scale(1.12); } }
+@keyframes drift-b { to { transform:translate3d(-14vmax, 12vmax, 0) scale(.94); } }
+@keyframes drift-c { to { transform:translate3d(10vmax, -14vmax, 0) scale(1.1); } }
+
+main { flex:1; display:grid; place-items:center; padding:24px; position:relative; z-index:1; }
+.card { width:min(500px,100%); background:var(--surface); border:1px solid var(--border); border-radius:24px; padding:32px 32px 26px;
+  -webkit-backdrop-filter:blur(22px) saturate(1.4); backdrop-filter:blur(22px) saturate(1.4);
+  box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 24px 60px -24px rgba(0,0,0,.55);
+  animation:rise .6s cubic-bezier(.2,.9,.25,1) both; }
+@keyframes rise { from { opacity:0; transform:translate3d(0,14px,0) scale(.985); } }
+
+.brand { display:flex; align-items:center; gap:14px; margin-bottom:6px; }
+.mark { position:relative; width:44px; height:44px; flex:none; }
+.mark i { position:absolute; inset:0; border-radius:50%; background:conic-gradient(from 210deg, var(--accent), var(--accent-2), var(--accent)); }
+.mark i:nth-child(1) { animation:breathe 3.2s ease-in-out infinite; opacity:.9; }
+.mark i:nth-child(2) { inset:5px; background:var(--bg); }
+.mark i:nth-child(3) { inset:13px; background:linear-gradient(135deg, var(--accent), var(--accent-2)); animation:breathe 3.2s ease-in-out infinite reverse; }
+@keyframes breathe { 50% { transform:scale(.9); } }
+h1 { font-size:22px; font-weight:650; margin:0; letter-spacing:-.02em; }
+p { margin:0 0 14px; color:var(--muted); }
+.sub { margin:2px 0 0 58px; }
+
+.btn { display:inline-block; padding:9px 18px; border-radius:12px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-text); text-decoration:none; font-weight:500; margin-right:8px; transition:transform .16s ease, filter .16s ease; }
+.btn:hover { transform:translateY(-1px); filter:brightness(1.06); }
+.btn:active { transform:scale(.98); }
+.btn.quiet { background:transparent; color:var(--text); border-color:var(--border); }
+code { font:13px ui-monospace, Consolas, monospace; color:var(--muted); word-break:break-all; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+ol { list-style:none; margin:22px 0 0; padding:0; }
+li { padding:8px 0 8px 32px; position:relative; color:var(--muted); font-size:14px; transition:color .3s ease; }
+li::before { content:""; position:absolute; left:3px; top:14px; width:10px; height:10px; border-radius:50%; border:1.5px solid var(--border); transition:background .3s ease, border-color .3s ease, transform .3s ease; }
+/* Active step */
+li[aria-current="step"],
+body[data-step="docker"] li.docker, body[data-step="data"] li.data, body[data-step="schema"] li.schema,
+body[data-step="api"] li.api, body[data-step="ready"] li.ready { color:var(--text); font-weight:550; }
+li[aria-current="step"]::before,
+body[data-step="docker"] li.docker::before, body[data-step="data"] li.data::before, body[data-step="schema"] li.schema::before,
+body[data-step="api"] li.api::before, body[data-step="ready"] li.ready::before { background:var(--accent); border-color:var(--accent); box-shadow:0 0 0 5px var(--glow-a); animation:pulse 1.6s ease-in-out infinite; }
+/* Finished steps (everything before the active one) */
+body[data-step="data"] li:nth-child(-n+1), body[data-step="schema"] li:nth-child(-n+2),
+body[data-step="api"] li:nth-child(-n+3), body[data-step="ready"] li:nth-child(-n+4) { color:var(--text); opacity:.78; }
+body[data-step="data"] li:nth-child(-n+1)::before, body[data-step="schema"] li:nth-child(-n+2)::before,
+body[data-step="api"] li:nth-child(-n+3)::before, body[data-step="ready"] li:nth-child(-n+4)::before { background:var(--accent); border-color:var(--accent); }
+body[data-step="data"] li:nth-child(-n+1)::after, body[data-step="schema"] li:nth-child(-n+2)::after,
+body[data-step="api"] li:nth-child(-n+3)::after, body[data-step="ready"] li:nth-child(-n+4)::after { content:""; position:absolute; left:7px; top:17px; width:3px; height:6px; border:solid var(--accent-text); border-width:0 1.5px 1.5px 0; transform:rotate(45deg) scale(.9); }
+@keyframes pulse { 50% { transform:scale(.8); opacity:.7; } }
+
+.bar { height:3px; margin-top:20px; border-radius:3px; background:var(--border); overflow:hidden; }
+.bar::after { content:""; display:block; width:40%; height:100%; border-radius:3px; background:linear-gradient(90deg, var(--accent), var(--accent-2)); animation:slide 1.8s cubic-bezier(.4,0,.2,1) infinite; }
+@keyframes slide { from { transform:translateX(-100%); } to { transform:translateX(260%); } }
+
+@media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><div class="orb c"></div></div>
+<div class="drag"></div>
+<main><div class="card" role="status" aria-live="polite">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+    <h1>Starting MAYA</h1>
+  </div>
+  <p class="sub"><span class="visually-hidden">Status: </span><span data-field="step">Preparing</span></p>
+  <div class="visually-hidden" role="status" aria-live="polite" data-field="statusText">Starting MAYA: Preparing</div>
+  <ol>
+    <li class="docker" aria-current="step">Checking Docker <span class="visually-hidden status-text">(current step)</span></li>
+    <li class="data">Starting database and cache <span class="visually-hidden status-text">(pending)</span></li>
+    <li class="schema">Checking database schema <span class="visually-hidden status-text">(pending)</span></li>
+    <li class="api">Starting the MAYA engine <span class="visually-hidden status-text">(pending)</span></li>
+    <li class="ready">Waiting for the engine to be ready <span class="visually-hidden status-text">(pending)</span></li>
+  </ol>
+  <div class="bar" aria-hidden="true"></div>
+</div></main>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# app/research
+
+Deep research (ADR-0032, status Proposed): the composer brain toggle. A message with `mode: "deep_research"` becomes a background task that reads many public pages, analyses them and writes a cited result. Without the mode nothing here runs.
+
+| Module                                  | Job                                                                                                                                                                                                                     |
+| :-------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `limits.py`                             | caps of a run from `MAYA_DEEP_RESEARCH_*` settings; the user's "50 sites" is clamped to the hard cap                                                                                                                    |
+| `intent.py`                             | topic, requested number of sites, missing-topic check and the start text written by code                                                                                                                                |
+| `plan.py`                               | marks the planner's research step as the deep run (or adds one in front); a chat-only request keeps ONLY that step (no File step), extra or `web_search` research steps are merged so no grounded single search can run |
+| `runtime.py`                            | availability (kill switch, search, model), status info, the task step run, the search adapter                                                                                                                           |
+| `pipeline.py`                           | the run: plan, search, select, read, notes, analyse, write, check; budgets, cancel, time cap                                                                                                                            |
+| `fetcher.py`                            | one page: skip reasons (paywall, login, bot check, robots, empty, script-only), untrusted wrap and screen                                                                                                               |
+| `select.py`                             | merge and dedupe candidates, score, pick (best page per site first, 2 per site at most)                                                                                                                                 |
+| `report.py`                             | verification of the written body and the parts made by code (status, evidence, limits, sources)                                                                                                                         |
+| `progress.py`                           | task progress steps and the cancel check                                                                                                                                                                                |
+| `schemas.py`, `prompts.py`, `models.py` | model outputs, prompts, plain data                                                                                                                                                                                      |
+
+The submission applies `plan.py` whenever the `deep_research` spec is NOT `None`. The chat passes an empty spec `{}` when no site count was asked for, so the check must never be a truthiness test (owner bug: `{}` skipped the transform and the planned plain steps, a grounded search and a "Synthesize" step, ran under a "Deep research" title). Ordinary research steps (not deep research) use `MAYA_RESEARCH_BACKEND` (`native` default), see `app/agents/specialized/research.py` and `app/agents/grounding_cooldown.py`.
+
+Safety lives in `app/search/fetch.py` (SSRF, redirects, robots.txt, 2 MB, pacing); this package adds PDF text (`allow_pdf`), timeouts of 10 s connect and 20 s read, and one attempt per page. All page text is untrusted data.
+
+Defaults: 20 sites aimed for, 40 pages, 60 at most when asked, 10 minutes, 60 model calls, 2 search rounds. Settings are in `docs/guides/CONFIGURATION.md`. Tests are offline: `tests/unit/test_research_*.py`, `tests/integration/test_chat_deep_research.py`.

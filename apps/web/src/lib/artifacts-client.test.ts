@@ -1,0 +1,242 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  artifactToFile,
+  canOpenNatively,
+  deleteArtifact,
+  downloadArtifact,
+  downloadFileName,
+  downloadArtifactFile,
+  openArtifactNatively,
+  getArtifactDownloadUrl,
+  getArtifactMetadata,
+  listArtifacts,
+} from "./artifacts-client";
+import { setAccessToken } from "./auth-session";
+
+describe("artifacts-client", () => {
+  afterEach(() => {
+    setAccessToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("produces encoded download URL without token when unauthenticated", () => {
+    const url = getArtifactDownloadUrl("art-123/test file.pdf");
+    expect(url).toBe("/api/v1/artifacts/art-123%2Ftest%20file.pdf");
+  });
+
+  it("produces download URL with token query parameter when authenticated", () => {
+    setAccessToken("test-secret-token", 3600);
+    const url = getArtifactDownloadUrl("art-123");
+    expect(url).toBe("/api/v1/artifacts/art-123?token=test-secret-token");
+  });
+
+  it("produces download URL with token and inline=true for browser viewing", () => {
+    setAccessToken("test-secret-token", 3600);
+    const url = getArtifactDownloadUrl("art-123", true);
+    expect(url).toBe(
+      "/api/v1/artifacts/art-123?token=test-secret-token&inline=true",
+    );
+  });
+
+  it("downloads artifact file as blob with bearer authentication", async () => {
+    setAccessToken("test-token", 3600);
+    const mockBlob = new Blob(["fake pdf content"], {
+      type: "application/pdf",
+    });
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(mockBlob, {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const createObjectURLMock = vi.fn(() => "blob:http://localhost/mock-uuid");
+    const revokeObjectURLMock = vi.fn();
+    window.URL.createObjectURL = createObjectURLMock;
+    window.URL.revokeObjectURL = revokeObjectURLMock;
+
+    await downloadArtifactFile("art-123", "report.pdf");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/artifacts/art-123",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.any(Headers),
+      }),
+    );
+    expect(createObjectURLMock).toHaveBeenCalledWith(expect.any(Blob));
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(
+      "blob:http://localhost/mock-uuid",
+    );
+  });
+
+  it("lists artifacts with authorization header", async () => {
+    setAccessToken("test-token", 3600);
+    const mockArtifacts = [
+      {
+        id: "art-1",
+        workspace_id: "ws-1",
+        task_id: "t-1",
+        user_id: "u-1",
+        file_name: "report.pdf",
+        file_type: "pdf",
+        size_bytes: 1024,
+        sha256: "abc123sha",
+        verification_status: "verified",
+        verification_report: null,
+        created_at: "2026-11-07T10:00:00Z",
+      },
+    ];
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(mockArtifacts), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listArtifacts("t-1");
+    expect(result).toHaveLength(1);
+    expect(result[0].file_name).toBe("report.pdf");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/artifacts?task_id=t-1",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.any(Headers),
+      }),
+    );
+  });
+
+  it("retrieves artifact metadata", async () => {
+    setAccessToken("test-token", 3600);
+    const mockMeta = {
+      id: "art-1",
+      workspace_id: "ws-1",
+      task_id: "t-1",
+      user_id: "u-1",
+      file_name: "report.pdf",
+      file_type: "pdf",
+      size_bytes: 1024,
+      sha256: "abc123sha",
+      verification_status: "verified",
+      verification_report: { verified: true },
+      created_at: "2026-11-07T10:00:00Z",
+    };
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(mockMeta), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getArtifactMetadata("art-1");
+    expect(result.sha256).toBe("abc123sha");
+    expect(result.verification_status).toBe("verified");
+  });
+
+  it("names a download with its real extension, zips included", () => {
+    expect(downloadFileName("report.pdf", "pdf")).toBe("report.pdf");
+    expect(downloadFileName("bundle", "zip")).toBe("bundle.zip");
+    expect(downloadFileName("site.tar.gz", "zip")).toBe("site.tar.gz");
+    expect(downloadFileName("a/b\\c.zip", "zip")).toBe("c.zip");
+    expect(downloadFileName("", "")).toBe("download");
+  });
+
+  it("saves a zip under its file name", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["PK"]), { status: 200 })),
+    );
+    window.URL.createObjectURL = vi.fn(() => "blob:x");
+    window.URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.download).toBe("site.zip");
+      });
+    await downloadArtifact("art-9", "site", "zip");
+    expect(click).toHaveBeenCalled();
+    click.mockRestore();
+  });
+
+  it("deletes with DELETE and the bearer token", async () => {
+    setAccessToken("t", 3600);
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await deleteArtifact("a/1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/artifacts/a%2F1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("surfaces a failed delete", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 500 })),
+    );
+    await expect(deleteArtifact("a")).rejects.toBeTruthy();
+  });
+
+  it("cannot open natively in a plain browser", async () => {
+    expect(canOpenNatively()).toBe(false);
+    expect(
+      await openArtifactNatively({
+        id: "a",
+        file_name: "x.pdf",
+        file_type: "pdf",
+      }),
+    ).toEqual({ ok: false, reason: "no-desktop" });
+  });
+
+  it("opens through the desktop bridge with an id, never a path", async () => {
+    setAccessToken("tok", 3600);
+    const openArtifact = vi.fn(async () => ({ ok: true }));
+    (window as unknown as { maya: unknown }).maya = {
+      isDesktop: true,
+      openArtifact,
+    };
+    try {
+      expect(canOpenNatively()).toBe(true);
+      const result = await openArtifactNatively({
+        id: "a-1",
+        file_name: "deck",
+        file_type: "pptx",
+      });
+      expect(result).toEqual({ ok: true });
+      expect(openArtifact).toHaveBeenCalledWith({
+        artifactId: "a-1",
+        fileName: "deck.pptx",
+        token: "tok",
+      });
+    } finally {
+      delete (window as unknown as { maya?: unknown }).maya;
+    }
+  });
+
+  it("turns the artifact into a File for the chat", async () => {
+    setAccessToken("t", 3600);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("hello", { status: 200 })),
+    );
+    const file = await artifactToFile({
+      id: "a",
+      file_name: "notes",
+      file_type: "pdf",
+    });
+    expect(file.name).toBe("notes.pdf");
+    expect(file.size).toBe(5);
+  });
+});

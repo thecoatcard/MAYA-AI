@@ -1,0 +1,78 @@
+/* Typeset math (KaTeX). Colour inherits; sizes are relative; fonts come from the katex package
+   and are bundled locally (no CDN). */
+
+.maya-math {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+.maya-math .katex {
+  color: inherit;
+  /* KaTeX default is 1.21em; keep it close to the surrounding text. */
+  font-size: 1.1em;
+  text-indent: 0;
+}
+
+.maya-math--block {
+  display: block;
+  margin: var(--maya-space-3) 0;
+  padding: 0.25rem 0;
+  text-align: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
+.maya-math--block:focus-visible {
+  outline: 2px solid var(--maya-focus, currentColor);
+  outline-offset: 2px;
+}
+
+.maya-math--block .katex-display {
+  margin: 0;
+  /* min-content so a wide equation scrolls instead of overflowing the message. */
+  width: max-content;
+  min-width: 100%;
+}
+
+.maya-math--inline {
+  display: inline;
+  overflow-wrap: normal;
+}
+
+/* Until KaTeX has loaded the readable text fallback shows in the same box. */
+.maya-math--pending {
+  font-style: italic;
+}
+
+/* The MathML copy is for assistive technology only; KaTeX hides it visually. */
+.maya-math .katex-mathml {
+  position: absolute;
+  clip-path: inset(50%);
+  height: 1px;
+  width: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .maya-math,
+  .maya-math .katex {
+    color: CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .maya-math .katex .frac-line,
+  .maya-math .katex .overline-line,
+  .maya-math .katex .underline-line,
+  .maya-math .katex .hline,
+  .maya-math .katex .rule {
+    border-color: CanvasText;
+  }
+}
+
+@media print {
+  .maya-math--block {
+    overflow: visible;
+  }
+}

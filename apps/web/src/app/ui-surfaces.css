@@ -1,0 +1,799 @@
+/*
+ * MAYA surfaces and interaction recipes: the iOS / macOS feel (owner request 2026-11-12).
+ *
+ * Tokens live in globals.css (single source of truth); this file only uses them. It exists as a
+ * separate file because globals.css must stay free of backdrop-filter (design-tokens.test.tsx).
+ *
+ * Rules kept here:
+ *  - vibrancy (blur) is for the sidebar, bars, popovers and sheets only, behind @supports, with an
+ *    opaque fallback that is also what reduced transparency and forced colours get;
+ *  - keyframes animate transform and opacity only, every duration and easing is a token;
+ *  - every movement has a static equivalent under prefers-reduced-motion (durations collapse to 0
+ *    and the transform-based recipes switch off);
+ *  - no looping animation is added here (the existing orb, shimmer and progress loops are the only ones);
+ *  - nothing here is applied to approval controls: they sit inside .motion-none.
+ */
+
+/* ------------------------------------------------------ continuous corners */
+
+/* Squircle corners where supported (Chromium 139+). Older engines keep the plain radius. */
+@supports (corner-shape: squircle) {
+  [class*="rounded-maya-"],
+  .maya-surface,
+  .maya-card,
+  .maya-sheet,
+  .maya-popover {
+    corner-shape: squircle;
+  }
+}
+
+/* --------------------------------------------------------------- vibrancy */
+
+/* Opaque by default: this is the fallback and the reduced-transparency look. */
+.maya-vib-bar {
+  background-color: var(--maya-pane);
+}
+.maya-vib-side {
+  background-color: var(--maya-pane);
+}
+.maya-vib-pop {
+  background-color: var(--maya-overlay);
+}
+.maya-vib-sheet {
+  background-color: var(--maya-overlay);
+}
+.maya-vib-scrim {
+  background-color: var(--maya-scrim);
+}
+
+@supports (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .maya-vib-bar,
+  .maya-vib-side,
+  .maya-vib-pop,
+  .maya-vib-sheet {
+    -webkit-backdrop-filter: blur(var(--maya-vib-blur))
+      saturate(var(--maya-vib-saturate));
+    backdrop-filter: blur(var(--maya-vib-blur))
+      saturate(var(--maya-vib-saturate));
+  }
+  .maya-vib-bar {
+    background-color: var(--maya-vib-bar);
+  }
+  .maya-vib-side {
+    background-color: var(--maya-vib-side);
+  }
+  .maya-vib-pop {
+    background-color: var(--maya-vib-pop);
+  }
+  .maya-vib-sheet {
+    background-color: var(--maya-vib-sheet);
+  }
+  .maya-vib-scrim {
+    background-color: var(--maya-vib-scrim);
+    -webkit-backdrop-filter: blur(var(--maya-vib-blur-scrim));
+    backdrop-filter: blur(var(--maya-vib-blur-scrim));
+  }
+}
+
+/* Reduced transparency and high contrast: back to the opaque surfaces, no blur. */
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .maya-vib-bar,
+  .maya-vib-side {
+    background-color: var(--maya-pane);
+  }
+  .maya-vib-pop,
+  .maya-vib-sheet {
+    background-color: var(--maya-overlay);
+  }
+  .maya-vib-scrim {
+    background-color: var(--maya-scrim);
+  }
+  .maya-vib-bar,
+  .maya-vib-side,
+  .maya-vib-pop,
+  .maya-vib-sheet,
+  .maya-vib-scrim {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* ------------------------------------------------------- surfaces: cards */
+
+.maya-card {
+  border-radius: var(--maya-radius-lg);
+  background-color: var(--maya-pane);
+  box-shadow: var(--maya-shadow-1);
+}
+
+.maya-card[data-interactive] {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .maya-card[data-interactive]:hover {
+    box-shadow: var(--maya-shadow-lift);
+  }
+}
+
+/* ------------------------------------------------------------ list rows */
+
+/*
+ * Row: rounded, tinted on hover, accent-soft when selected. Selected is also marked by
+ * aria-current / aria-selected and a left accent bar, so colour is never the only signal.
+ */
+.maya-row {
+  position: relative;
+  border-radius: var(--maya-radius-md);
+  transition:
+    background-color var(--maya-dur-fast) var(--maya-ease-out),
+    color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-row:hover {
+  background-color: var(--maya-hover);
+}
+
+.maya-row:active {
+  background-color: var(--maya-pressed);
+}
+
+.maya-row[aria-current="page"],
+.maya-row[aria-selected="true"],
+.maya-row[data-selected="true"] {
+  background-color: var(--maya-accent-soft);
+  color: var(--maya-text);
+}
+
+.maya-row[aria-current="page"]::before,
+.maya-row[aria-selected="true"]::before,
+.maya-row[data-selected="true"]::before {
+  position: absolute;
+  inset-block: 25%;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: var(--maya-radius-full);
+  background: var(--maya-accent);
+  content: "";
+}
+
+/* Row actions appear on hover or keyboard focus; always shown on touch. */
+.maya-reveal [data-reveal] {
+  opacity: 0;
+  transition: opacity var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-reveal:hover [data-reveal],
+.maya-reveal:focus-within [data-reveal],
+.maya-reveal[data-selected="true"] [data-reveal],
+.maya-reveal[aria-current="page"] [data-reveal] {
+  opacity: 1;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .maya-reveal [data-reveal] {
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------- icon nudge on hover */
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .maya-nudge-icon {
+    transition: transform var(--maya-dur-fast) var(--maya-ease-spring);
+  }
+  :where(button, a):hover > .maya-nudge-icon,
+  :where(button, a):hover .maya-nudge-icon {
+    transform: translateX(var(--maya-nudge));
+  }
+}
+
+/* ------------------------------------------------------------- Switch */
+
+/* iOS-style switch: pill track, spring thumb. State is also exposed as aria-checked. */
+.maya-switch {
+  position: relative;
+  display: block;
+  width: 2.75rem;
+  height: 1.625rem;
+  border: 1px solid var(--maya-border-strong);
+  border-radius: var(--maya-radius-full);
+  background-color: var(--maya-raised);
+  transition:
+    background-color var(--maya-dur-base) var(--maya-ease-out),
+    border-color var(--maya-dur-base) var(--maya-ease-out);
+}
+
+.maya-switch__thumb {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--maya-radius-full);
+  background-color: var(--maya-text-muted);
+  box-shadow: var(--maya-shadow-1);
+  transition:
+    transform var(--maya-dur-base) var(--maya-ease-overshoot),
+    background-color var(--maya-dur-base) var(--maya-ease-out);
+}
+
+[role="switch"][aria-checked="true"] .maya-switch {
+  border-color: var(--maya-accent);
+  background-color: var(--maya-accent);
+}
+
+[role="switch"][aria-checked="true"] .maya-switch__thumb {
+  background-color: var(--maya-accent-text);
+  transform: translateX(1.125rem);
+}
+
+[role="switch"]:active:not(:disabled) .maya-switch__thumb {
+  transform: scaleX(1.12);
+}
+
+[role="switch"][aria-checked="true"]:active:not(:disabled) .maya-switch__thumb {
+  transform: translateX(1rem) scaleX(1.12);
+}
+
+[role="switch"]:disabled .maya-switch {
+  border-color: var(--maya-border);
+  background-color: var(--maya-disabled-bg);
+}
+
+[role="switch"]:disabled .maya-switch__thumb {
+  background-color: var(--maya-disabled-text);
+  box-shadow: none;
+}
+
+/* -------------------------------------------------- Segmented control */
+
+/* Equal-width segments; the indicator is one segment wide and slides with transform only. */
+.maya-seg {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border-radius: var(--maya-radius-md);
+  background-color: var(--maya-raised);
+  box-shadow: inset 0 0 0 1px var(--maya-border);
+}
+
+.maya-seg__thumb {
+  position: absolute;
+  inset-block: 2px;
+  inset-inline-start: 2px;
+  width: calc((100% - 4px) / var(--maya-seg-n, 2));
+  border-radius: calc(var(--maya-radius-md) - 2px);
+  background-color: var(--maya-pane);
+  box-shadow: var(--maya-shadow-1);
+  transform: translateX(calc(var(--maya-seg-i, 0) * 100%));
+  transition: transform var(--maya-dur-base) var(--maya-ease-spring);
+  pointer-events: none;
+}
+
+.maya-seg__item {
+  position: relative;
+  z-index: 1;
+  border-radius: calc(var(--maya-radius-md) - 2px);
+  color: var(--maya-text-secondary);
+  transition: color var(--maya-dur-fast) var(--maya-ease-out);
+}
+
+.maya-seg__item:hover {
+  color: var(--maya-text);
+}
+
+.maya-seg__item[aria-checked="true"],
+.maya-seg__item[aria-selected="true"] {
+  color: var(--maya-text);
+  font-weight: var(--maya-weight-medium);
+}
+
+/* ------------------------------------------------------- Sheet / dialog */
+
+@keyframes maya-sheet-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--maya-modal-from));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes maya-sheet-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--maya-modal-from));
+  }
+}
+
+@keyframes maya-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes maya-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.maya-sheet {
+  border-radius: var(--maya-radius-xl);
+  box-shadow: var(--maya-shadow-3);
+  animation: maya-sheet-in var(--maya-dur-base) var(--maya-ease-spring) both;
+}
+
+.maya-sheet-scrim {
+  animation: maya-scrim-in var(--maya-dur-base) var(--maya-ease-out) both;
+}
+
+[data-state="closing"] > .maya-sheet,
+.maya-sheet[data-state="closing"] {
+  animation: maya-sheet-out var(--maya-dur-fast) var(--maya-ease-in) both;
+}
+
+.maya-sheet-scrim[data-state="closing"] {
+  animation: maya-scrim-out var(--maya-dur-fast) var(--maya-ease-in) both;
+}
+
+/* Bottom sheet on narrow screens: slides up (transform) instead of scaling. */
+@keyframes maya-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 40rem) {
+  .maya-sheet[data-placement="auto"] {
+    animation-name: maya-sheet-up;
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+    padding-bottom: var(--maya-safe-bottom);
+  }
+}
+
+/* -------------------------------------------- Popover, menu and tooltip */
+
+@keyframes maya-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.maya-popover {
+  border-radius: var(--maya-radius-md);
+  box-shadow: var(--maya-shadow-2);
+  transform-origin: var(--maya-origin, 50% 0);
+  animation: maya-pop-in var(--maya-dur-fast) var(--maya-ease-spring) both;
+}
+
+.maya-popover[data-side="top"] {
+  --maya-origin: 50% 100%;
+}
+
+.maya-menu-item {
+  border-radius: var(--maya-radius-sm);
+  transition: background-color var(--maya-dur-instant) var(--maya-ease-out);
+}
+
+.maya-menu-item:hover,
+.maya-menu-item:focus-visible {
+  background-color: var(--maya-hover);
+}
+
+/* ------------------------------------------------------------------ Toast */
+
+@keyframes maya-toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.maya-toast {
+  border-radius: var(--maya-radius-lg);
+  box-shadow: var(--maya-shadow-2);
+  animation: maya-toast-slide-in var(--maya-dur-base) var(--maya-ease-spring)
+    both;
+}
+
+/* ------------------------------------------------- Page and list entrance */
+
+@keyframes maya-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--maya-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Route change: fade plus 4 px rise. "backwards" leaves no transform behind afterwards. */
+.motion-page {
+  animation: maya-page-in var(--maya-dur-base) var(--maya-ease-out-soft)
+    backwards;
+}
+
+/* Lists: children enter one after another (first 8 only, so the whole sequence stays short). */
+.motion-stagger > * {
+  --i: 8;
+  animation: maya-page-in var(--maya-dur-base) var(--maya-ease-out-soft)
+    backwards;
+  animation-delay: calc(var(--i) * var(--maya-stagger));
+}
+.motion-stagger > :nth-child(1) {
+  --i: 0;
+}
+.motion-stagger > :nth-child(2) {
+  --i: 1;
+}
+.motion-stagger > :nth-child(3) {
+  --i: 2;
+}
+.motion-stagger > :nth-child(4) {
+  --i: 3;
+}
+.motion-stagger > :nth-child(5) {
+  --i: 4;
+}
+.motion-stagger > :nth-child(6) {
+  --i: 5;
+}
+.motion-stagger > :nth-child(7) {
+  --i: 6;
+}
+.motion-stagger > :nth-child(8) {
+  --i: 7;
+}
+
+/* ---------------------------------------------------- Sidebar fold and drawer */
+
+/*
+ * The docked sidebar folds with transform and opacity only. When collapsed it leaves the layout
+ * (so the content takes the space at once) but stays painted while it slides out. The content
+ * gutter hides that one-frame layout change by sliding with it (a FLIP: it starts offset by the
+ * sidebar width and settles at 0) and fading in a little. Nothing animates width or margins.
+ */
+.maya-sidebar[data-state="docked"] {
+  position: relative;
+  z-index: var(--maya-z-sticky);
+}
+
+.maya-sidebar[data-state="collapsed"] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  transform: translateX(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--maya-dur-slow) var(--maya-ease-spring),
+    opacity var(--maya-dur-base) var(--maya-ease-out),
+    visibility 0s linear var(--maya-dur-slow);
+}
+
+.maya-sidebar[data-state="docked"] {
+  transition:
+    transform var(--maya-dur-slow) var(--maya-ease-spring),
+    opacity var(--maya-dur-base) var(--maya-ease-out);
+}
+
+@keyframes maya-fold-open {
+  from {
+    transform: translateX(
+      calc((var(--maya-sidebar-width) - var(--maya-nav-width)) * -1)
+    );
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes maya-fold-shut {
+  from {
+    transform: translateX(
+      calc(var(--maya-sidebar-width) - var(--maya-nav-width))
+    );
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes maya-sidebar-open {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+[data-fold="open"] > .maya-gutter {
+  animation: maya-fold-open var(--maya-dur-slow) var(--maya-ease-spring) both;
+}
+
+[data-fold="shut"] > .maya-gutter {
+  animation: maya-fold-shut var(--maya-dur-slow) var(--maya-ease-spring) both;
+}
+
+/* The folded icon rail appears with a short fade (opacity only; its width is never animated). */
+@keyframes maya-rail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.maya-rail-in {
+  animation: maya-rail-in var(--maya-dur-base) var(--maya-ease-out) both;
+}
+
+/* Overlay drawers (narrow and mobile) slide in from the left. */
+.motion-drawer-in {
+  animation: maya-sidebar-open var(--maya-dur-slow) var(--maya-ease-spring) both;
+}
+
+/* ----------------------------------------------------------- Title bar */
+
+/* Vibrant bars keep their hairline. The drag regions are untouched (classes in globals.css). */
+.maya-bar {
+  box-shadow: 0 1px 0 var(--maya-hairline);
+  border-bottom-color: transparent;
+}
+
+.maya-bar-bottom {
+  box-shadow: 0 -1px 0 var(--maya-hairline);
+  border-top-color: transparent;
+}
+
+/* ---------------------------------------------------------- Counters */
+
+.maya-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------- Touch and coarse input */
+
+@media (pointer: coarse) {
+  .maya-hit {
+    min-block-size: var(--maya-touch);
+    min-inline-size: var(--maya-touch);
+  }
+}
+
+/* --------------------------------------------- Reduced motion equivalents */
+
+/*
+ * Durations are already 0 through --maya-motion-scale. The rules below remove the movement
+ * itself, so a reduced-motion user gets the final state with no travel, only the colour changes.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .maya-sheet,
+  .maya-sheet-scrim,
+  .maya-popover,
+  .maya-toast,
+  .motion-page,
+  .motion-stagger > *,
+  .motion-drawer-in,
+  .maya-rail-in,
+  [data-fold] > .maya-gutter {
+    animation: none;
+  }
+
+  .maya-sidebar,
+  .maya-seg__thumb,
+  .maya-switch__thumb {
+    transition: none;
+  }
+
+  [role="switch"]:active:not(:disabled) .maya-switch__thumb {
+    transform: none;
+  }
+
+  [role="switch"][aria-checked="true"]:active:not(:disabled)
+    .maya-switch__thumb {
+    transform: translateX(1.125rem);
+  }
+}
+
+/* ----------------------------------------------------- Forced colours */
+
+@media (forced-colors: active) {
+  .maya-switch,
+  .maya-seg,
+  .maya-card,
+  .maya-sheet,
+  .maya-popover,
+  .maya-toast {
+    border: 1px solid CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .maya-switch__thumb {
+    background-color: CanvasText;
+  }
+
+  [role="switch"][aria-checked="true"] .maya-switch {
+    background-color: Highlight;
+  }
+
+  [role="switch"][aria-checked="true"] .maya-switch__thumb {
+    background-color: HighlightText;
+  }
+
+  .maya-seg__thumb {
+    border: 2px solid Highlight;
+  }
+
+  .maya-row[aria-current="page"],
+  .maya-row[aria-selected="true"],
+  .maya-row[data-selected="true"] {
+    border: 1px solid Highlight;
+  }
+}
+
+/* ------------------------------------------------------------------ Icons */
+
+/* One stroke width for every lucide icon, chat included: it comes from a token, not a prop. */
+svg.lucide {
+  stroke-width: var(--maya-icon-stroke);
+}
+
+/* ------------------------------------------------------- context menu */
+
+.maya-ctx {
+  min-width: 12rem;
+  max-width: min(22rem, calc(100vw - 2 * var(--maya-space-2)));
+  max-height: calc(100dvh - 2 * var(--maya-space-2));
+  overflow-y: auto;
+  padding: var(--maya-space-1);
+  border-radius: var(--maya-radius-md);
+  box-shadow: var(--maya-shadow-3);
+  transform-origin: top left;
+  animation: maya-ctx-in var(--maya-dur-instant) var(--maya-ease-out) both;
+}
+
+.maya-ctx__item {
+  display: flex;
+  align-items: center;
+  gap: var(--maya-space-2);
+  min-height: 2rem;
+  padding: 0.25rem var(--maya-space-2);
+  border-radius: var(--maya-radius-sm);
+  color: var(--maya-text);
+  cursor: default;
+  outline: none;
+  user-select: none;
+}
+.maya-ctx__item:hover,
+.maya-ctx__item:focus-visible {
+  background-color: var(--maya-hover);
+}
+.maya-ctx__item:focus-visible {
+  outline: 2px solid var(--maya-focus);
+  outline-offset: -2px;
+}
+.maya-ctx__item[aria-disabled="true"] {
+  color: var(--maya-muted);
+}
+.maya-ctx__item[data-danger="true"] {
+  color: var(--maya-danger);
+}
+.maya-ctx__icon {
+  display: inline-flex;
+  width: 1rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.maya-ctx__text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--maya-text-small, 0.875rem);
+  overflow-wrap: anywhere;
+}
+.maya-ctx__reason {
+  font-size: var(--maya-text-caption, 0.75rem);
+  color: var(--maya-muted);
+}
+.maya-ctx__shortcut {
+  color: var(--maya-muted);
+  font-size: var(--maya-text-caption, 0.75rem);
+}
+.maya-ctx__sep {
+  height: 1px;
+  margin: var(--maya-space-1) var(--maya-space-2);
+  background-color: var(--maya-border);
+}
+.maya-ctx__label {
+  padding: var(--maya-space-1) var(--maya-space-2);
+  color: var(--maya-muted);
+  font-size: var(--maya-text-caption, 0.75rem);
+}
+.maya-ctx__trigger {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--maya-radius-sm);
+  color: var(--maya-muted);
+}
+.maya-ctx__trigger:hover,
+.maya-ctx__trigger[aria-expanded="true"] {
+  background-color: var(--maya-hover);
+  color: var(--maya-text);
+}
+
+@keyframes maya-ctx-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maya-ctx {
+    animation: none;
+  }
+}
+
+/* A surface that carries a context menu: its "..." button sits in the top corner. */
+.maya-ctx__host {
+  position: relative;
+}
+.maya-ctx__host > .maya-ctx__trigger {
+  position: absolute;
+  inset-block-start: var(--maya-space-1);
+  inset-inline-end: var(--maya-space-1);
+}

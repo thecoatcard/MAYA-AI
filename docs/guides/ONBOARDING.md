@@ -4,13 +4,28 @@ How to set up this repository, for people and for AI coding agents.
 
 ## Prerequisites
 
-| Tool | Version | Needed for |
-| :--- | :--- | :--- |
-| Git | recent | Hooks, history |
-| Node.js | 22 or newer (developed on 24) | All governance automation |
-| npm | bundled with Node.js | Task runner and the pinned `yaml` dev dependency |
+| Tool    | Version                       | Needed for                                       |
+| :------ | :---------------------------- | :----------------------------------------------- |
+| Git     | recent                        | Hooks, history                                   |
+| Node.js | 22 or newer (developed on 24) | All governance automation                        |
+| npm     | bundled with Node.js          | Task runner and the pinned `yaml` dev dependency |
 
-Python, Docker and the other application tools are not needed yet because there is no application code. When the backend or web project is added, its toolchain becomes a prerequisite and this page must be updated in the same change.
+For the implemented local foundation, also install Python 3.12, uv, Docker Desktop
+with Linux containers and Node.js 22.12+ or 24+. Follow the
+[local runbook](../operations/LOCAL_DEVELOPMENT.md) to start the API, web and data services.
+Dependency installation and infrastructure changes require human approval when performed by agents.
+
+## Desktop app (optional)
+
+The Electron desktop shell lives in `apps/desktop` ([ADR-0013](../adr/0013-desktop-shell-electron.md)). It needs Docker Desktop running and `backend/.venv`. Build the web export once, then start it:
+
+```bash
+npm --prefix apps/desktop install
+npm --prefix apps/desktop run build:web
+npm --prefix apps/desktop run dev
+```
+
+See [`apps/desktop/README.md`](../../apps/desktop/README.md) for the smoke check, packaging and troubleshooting.
 
 ## One-command setup
 
@@ -24,17 +39,17 @@ npm run setup
 
 ## Everyday commands
 
-| Command | What it does |
-| :--- | :--- |
-| `npm run validate` | Everything the pre-push hook runs |
-| `npm run validate:fast` | Whole-repository checks without tests or range rules |
-| `npm test` | Unit tests for the governance scripts |
-| `npm run lint` | Script and config syntax, workflow security lint, stack linters when projects exist |
-| `npm run typecheck` | Stack type checkers when projects exist |
-| `npm run docs:check` | Documentation validation |
-| `npm run security:check` | Secret scan, blocked-file check, workflow lint |
-| `npm run agents:sync` | Regenerate per-tool agent files after changing `AGENTS.md`, a workflow or a role |
-| `npm run agents:check` | Fail if generated files drifted from their sources |
+| Command                  | What it does                                                                        |
+| :----------------------- | :---------------------------------------------------------------------------------- |
+| `npm run validate`       | Everything the pre-push hook runs                                                   |
+| `npm run validate:fast`  | Whole-repository checks without tests or range rules                                |
+| `npm test`               | Unit tests for the governance scripts                                               |
+| `npm run lint`           | Script and config syntax, workflow security lint, stack linters when projects exist |
+| `npm run typecheck`      | Stack type checkers when projects exist                                             |
+| `npm run docs:check`     | Documentation validation                                                            |
+| `npm run security:check` | Secret scan, blocked-file check, workflow lint                                      |
+| `npm run agents:sync`    | Regenerate per-tool agent files after changing `AGENTS.md`, a workflow or a role    |
+| `npm run agents:check`   | Fail if generated files drifted from their sources                                  |
 
 Results are `PASS`, `FAIL` or `SKIPPED`. **`SKIPPED` means the check did not run**, for example stack checks before any application project exists. It is not a pass.
 
@@ -49,15 +64,15 @@ Results are `PASS`, `FAIL` or `SKIPPED`. **`SKIPPED` means the check did not run
 
 Every supported agent starts from the same canonical file, `AGENTS.md`. What each tool reads, and what is and is not verified, is in `docs/governance/AI_AGENT_COMPATIBILITY.md`. Quick start:
 
-| Tool | Do this |
-| :--- | :--- |
-| Claude Code | Open the repository root. `CLAUDE.md` imports `AGENTS.md`. Run `/gov-plan-feature` and similar skills. |
+| Tool           | Do this                                                                                                           |
+| :------------- | :---------------------------------------------------------------------------------------------------------------- |
+| Claude Code    | Open the repository root. `CLAUDE.md` imports `AGENTS.md`. Run `/gov-plan-feature` and similar skills.            |
 | GitHub Copilot | Instructions load from `.github/copilot-instructions.md` and `AGENTS.md`. In VS Code use `/gov-...` prompt files. |
-| Antigravity | `AGENTS.md` and `GEMINI.md` load automatically. Use `/gov-...` skills. |
-| Cursor | `AGENTS.md` and `.cursor/rules/` load automatically. |
-| Gemini CLI | `GEMINI.md` imports `AGENTS.md`. |
-| Codex | `AGENTS.md` loads automatically. Use `$gov-...` skills. |
-| Anything else | Point the tool at `AGENTS.md`, or paste its "Hard rules" section into the tool's custom instructions. |
+| Antigravity    | `AGENTS.md` and `GEMINI.md` load automatically. Use `/gov-...` skills.                                            |
+| Cursor         | `AGENTS.md` and `.cursor/rules/` load automatically.                                                              |
+| Gemini CLI     | `GEMINI.md` imports `AGENTS.md`.                                                                                  |
+| Codex          | `AGENTS.md` loads automatically. Use `$gov-...` skills.                                                           |
+| Anything else  | Point the tool at `AGENTS.md`, or paste its "Hard rules" section into the tool's custom instructions.             |
 
 Configure each tool's own approval and sandbox mode conservatively on your machine. This repository cannot force those settings.
 

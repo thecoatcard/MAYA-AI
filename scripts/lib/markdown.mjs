@@ -10,11 +10,11 @@ const LINK = /(!?)\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 export function slugify(text) {
   return text
     .toLowerCase()
-    .replace(/`/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/`/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .trim()
-    .replace(/\s/g, '-');
+    .replace(/\s/g, "-");
 }
 
 /**
@@ -26,7 +26,7 @@ export function slugify(text) {
  *  - headings:    [{ text, level, slug, line }]  (slugs de-duplicated like GitHub: x, x-1, x-2)
  */
 export function analyze(markdown) {
-  const raw = markdown.replace(/\r\n/g, '\n').split('\n');
+  const raw = markdown.replace(/\r\n/g, "\n").split("\n");
   const lines = [];
   const inlineCodes = [];
   const links = [];
@@ -43,27 +43,27 @@ export function analyze(markdown) {
     if (fence) {
       const m = FENCE.exec(line);
       if (m && m[1][0] === fence.char && m[1].length >= fence.len) fence = null;
-      lines.push('');
+      lines.push("");
       return;
     }
     const open = FENCE.exec(line);
     if (open) {
       fence = { char: open[1][0], len: open[1].length };
-      lines.push('');
+      lines.push("");
       return;
     }
 
     if (inComment) {
-      const end = line.indexOf('-->');
+      const end = line.indexOf("-->");
       if (end === -1) {
-        lines.push('');
+        lines.push("");
         return;
       }
       line = line.slice(end + 3);
       inComment = false;
     }
-    line = line.replace(/<!--.*?-->/g, '');
-    const start = line.indexOf('<!--');
+    line = line.replace(/<!--.*?-->/g, "");
+    const start = line.indexOf("<!--");
     if (start !== -1) {
       line = line.slice(0, start);
       inComment = true;
@@ -74,16 +74,21 @@ export function analyze(markdown) {
       const base = slugify(h[2]);
       const n = slugCounts.get(base) ?? 0;
       slugCounts.set(base, n + 1);
-      headings.push({ text: h[2], level: h[1].length, slug: n === 0 ? base : `${base}-${n}`, line: lineNo });
+      headings.push({
+        text: h[2],
+        level: h[1].length,
+        slug: n === 0 ? base : `${base}-${n}`,
+        line: lineNo,
+      });
     }
 
     line = line.replace(INLINE_CODE, (_all, _ticks, content) => {
       inlineCodes.push({ text: content.trim(), line: lineNo });
-      return ' '.repeat(_all.length);
+      return " ".repeat(_all.length);
     });
 
     for (const m of line.matchAll(LINK)) {
-      links.push({ image: m[1] === '!', text: m[2], href: m[3], line: lineNo });
+      links.push({ image: m[1] === "!", text: m[2], href: m[3], line: lineNo });
     }
     lines.push(line);
   });

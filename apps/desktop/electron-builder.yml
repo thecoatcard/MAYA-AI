@@ -1,0 +1,30 @@
+# Unsigned Windows installer (NSIS). The Python runtime is NOT bundled yet: see ADR-0013.
+appId: ai.maya.desktop
+productName: MAYA
+directories:
+  output: dist
+files:
+  - package.json
+  - src/**/*
+asar: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+extraResources:
+  # The static web export built by `npm run build:web` (apps/web/.next-desktop).
+  - from: ../web/.next-desktop
+    to: web
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Unsigned on purpose; Windows SmartScreen will warn. Signing is a later decision.
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

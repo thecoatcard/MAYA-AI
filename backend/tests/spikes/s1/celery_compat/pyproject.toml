@@ -1,0 +1,25 @@
+[project]
+name = "maya-s1-celery-compat"
+version = "0.1.0"
+description = "Isolated Celery candidate using the backend Redis 8.1.0 pin"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "asyncpg==0.32.0",
+    "celery[redis]==5.6.3",
+    "kombu==5.7.0",
+    "langgraph==1.2.20",
+    "redis==8.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["../driver.py", "../runtime.py", "../metrics.py"]

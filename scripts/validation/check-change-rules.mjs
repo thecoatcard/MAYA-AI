@@ -2,11 +2,11 @@
 // range (base...HEAD) against the rules in governance/governance.config.json.
 //
 // Usage: node scripts/validation/check-change-rules.mjs --range <base> [--root <dir>]
-import { ROOT, EXIT, isMain, argValue } from '../lib/fsutil.mjs';
-import { loadConfig } from '../lib/config.mjs';
-import { matchesAny } from '../lib/glob.mjs';
-import { findWaiver, commitType, cleanMessage } from '../lib/commit.mjs';
-import * as G from '../lib/git.mjs';
+import { ROOT, EXIT, isMain, argValue } from "../lib/fsutil.mjs";
+import { loadConfig } from "../lib/config.mjs";
+import { matchesAny } from "../lib/glob.mjs";
+import { findWaiver, commitType, cleanMessage } from "../lib/commit.mjs";
+import * as G from "../lib/git.mjs";
 
 /**
  * Pure rule evaluation.
@@ -24,9 +24,12 @@ export function evaluate({ files, commits, cfg }) {
   // Only commits of non-exempt types trigger documentation/ADR rules.
   const exempt = new Set(rules.exemptCommitTypes ?? []);
   const nonExempt = types.length === 0 || types.some((t) => !exempt.has(t));
-  const triggerPaths = nonExempt ? allPaths.filter((p) => !matchesAny(p, rules.ignoreChangedPaths ?? [])) : [];
+  const triggerPaths = nonExempt
+    ? allPaths.filter((p) => !matchesAny(p, rules.ignoreChangedPaths ?? []))
+    : [];
 
-  const satisfied = (globs, excludes = []) => allPaths.some((p) => matchesAny(p, globs) && !matchesAny(p, excludes));
+  const satisfied = (globs, excludes = []) =>
+    allPaths.some((p) => matchesAny(p, globs) && !matchesAny(p, excludes));
 
   for (const rule of rules.docRules ?? []) {
     if (!triggerPaths.some((p) => matchesAny(p, rule.when))) continue;
@@ -37,13 +40,17 @@ export function evaluate({ files, commits, cfg }) {
       continue;
     }
     errors.push(
-      `[${rule.id}] ${rule.description}. Update one of: ${rule.requireOneOf.join(', ')} — or add a commit trailer ` +
+      `[${rule.id}] ${rule.description}. Update one of: ${rule.requireOneOf.join(", ")} — or add a commit trailer ` +
         `"${rule.trailer}: not-required: <specific reason>".`,
     );
   }
 
   const adr = rules.adrRule;
-  if (adr && types.some((t) => (adr.commitTypes ?? []).includes(t)) && triggerPaths.some((p) => matchesAny(p, adr.when))) {
+  if (
+    adr &&
+    types.some((t) => (adr.commitTypes ?? []).includes(t)) &&
+    triggerPaths.some((p) => matchesAny(p, adr.when))
+  ) {
     if (!satisfied(adr.requireOneOf, adr.excludeFiles ?? [])) {
       const reason = findWaiver(messages, adr.trailer);
       if (reason) waived.push(`${adr.id}: ${reason}`);
@@ -56,7 +63,11 @@ export function evaluate({ files, commits, cfg }) {
   }
 
   const cl = rules.changelog;
-  if (cl && types.some((t) => (cl.requiredForCommitTypes ?? []).includes(t)) && !allPaths.includes(cl.file)) {
+  if (
+    cl &&
+    types.some((t) => (cl.requiredForCommitTypes ?? []).includes(t)) &&
+    !allPaths.includes(cl.file)
+  ) {
     const reason = findWaiver(messages, cl.trailer);
     if (reason) waived.push(`changelog: ${reason}`);
     else {
@@ -70,14 +81,18 @@ export function evaluate({ files, commits, cfg }) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const root = argValue(argv, '--root') ?? ROOT;
-  const base = argValue(argv, '--range');
+  const root = argValue(argv, "--root") ?? ROOT;
+  const base = argValue(argv, "--range");
   if (!base) {
-    console.error('usage: check-change-rules.mjs --range <base>');
+    console.error("usage: check-change-rules.mjs --range <base>");
     process.exit(EXIT.FAIL);
   }
   const cfg = loadConfig(root);
-  const result = evaluate({ files: G.rangeFiles(base, root), commits: G.rangeCommits(base, root), cfg });
+  const result = evaluate({
+    files: G.rangeFiles(base, root),
+    commits: G.rangeCommits(base, root),
+    cfg,
+  });
 
   for (const w of result.waived) console.log(`waived: ${w}`);
   if (result.errors.length === 0) {

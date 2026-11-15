@@ -6,20 +6,20 @@
 
 The "Rule" column names the automated check in `governance/governance.config.json` (`changeRules`) that enforces the row once matching code exists. Rows without a rule are enforced in review.
 
-| Change type | Required documentation | Rule |
-| :--- | :--- | :--- |
-| New module | Overview, responsibility, interfaces, dependencies (`templates/module-documentation/TEMPLATE.md`) | module README check |
-| API change | API documentation with request and response examples (`templates/api-documentation/TEMPLATE.md`) | `api` |
-| Database change | Schema documentation and migration notes | `database` |
-| Architecture change | Architecture documentation and an ADR (`templates/adr/TEMPLATE.md`) | `architecture` |
-| New integration | Setup, permissions, failure handling (`templates/integration-documentation/TEMPLATE.md`) | `integration` |
-| Configuration change | Entry in `.env.example` and `docs/guides/CONFIGURATION.md` | `configuration`, env check |
-| Security change | Security documentation and threat considerations | `security` |
-| New runtime agent | Responsibility, tools, permissions, workflows (`templates/agent-documentation/TEMPLATE.md`) | `agent` |
-| New background task | Lifecycle, retries, timeout, cancellation | `background-task` |
-| Bug fix | Relevant docs if behavior or usage changes; changelog entry | changelog rule |
-| Dependency update | Changelog or dependency note | `dependencies` |
-| Deployment change | Deployment and operational documentation (`templates/operational-runbook/TEMPLATE.md`) | `deployment` |
+| Change type          | Required documentation                                                                            | Rule                       |
+| :------------------- | :------------------------------------------------------------------------------------------------ | :------------------------- |
+| New module           | Overview, responsibility, interfaces, dependencies (`templates/module-documentation/TEMPLATE.md`) | module README check        |
+| API change           | API documentation with request and response examples (`templates/api-documentation/TEMPLATE.md`)  | `api`                      |
+| Database change      | Schema documentation and migration notes                                                          | `database`                 |
+| Architecture change  | Architecture documentation and an ADR (`templates/adr/TEMPLATE.md`)                               | `architecture`             |
+| New integration      | Setup, permissions, failure handling (`templates/integration-documentation/TEMPLATE.md`)          | `integration`              |
+| Configuration change | Entry in `.env.example` and `docs/guides/CONFIGURATION.md`                                        | `configuration`, env check |
+| Security change      | Security documentation and threat considerations                                                  | `security`                 |
+| New runtime agent    | Responsibility, tools, permissions, workflows (`templates/agent-documentation/TEMPLATE.md`)       | `agent`                    |
+| New background task  | Lifecycle, retries, timeout, cancellation                                                         | `background-task`          |
+| Bug fix              | Relevant docs if behavior or usage changes; changelog entry                                       | changelog rule             |
+| Dependency update    | Changelog or dependency note                                                                      | `dependencies`             |
+| Deployment change    | Deployment and operational documentation (`templates/operational-runbook/TEMPLATE.md`)            | `deployment`               |
 
 ## 2. General requirements
 
@@ -55,15 +55,15 @@ The same pattern applies to `ADR:` and `Changelog:` trailers (see `governance/GI
 
 Located in `templates/` (placeholders there are intentional and excluded from placeholder checks):
 
-| Template | Use for |
-| :--- | :--- |
-| `templates/adr/TEMPLATE.md` | Architecture Decision Records |
-| `templates/module-documentation/TEMPLATE.md` | Module documentation |
-| `templates/api-documentation/TEMPLATE.md` | API documentation |
-| `templates/integration-documentation/TEMPLATE.md` | Integration documentation |
-| `templates/agent-documentation/TEMPLATE.md` | Runtime agent documentation |
-| `templates/change-report/TEMPLATE.md` | Change reports |
-| `templates/operational-runbook/TEMPLATE.md` | Operational runbooks |
+| Template                                          | Use for                       |
+| :------------------------------------------------ | :---------------------------- |
+| `templates/adr/TEMPLATE.md`                       | Architecture Decision Records |
+| `templates/module-documentation/TEMPLATE.md`      | Module documentation          |
+| `templates/api-documentation/TEMPLATE.md`         | API documentation             |
+| `templates/integration-documentation/TEMPLATE.md` | Integration documentation     |
+| `templates/agent-documentation/TEMPLATE.md`       | Runtime agent documentation   |
+| `templates/change-report/TEMPLATE.md`             | Change reports                |
+| `templates/operational-runbook/TEMPLATE.md`       | Operational runbooks          |
 
 ## 5. Automated validation
 

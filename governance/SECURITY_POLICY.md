@@ -4,20 +4,20 @@ This policy applies to humans and AI agents. The permission model is in `governa
 
 ## 1. Requirements
 
-| Requirement | How it is met |
-| :--- | :--- |
-| No secrets in source | Secret scan in the pre-commit hook and in CI (`scripts/validation/check-secrets.mjs`, plus Gitleaks in CI) |
-| No secrets in Git history | Pre-commit and pre-push scans; if a secret is ever committed, treat it as leaked (see section 5) |
-| No credentials in logs | Logging standard in `governance/ENGINEERING_STANDARDS.md`; redaction at the logging layer |
-| No accidental `.env` commits | `.gitignore` plus `scripts/validation/check-sensitive.mjs` blocks `.env*` (except `.env.example`), private keys, credential files |
-| Dependency vulnerability scanning | Dependabot and dependency review in CI; a stack-specific scanner is added with the first Python or web project |
-| Static analysis | CodeQL or Semgrep is added in CI when application code exists (running them on an empty codebase proves nothing) |
-| Safe shell practice | Section 3 |
-| Input validation | Required at every trust boundary; see engineering standards |
-| Dependency pinning | Lockfiles committed; GitHub Actions pinned to commit SHAs; exact versions for tooling |
-| Least privilege | CI workflows declare minimal `permissions`; agents use the lowest permission level their task needs |
-| Secure temporary files | Create temp files in the OS temp directory with unpredictable names, restrictive permissions and cleanup; never in the repository |
-| No unauthorized network access | Agents do not call external services or download-and-run code without approval (Level 3) |
+| Requirement                                       | How it is met                                                                                                                                                      |
+| :------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No secrets in source                              | Secret scan in the pre-commit hook and in CI (`scripts/validation/check-secrets.mjs`, plus Gitleaks in CI)                                                         |
+| No secrets in Git history                         | Pre-commit and pre-push scans; if a secret is ever committed, treat it as leaked (see section 5)                                                                   |
+| No credentials in logs                            | Logging standard in `governance/ENGINEERING_STANDARDS.md`; redaction at the logging layer                                                                          |
+| No accidental `.env` commits                      | `.gitignore` plus `scripts/validation/check-sensitive.mjs` blocks `.env*` (except `.env.example`), private keys, credential files                                  |
+| Dependency vulnerability scanning                 | Dependabot and dependency review in CI; a stack-specific scanner is added with the first Python or web project                                                     |
+| Static analysis                                   | CodeQL or Semgrep is added in CI when application code exists (running them on an empty codebase proves nothing)                                                   |
+| Safe shell practice                               | Section 3                                                                                                                                                          |
+| Input validation                                  | Required at every trust boundary; see engineering standards                                                                                                        |
+| Dependency pinning                                | Lockfiles committed; GitHub Actions pinned to commit SHAs; exact versions for tooling                                                                              |
+| Least privilege                                   | CI workflows declare minimal `permissions`; agents use the lowest permission level their task needs                                                                |
+| Secure temporary files                            | Create temp files in the OS temp directory with unpredictable names, restrictive permissions and cleanup; never in the repository                                  |
+| No unauthorized network access                    | Agents do not call external services or download-and-run code without approval (Level 3)                                                                           |
 | No unreviewed changes to security-sensitive files | `sensitive.approvalRequiredPaths` in `governance/governance.config.json`; commits need a `Human-Approval:` trailer; CODEOWNERS and branch protection (manual step) |
 
 ## 2. Secrets handling
