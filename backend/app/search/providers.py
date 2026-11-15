@@ -210,6 +210,23 @@ class DdgsProvider:
             if rows:
                 return engine, rows
             empty = True
+
+        # Fallback to unconstrained default search if all individual engine attempts failed
+        try:
+
+            def run_default() -> list[dict[str, Any]]:
+                client = self._client()
+                method = client.news if kind == "news" else client.text
+                return list(method(query, **arguments) or [])
+
+            default_rows = await asyncio.wait_for(
+                asyncio.to_thread(run_default), timeout=self._timeout + 2
+            )
+            if default_rows:
+                return "ddgs", default_rows
+        except Exception:
+            pass
+
         if empty or last_error is None:
             raise NoResultsError
         raise last_error

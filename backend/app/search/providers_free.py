@@ -30,7 +30,10 @@ from app.search.models import (
 from app.search.query import wants_arxiv, wants_hacker_news, wants_stackexchange
 
 _TIMEOUT: Final = 8.0
-_UA: Final = "MAYA-AI/0.1 (personal assistant; contact via the project repository)"
+_UA: Final = (
+    "MAYA-AI/0.1 (https://maya.ai; dev@maya.ai) "
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+)
 _TAGS = re.compile(r"<[^>]+>")
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 _LANG = re.compile(r"^[a-z]{2,3}$")

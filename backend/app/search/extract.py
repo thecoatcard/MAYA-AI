@@ -33,9 +33,12 @@ _DROP_TAGS: Final = (
     "select",
     "dialog",
 )
-_FURNITURE = re.compile(
-    r"(comment|sidebar|footer|nav|menu|cookie|consent|banner|advert|promo|share|social|related|"
-    r"newsletter|popup|modal|subscribe|breadcrumb|pagination|sponsor)",
+_CONTENT_MARKERS: Final = re.compile(
+    r"\b(main|content|article|post|entry|topic|doc|page|body)\b", re.IGNORECASE
+)
+_FURNITURE: Final = re.compile(
+    r"\b(comment|sidebar|footer|nav|menu|cookie|consent|banner|advert|promo|share|social|related|"
+    r"newsletter|popup|modal|subscribe|breadcrumb|pagination|sponsor)\b",
     re.IGNORECASE,
 )
 _TEXT_TAGS: Final = ("h1", "h2", "h3", "h4", "p", "li", "blockquote", "pre")
@@ -134,7 +137,11 @@ def _title(root: Any) -> str:
 
 def _is_furniture(element: Any) -> bool:
     marker = f"{element.get('class') or ''} {element.get('id') or ''}"
-    return bool(marker.strip()) and _FURNITURE.search(marker) is not None
+    if not marker.strip():
+        return False
+    if _CONTENT_MARKERS.search(marker):
+        return False
+    return _FURNITURE.search(marker) is not None
 
 
 def _score(container: Any) -> float:
@@ -163,12 +170,13 @@ def _best_container(body: Any) -> Any:
         if score > best_score:
             best, best_score = element, score
     # A parent holds all of its child's paragraphs: descend while one child holds nearly all.
-    while True:
+    while best_score > 0:
         children = [c for c in best.iterchildren("div", "section") if _score(c) >= 0.9 * best_score]
         if not children:
             return best
         best = max(children, key=_score)
         best_score = _score(best)
+    return best
 
 
 def extract_page(raw_html: str, *, max_chars: int = 20_000) -> ExtractedPage:
@@ -203,6 +211,32 @@ def extract_page(raw_html: str, *, max_chars: int = 20_000) -> ExtractedPage:
             continue
         previous = text
         lines.append(text)
+
+    if not lines and body is not container:
+        # Fallback: extract from full body if selected container yielded no text
+        for element in body.iter(*_TEXT_TAGS):
+            if element.tag in ("li", "blockquote") and element.xpath(".//p"):
+                continue
+            text = _squash(element.text_content())
+            if not text or text == previous:
+                continue
+            if element.tag == "li" and len(text) < 25:
+                continue
+            if (
+                element.tag != "li"
+                and element.tag not in ("h1", "h2", "h3", "h4")
+                and len(text) < 20
+            ):
+                continue
+            previous = text
+            lines.append(text)
+
+    if not lines:
+        # Fallback: readable text content directly from body
+        raw_text = _squash(body.text_content())
+        if len(raw_text) >= 20:
+            lines.append(raw_text[:max_chars])
+
     text = "\n\n".join(lines)
     if len(text) > max_chars:
         text = text[:max_chars].rsplit(" ", 1)[0]

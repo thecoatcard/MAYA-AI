@@ -31,17 +31,18 @@ from app.search.extract import extract_page, extract_pdf
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT: Final = "MAYA-AI/0.1 (+personal assistant; reads public pages you ask about)"
+USER_AGENT: Final = "MAYA-AI/0.1 (+https://maya.ai; dev@maya.ai)"
 # Some sites refuse an unusual agent string. Page reading rotates between these browser-compatible
-# strings, each still carrying the MAYA-AI token, and robots.txt is respected as before.
+# strings, each carrying the MAYA-AI identifier with contact information.
 USER_AGENTS: Final = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36 MAYA-AI/0.1",
+    "Chrome/131.0.0.0 Safari/537.36 MAYA-AI/0.1 (https://maya.ai; dev@maya.ai)",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
-    "Version/17.6 Safari/605.1.15 MAYA-AI/0.1",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0 MAYA-AI/0.1",
+    "Version/17.6 Safari/605.1.15 MAYA-AI/0.1 (https://maya.ai; dev@maya.ai)",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0 "
+    "MAYA-AI/0.1 (https://maya.ai; dev@maya.ai)",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0 MAYA-AI/0.1",
+    "Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0 MAYA-AI/0.1 (https://maya.ai; dev@maya.ai)",
 )
 _agent_cursor = itertools.count()
 
