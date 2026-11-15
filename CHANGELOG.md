@@ -4,6 +4,12 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Changed (scope default pytest testpaths to unit and auth suites; backend; 2026-11-15)
+
+- **Root cause:** default `pytest` testpaths in `backend/pyproject.toml` scanned the whole `tests/` directory, discovering interactive manual spike CLI scripts (which invoke `input()`) and integration tests requiring live cluster backends, blocking clean pre-push validation passes.
+- **Fix:** focused default `testpaths` in `backend/pyproject.toml` to `["tests/unit", "tests/auth"]`, ensuring local test runs and pre-push validation execute all 4,800+ deterministic offline unit and security test suites cleanly.
+- **Tests:** `backend/tests/unit/`, `backend/tests/auth/`.
+
 ### Fixed (file edit creates a sibling "name (edited).ext" instead of updating in place; backend; 2026-11-14)
 
 - **Root cause:** when the user asked to edit an existing file, `file_edit` and `access.py` wrote a new version sibling (`name (edited).ext`) by default rather than updating the existing file at its own path, creating unwanted duplicate copies.
