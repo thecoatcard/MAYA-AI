@@ -448,7 +448,7 @@ async def test_the_spoken_reply_is_attached_to_its_update_and_a_silent_model_add
     assert all("said" not in f for f in rig.frames)
     rig.finish(2, "failed", error="boom")
     await rig.event(2, "failed")
-    await rig.settle(2)
+    await rig.settle(2, advance=10)
     await rig.announcer.on_model_turn("Chapter 2 fail ho gaya.")
     said = [f for f in rig.frames if f.get("said")]
     assert said and said[0]["update_id"] == rig.frames[-2]["update_id"]

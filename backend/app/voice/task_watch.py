@@ -557,9 +557,8 @@ class TaskAnnouncer:
                     await self._store.release(self.workspace_id, self.user_id, key)
 
     async def _pause(self, seconds: float) -> None:
-        """Sleep without a bare sleep loop; the event is never set, only used for the timeout."""
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._never.wait(), timeout=seconds)
+        if seconds > 0:
+            await asyncio.sleep(seconds)
 
     async def _wait_quiet(self) -> None:
         while self._is_busy():

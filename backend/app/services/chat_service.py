@@ -3812,7 +3812,7 @@ class _LiveTurn:
             addendum = TOOL_LOOP_ADDENDUM if self._loop_phase1 else STATUS_ADDENDUM
             if self._loop_phase1 and self._loop_names - LOOP_TOOL_NAMES - SHEET_TOOL_NAMES:
                 addendum = f"{addendum}\n\n{PHASE2_ADDENDUM}"
-            return f"{chat_system_instruction(tasks=False, memory=memory)}\n\n{addendum}"
+            return f"{chat_system_instruction(tasks=False, memory=memory, loop=True)}\n\n{addendum}"
         if decision.route is Route.ANSWER:
             offer = ""
             if offers_format_line(self._plan.content, self._user_history()):

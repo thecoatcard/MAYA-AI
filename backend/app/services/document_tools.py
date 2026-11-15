@@ -451,9 +451,10 @@ _SPEC_PROPERTIES: Final[dict[str, Any]] = {
 CREATE_DOCUMENT_TOOL: Final = ToolDefinition(
     name=CREATE_DOCUMENT_NAME,
     description=(
-        "Make ONE file the user can download from this chat: pdf, docx, pptx, xlsx, html, md, txt, "
-        "csv, json, or a zip of a small multi-file website (format 'zip'). Write the complete "
-        "design and content in 'spec'. If the result is an error, fix exactly what it names and "
+        "Make ONE file or project deliverable the user can download from this chat: pdf, docx, "
+        "pptx, xlsx, html, md, txt, csv, json, or a zip of a multi-file application or website "
+        "(format 'zip', e.g. React, frontend, backend apps). Write the complete design and "
+        "content in 'spec'. If the result is an error, fix exactly what it names and "
         f"call this again. A pdf or docx over {LONG_DOCUMENT_PAGES} pages is built as a "
         "background job automatically; "
         "for a deck over 12 slides or a large project use start_job."
@@ -567,11 +568,11 @@ _WORDS_PER_PAGE_TEXT: Final = ", ".join(
 )
 TOOL_LOOP_ADDENDUM: Final = (
     "You can make files and start longer work with four tools: create_document makes one file "
-    "(pdf, docx, pptx, xlsx, html, md, txt, csv, json, or a zip of a multi-file website); "
-    "preview_document checks a file made in this chat; start_job runs big work in the background "
-    "and returns a job id; check_job reports its status. "
-    "For a file request (a deck, slides, PDF, Word, Excel, CSV, website or other file), follow "
-    "these steps. "
+    "(pdf, docx, pptx, xlsx, html, md, txt, csv, json, or a zip of a multi-file project, app or "
+    "website); preview_document checks a file made in this chat; start_job runs big work in the "
+    "background and returns a job id; check_job reports its status. "
+    "For any deliverable or file request (a deck, slides, PDF, Word, Excel, CSV, multi-file "
+    "software app, React/Node/Python project, website, or other file), follow these steps. "
     "1. Plan in one or two short lines: the format; the length (pages for pdf and docx, slides "
     "for pptx; when the user stated no count, choose a professional depth yourself, about 3 to 6 "
     "pages for a report, and never ask); for a deck, ONE layout for each slide, chosen only from: "
@@ -598,7 +599,9 @@ TOOL_LOOP_ADDENDUM: Final = (
     "if 'delivery' is 'partial' say 'N of M rows' plainly and offer to generate the rest; if "
     "'synthetic' is true say it is generated sample data, not real data. For edits of a sheet "
     "use sheet_summary to inspect it and edit_sheet to change it, never paste rows.) "
-    "For text files, 'text'. For zip, 'files'. 'design' sets the look. For layouts, "
+    "For text files, 'text'. For zip (multi-file projects, apps or websites), use format 'zip' "
+    "and put all files in 'files' mapping each relative path to its complete code/text. 'design' "
+    "sets the look. For layouts, "
     "block types, themes, fonts and styles use only the values the tool schema lists. Palette "
     "colours are #RRGGBB and the text must stand out from the background. "
     "Pass 'pages' ONLY when the user's own message states a page or slide count, and then write "
@@ -1021,13 +1024,27 @@ def _flatten_zip_files(raw: Any, prefix: str = "") -> dict[str, str]:
 
 def _build_zip(title: str, body: dict[str, Any], request: str, workdir: Path) -> BuiltDocument:
     raw_files = body.get("files")
+    if raw_files is None and isinstance(body.get("spec"), dict):
+        raw_files = body["spec"].get("files")
     if isinstance(raw_files, str):
         trimmed = raw_files.strip()
-        if trimmed.startswith("{") and trimmed.endswith("}"):
+        if (trimmed.startswith("{") and trimmed.endswith("}")) or (
+            trimmed.startswith("[") and trimmed.endswith("]")
+        ):
             try:
                 raw_files = json.loads(trimmed)
             except Exception:
                 pass
+    if isinstance(raw_files, list):
+        converted: dict[str, str] = {}
+        for item in raw_files:
+            if isinstance(item, dict):
+                p = item.get("path") or item.get("name") or item.get("filename") or item.get("file")
+                c = item.get("content") or item.get("text") or item.get("code") or item.get("body")
+                if p and c is not None:
+                    converted[str(p)] = str(c)
+        if converted:
+            raw_files = converted
     if not isinstance(raw_files, dict) or not raw_files:
         raise DocumentToolError(
             "A zip needs 'files': an object that maps each file path to its complete text."

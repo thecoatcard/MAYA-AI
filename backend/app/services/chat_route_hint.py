@@ -18,9 +18,10 @@ HINT_REASON_PREFIX = "decision_"
 
 _OPTIONS = {
     "answer": "A conversational answer, explanation, translation or short text in the chat.",
-    "file": "A small file (a note, a text or code file) the assistant makes right away.",
-    "task": "Big or slow work that needs a background task: long documents, research with "
-    "sources, many pages, a website or a multi-step job.",
+    "file": "A file, code project, web/React app, deliverable (document, spreadsheet, slide deck) "
+    "that the assistant creates.",
+    "task": "Big or slow work that needs a background task: long multi-chapter books, external "
+    "research with sources, or a multi-step job.",
     "approval": "An action outside the chat that needs the user's approval: sending an email or "
     "message, publishing, deleting, replacing or merging something.",
 }
@@ -41,8 +42,8 @@ async def refine_route(decision: Decision | None, text: str) -> Decision:
         return decision
     question = choice(
         "route",
-        "Which kind of handling does the user's message need? Judge only what the user is "
-        "asking for in the message.",
+        "Which kind of handling does the user's message need? Judge the user's exact motive "
+        "from what they are asking (in English, Hindi, or Hinglish).",
         _OPTIONS,
     )
     answers = await decisions.decide("route", untrusted_block("user message", text), [question])

@@ -4,11 +4,11 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
-### Fixed (standing memory dropped in voice overview, task announcer race, and project zip extensions; backend; 2026-11-15)
+### Fixed (chat tool loop prompt, voice announcer settle, and multi-file project zip; backend; 2026-11-15)
 
-- **Root cause:** `VOICE_OVERVIEW_CANDIDATES` was set to 30, which caused older standing preferences and profile facts to be dropped by the database limit when a user accumulated more than 30 episodic notes. In `TaskAnnouncer`, `_speak` was awaited before setting `_awaiting`, creating a race condition where `on_model_turn` could fire before frames were marked as awaiting. Furthermore, `build_project_zip` and `create_document(zip)` rejected modern web extensions (`.jsx`, `.tsx`, `.mjs`, etc.) and did not support nested directory objects emitted by LLMs.
-- **Fix:** raised `VOICE_OVERVIEW_CANDIDATES` to 60, aligned `TaskAnnouncer` state assignment before `_speak`, updated test `settle` synchronisation to wait for frames, expanded zipper allowed extensions to cover modern project source types, and added recursive nested dict flattening for zip file payloads.
-- **Tests:** `backend/tests/unit/test_standing_preferences.py`, `backend/tests/unit/test_voice_task_digest.py`, `backend/tests/unit/test_document_tools.py`, `backend/tests/unit/test_file_types_and_honesty.py`.
+- **Root cause:** `VOICE_OVERVIEW_CANDIDATES` was set to 30, dropping older standing preferences when a user had >30 notes. In `TaskAnnouncer`, `_speak` was awaited before setting `_awaiting` and `_pause` lacked non-blocking sleep semantics on zero/negative values. During the chat tool loop, the base prompt declared "no tools" while tools were injected in addendum, causing LLM confusion when asked to generate documents or multi-file projects. In `_build_zip`, LLMs emitting list-of-files `[{"path": ..., "content": ...}]` or nested dicts raised formatting errors.
+- **Fix:** raised `VOICE_OVERVIEW_CANDIDATES` to 60, aligned `TaskAnnouncer` state assignment before `_speak`, added `CHAT_LOOP_SYSTEM_INSTRUCTION` for tool-loop chat turns, expanded zipper allowed extensions to cover modern project source types, and added list-of-files parsing and recursive nested dict flattening for zip file payloads.
+- **Tests:** `backend/tests/unit/test_context_manager.py`, `backend/tests/unit/test_standing_preferences.py`, `backend/tests/unit/test_voice_task_digest.py`, `backend/tests/unit/test_document_tools.py`, `backend/tests/unit/test_file_types_and_honesty.py`.
 
 ### Changed (scope default pytest testpaths to unit and auth suites; backend; 2026-11-15)
 

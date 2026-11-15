@@ -138,6 +138,27 @@ def test_a_react_zip_project_with_jsx_and_nested_dict(tmp_path: Path) -> None:
     assert "react-todo/src/index.css" in names
 
 
+def test_a_react_zip_project_with_list_of_files(tmp_path: Path) -> None:
+    # Handles list of {"path": ..., "content": ...}
+    spec = {
+        "files": [
+            {"path": "package.json", "content": '{"name": "react-todo"}'},
+            {
+                "path": "src/App.jsx",
+                "content": "export default function App() { return <div>App</div>; }",
+            },
+        ]
+    }
+    built = build(tmp_path, file_format="zip", title="React List", spec=spec)
+    assert built.name == "react-list.zip"
+    archive = tmp_path / "react_list.zip"
+    archive.write_bytes(built.data)
+    with zipfile.ZipFile(archive) as handle:
+        names = set(handle.namelist())
+    assert "react-list/package.json" in names
+    assert "react-list/src/App.jsx" in names
+
+
 # ------------------------------------------------------ create_document: readable errors
 
 

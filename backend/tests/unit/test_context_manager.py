@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.services.context_manager import (
+    CHAT_LOOP_SYSTEM_INSTRUCTION,
     CHAT_SYSTEM_INSTRUCTION,
     CHAT_TOOLS_SYSTEM_INSTRUCTION,
     PER_TURN_OVERHEAD_TOKENS,
@@ -15,6 +16,7 @@ from app.services.context_manager import (
     ContextTooLarge,
     ContextWindow,
     HistoryTurn,
+    chat_system_instruction,
     conservative_token_estimate,
 )
 
@@ -464,6 +466,17 @@ def test_tools_instruction_names_the_tool_and_limits_its_use() -> None:
     assert "at most once" in lowered
     assert "no tools" not in lowered
     assert "language" in lowered and "uncertain" in lowered
+
+
+def test_loop_system_instruction_mentions_tools_and_no_tools_limit_absent() -> None:
+    lowered = CHAT_LOOP_SYSTEM_INSTRUCTION.lower()
+    assert CHAT_LOOP_SYSTEM_INSTRUCTION.isascii()
+    assert 100 < len(CHAT_LOOP_SYSTEM_INSTRUCTION) < 1500
+    assert "tools" in lowered
+    assert "no tools" not in lowered
+    assert "language" in lowered and "uncertain" in lowered
+    loop_prompt = chat_system_instruction(tasks=False, memory=False, loop=True)
+    assert "no tools" not in loop_prompt.lower()
 
 
 def test_chat_system_instruction_fits_a_minimal_budget() -> None:
