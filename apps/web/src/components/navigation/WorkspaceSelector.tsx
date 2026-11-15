@@ -208,7 +208,7 @@ export function WorkspaceSelector({
         <div
           role="listbox"
           aria-label="Project workspaces"
-          className="absolute left-0 right-0 top-full mt-1.5 z-maya-dropdown min-w-[220px] rounded-maya-md border border-maya-control-border bg-maya-raised p-1 shadow-lg text-maya-small backdrop-blur-md"
+          className="absolute left-0 right-0 top-full mt-1.5 z-maya-dropdown min-w-[220px] rounded-maya-md border border-maya-control-border bg-maya-raised p-1 shadow-lg text-maya-small"
           data-testid="workspace-dropdown"
         >
           <div className="px-2 py-1 text-maya-label font-medium uppercase tracking-wider text-maya-muted">
