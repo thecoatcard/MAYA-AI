@@ -17,7 +17,36 @@ MAX_ZIP_FILES = 64
 MAX_ENTRY_BYTES = 5 * 1024 * 1024
 MAX_ZIP_BYTES = 20 * 1024 * 1024
 ALLOWED_EXTENSIONS = frozenset(
-    {"html", "css", "js", "json", "svg", "txt", "md", "xml", "csv", "py", "ts"}
+    {
+        "html",
+        "css",
+        "js",
+        "mjs",
+        "cjs",
+        "jsx",
+        "ts",
+        "tsx",
+        "json",
+        "svg",
+        "txt",
+        "md",
+        "xml",
+        "csv",
+        "py",
+        "java",
+        "c",
+        "h",
+        "cpp",
+        "cs",
+        "go",
+        "rs",
+        "rb",
+        "sql",
+        "yaml",
+        "yml",
+        "toml",
+        "ini",
+    }
 )
 _FIXED_TIME = (1980, 1, 1, 0, 0, 0)
 _BAD_SEGMENT = re.compile(r'[<>:"|?*\x00-\x1f]')

@@ -110,6 +110,34 @@ def test_a_zip_project_is_built_with_one_top_folder(tmp_path: Path) -> None:
     assert "solar-site/index.html" in names
 
 
+def test_a_react_zip_project_with_jsx_and_nested_dict(tmp_path: Path) -> None:
+    # Handles nested directory structure and .jsx files gracefully
+    spec = {
+        "files": {
+            "package.json": '{"name": "react-todo"}',
+            "src": {
+                "App.jsx": "export default function App() { return <div>Todo</div>; }",
+                "components": {
+                    "TodoForm.jsx": "export default function TodoForm() { return <form></form>; }",
+                    "TodoList.jsx": "export default function TodoList() { return <ul></ul>; }",
+                },
+                "index.css": "body { margin: 0; }",
+            },
+        }
+    }
+    built = build(tmp_path, file_format="zip", title="React Todo", spec=spec)
+    assert built.name == "react-todo.zip"
+    archive = tmp_path / "react_todo.zip"
+    archive.write_bytes(built.data)
+    with zipfile.ZipFile(archive) as handle:
+        names = set(handle.namelist())
+    assert "react-todo/package.json" in names
+    assert "react-todo/src/App.jsx" in names
+    assert "react-todo/src/components/TodoForm.jsx" in names
+    assert "react-todo/src/components/TodoList.jsx" in names
+    assert "react-todo/src/index.css" in names
+
+
 # ------------------------------------------------------ create_document: readable errors
 
 

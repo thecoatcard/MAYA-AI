@@ -683,14 +683,14 @@ class TaskAnnouncer:
         text, frames = self._render(batch)
         if self._queue:
             text += f"\nThere are {len(self._queue)} more updates after this."
+        self._after_turn = [i.on_spoken for i in batch if i.on_spoken is not None]
+        self._awaiting = [
+            {k: v for k, v in f.items() if k in ("update_id", "task_id", "milestone")}
+            for f in frames
+        ]
         try:
             await self._speak(text)
             self._last_spoken = self._now()
-            self._after_turn = [i.on_spoken for i in batch if i.on_spoken is not None]
-            self._awaiting = [
-                {k: v for k, v in f.items() if k in ("update_id", "task_id", "milestone")}
-                for f in frames
-            ]
             for frame in frames:
                 await self._notify(frame)
         except Exception as err:

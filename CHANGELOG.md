@@ -4,6 +4,12 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed (standing memory dropped in voice overview, task announcer race, and project zip extensions; backend; 2026-11-15)
+
+- **Root cause:** `VOICE_OVERVIEW_CANDIDATES` was set to 30, which caused older standing preferences and profile facts to be dropped by the database limit when a user accumulated more than 30 episodic notes. In `TaskAnnouncer`, `_speak` was awaited before setting `_awaiting`, creating a race condition where `on_model_turn` could fire before frames were marked as awaiting. Furthermore, `build_project_zip` and `create_document(zip)` rejected modern web extensions (`.jsx`, `.tsx`, `.mjs`, etc.) and did not support nested directory objects emitted by LLMs.
+- **Fix:** raised `VOICE_OVERVIEW_CANDIDATES` to 60, aligned `TaskAnnouncer` state assignment before `_speak`, updated test `settle` synchronisation to wait for frames, expanded zipper allowed extensions to cover modern project source types, and added recursive nested dict flattening for zip file payloads.
+- **Tests:** `backend/tests/unit/test_standing_preferences.py`, `backend/tests/unit/test_voice_task_digest.py`, `backend/tests/unit/test_document_tools.py`, `backend/tests/unit/test_file_types_and_honesty.py`.
+
 ### Changed (scope default pytest testpaths to unit and auth suites; backend; 2026-11-15)
 
 - **Root cause:** default `pytest` testpaths in `backend/pyproject.toml` scanned the whole `tests/` directory, discovering interactive manual spike CLI scripts (which invoke `input()`) and integration tests requiring live cluster backends, blocking clean pre-push validation passes.

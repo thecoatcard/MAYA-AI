@@ -56,7 +56,7 @@ CHAT_SOURCE: Final = "chat"
 VOICE_SOURCE: Final = "voice"
 # Voice puts a short "what I know about the user" block into the Live session instruction at
 # connect (no embedding call: a plain list query, permanent memories first, then most recent).
-VOICE_OVERVIEW_CANDIDATES: Final = 30
+VOICE_OVERVIEW_CANDIDATES: Final = 60
 VOICE_BLOCK_CHARS: Final = 1200
 # ``memory_items.category`` is a database CHECK; these are the values chat maps ``kind`` onto.
 _KIND_CATEGORY: Final = {"preference": "preference", "project": "project", "fact": "knowledge"}

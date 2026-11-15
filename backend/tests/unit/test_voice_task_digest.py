@@ -248,7 +248,7 @@ class Rig:
     async def settle(self, count: int, *, advance: float = 0.0) -> None:
         self.clock.now += advance
         for _ in range(400):
-            if len(self.spoken) >= count:
+            if len(self.spoken) >= count and len(self.frames) >= count:
                 return
             await asyncio.sleep(0.005)
 

@@ -444,7 +444,7 @@ _SPEC_PROPERTIES: Final[dict[str, Any]] = {
     "files": {
         "type": "object",
         "description": "zip: a website or project, mapping each relative file path (for example "
-        "'index.html' or 'css/site.css') to its complete text.",
+        "'package.json', 'src/App.jsx', or 'css/site.css') to its complete text.",
     },
 }
 
@@ -990,9 +990,50 @@ def _count(report: VerificationReport, key: str) -> int | None:
     return int(value) if isinstance(value, int | float) else None
 
 
+def _flatten_zip_files(raw: Any, prefix: str = "") -> dict[str, str]:
+    """Recursively flatten nested directory dicts or JSON strings into a flat path -> text map."""
+    if isinstance(raw, str):
+        trimmed = raw.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            try:
+                parsed = json.loads(trimmed)
+                if isinstance(parsed, dict):
+                    return _flatten_zip_files(parsed, prefix)
+            except Exception:
+                pass
+        return {prefix: raw} if prefix else {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for raw_k, v in raw.items():
+        k_str = str(raw_k).strip().strip("\"'").replace("&quot;", "")
+        while k_str.startswith("./"):
+            k_str = k_str[2:]
+        path = f"{prefix}/{k_str}" if prefix else k_str
+        if isinstance(v, dict):
+            out.update(_flatten_zip_files(v, path))
+        elif isinstance(v, str):
+            out[path] = v
+        elif v is not None:
+            out[path] = str(v)
+    return out
+
+
 def _build_zip(title: str, body: dict[str, Any], request: str, workdir: Path) -> BuiltDocument:
-    files = body.get("files")
-    if not isinstance(files, dict) or not files:
+    raw_files = body.get("files")
+    if isinstance(raw_files, str):
+        trimmed = raw_files.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            try:
+                raw_files = json.loads(trimmed)
+            except Exception:
+                pass
+    if not isinstance(raw_files, dict) or not raw_files:
+        raise DocumentToolError(
+            "A zip needs 'files': an object that maps each file path to its complete text."
+        )
+    files = _flatten_zip_files(raw_files)
+    if not files:
         raise DocumentToolError(
             "A zip needs 'files': an object that maps each file path to its complete text."
         )

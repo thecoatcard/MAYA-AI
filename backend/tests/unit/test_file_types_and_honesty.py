@@ -83,6 +83,26 @@ def test_zip_contents_extensions_and_determinism(tmp_path: Path) -> None:
     assert verify_zip(a) == []
 
 
+def test_zip_allows_react_and_modern_project_extensions(tmp_path: Path) -> None:
+    for ext in ("jsx", "tsx", "mjs", "yaml", "toml", "json"):
+        assert safe_entry_name(f"src/file.{ext}") == f"src/file.{ext}"
+
+    react_project = {
+        "package.json": '{"name": "todo-app"}',
+        "src/App.jsx": "export default function App() { return <div>Todo</div>; }",
+        "src/components/TodoItem.jsx": (
+            "export default function TodoItem() { return <li>item</li>; }"
+        ),
+        "src/index.css": "body { margin: 0; }",
+    }
+    out = tmp_path / "react_app.zip"
+    names = build_project_zip(react_project, out, folder="react-app")
+    assert len(names) == 4
+    assert verify_zip(out) == []
+    with zipfile.ZipFile(out) as archive:
+        assert b"TodoItem" in archive.read("react-app/src/components/TodoItem.jsx")
+
+
 @pytest.mark.parametrize(
     "name",
     [
