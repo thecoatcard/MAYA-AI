@@ -55,6 +55,10 @@ DEEP_VOICE = (
         ("mail karo isko", "mail"),
         ("save this", "file"),
         ("export as a word document", "docx"),
+        ("create a todo aplication", "zip"),
+        ("create a todo application", "zip"),
+        ("build a react app", "zip"),
+        ("what is a web application", "chat"),
     ],
 )
 def test_requested_deliverable_golden_prompts(text: str, expected: str) -> None:

@@ -93,7 +93,9 @@ _TEXT_NOUN = re.compile(
 )
 _PROJECT_NOUN = re.compile(
     r"\b(?:websites?|web\s*sites?|landing\s+pages?|portfolios?|multi[-\s]?files?|multiple\s+files|"
-    r"multi[-\s]?page|web\s*apps?|full[-\s]?stack|complete\s+(?:app|project|website)|ebooks?|"
+    r"multi[-\s]?page|(?:web\s*|react\s*|node\s*|full[-\s]?stack\s*)?apps?|"
+    r"(?:web\s*|react\s*|software\s*)?ap{1,2}l?ications?|projects?|"
+    r"complete\s+(?:app|project|website)|ebooks?|"
     r"e-books?|handbooks?|chapters?)\b"
 )
 _BACKGROUND = re.compile(
@@ -153,7 +155,7 @@ _NOUN_TOKENS: Final = frozenset(
     "word document documents xlsx excel spreadsheet spreadsheets sheet sheets workbook workbooks "
     "csv json md markdown txt html htm css js tsx jsx py java sql yaml yml xml toml ini readme "
     "todo notes note report reports resume cv letter letters essay essays checklist guide guides "
-    "budget plan plans "
+    "budget plan plans app apps application applications aplication project projects "
     "template templates file files page pages words ebook handbook website landing portfolio "
     "chapters itinerary proposal".split()
 )
@@ -390,7 +392,11 @@ def route_message(
     text_noun = _TEXT_NOUN.search(lower) is not None
     if (creation or binary or text_file or text_noun) and (size := _size_over_limit(lower)):
         return Decision(Route.MODEL if tool_loop else Route.TASK, f"over_limit_{size}")
-    if creation and _PROJECT_NOUN.search(lower):
+    if (
+        creation
+        and _PROJECT_NOUN.search(lower)
+        and not (_TEXT_EXT.search(lower) and re.search(r"\b(?:for|ke\s+liye)\b", lower))
+    ):
         return Decision(Route.MODEL if tool_loop else Route.TASK, "project")
     if live_formats and _edits_working_file(lower, live_formats):
         return Decision(Route.MODEL, EDIT_WORKING_FILE_REASON)

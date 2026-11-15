@@ -92,6 +92,13 @@ _WEAK: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
             rf"{_TOPIC_PREFIX}(?<!cheat\s)\b(?:spreadsheets?|sheets?|workbooks?|tables?\s+in\s+excel)\b"
         ),
     ),
+    (
+        "zip",
+        re.compile(
+            rf"{_TOPIC_PREFIX}\b(?:(?:web\s*|react\s*|node\s*|vue\s*|full[-\s]?stack\s*)?apps?|"
+            rf"(?:web\s*|react\s*|software\s*)?ap{{1,2}}l?ications?|projects?)\b"
+        ),
+    ),
 )
 _GENERIC_FILE = re.compile(
     rf"{_TOPIC_PREFIX}\b(?:files?|documents?|डॉक्यूमेंट|फाइल)\b|\bdownload\b|\bdownloadable\b"

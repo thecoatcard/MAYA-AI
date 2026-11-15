@@ -90,6 +90,8 @@ EXTRA_TABLE: list[tuple[str, Route]] = [
     ("Ek sheet banao monthly kharch ka, excel mein", Route.TASK),
     ("What is the difference between a CSV and an Excel file?", Route.ANSWER),
     ("Build a website for my bakery", Route.TASK),
+    ("create a todo aplication", Route.TASK),
+    ("create a todo application", Route.TASK),
     ("How do I deploy my app to Vercel?", Route.ANSWER),
     ("Translate this note to Hindi", Route.ANSWER),
     ("Make a checklist for moving house", Route.MODEL),
@@ -118,6 +120,12 @@ def test_a_decision_names_its_reason() -> None:
 
 def test_empty_text_is_an_answer_and_never_a_task() -> None:
     assert route_message("   ").route is Route.ANSWER
+
+
+def test_project_with_tool_loop_routes_to_model() -> None:
+    decision = route_message("create a todo aplication", tool_loop=True)
+    assert decision.route is Route.MODEL
+    assert decision.reason == "project"
 
 
 def test_an_inline_file_over_the_size_cap_is_refused_by_the_tool() -> None:

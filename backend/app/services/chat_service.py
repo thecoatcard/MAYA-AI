@@ -244,7 +244,7 @@ from app.services.chat_idempotency import (
     request_hash,
 )
 from app.services.chat_repo import ChatRepoTools
-from app.services.chat_route_hint import refine_route
+from app.services.chat_route_hint import HINT_REASON_PREFIX, refine_route
 from app.services.chat_router import (
     EDIT_WORKING_FILE_REASON,
     Decision,
@@ -3769,7 +3769,14 @@ class _LiveTurn:
         if self._plan.attachments or call.arguments.get("edits_file_id"):
             return False
         decision = self._decision
-        if decision is not None and decision.reason == EDIT_WORKING_FILE_REASON:
+        if decision is not None and (
+            decision.reason == EDIT_WORKING_FILE_REASON
+            or decision.reason == f"{HINT_REASON_PREFIX}file"
+            or decision.reason == "file_candidate"
+            or decision.reason == "project"
+            or decision.reason == "binary_deliverable"
+            or decision.reason == "text_deliverable"
+        ):
             return False
         return self._requested_deliverable() == DELIVERABLE_CHAT
 
